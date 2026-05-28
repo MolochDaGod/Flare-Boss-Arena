@@ -1,22 +1,31 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Grudge Warlords game API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: characters
+    description: Player character management
+  - name: equipment
+    description: Weapons and armor management
+  - name: bosses
+    description: AI boss generation and combat
+  - name: gamedata
+    description: Static game data from R2
+  - name: openai
+    description: OpenAI AI boss generation
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +33,334 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /characters:
+    get:
+      operationId: listCharacters
+      tags: [characters]
+      summary: List player characters
+      responses:
+        "200":
+          description: List of characters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Character"
+    post:
+      operationId: createCharacter
+      tags: [characters]
+      summary: Create a new character
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CharacterInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Character"
+
+  /characters/{id}:
+    get:
+      operationId: getCharacter
+      tags: [characters]
+      summary: Get a character by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Character
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Character"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateCharacter
+      tags: [characters]
+      summary: Update a character
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CharacterUpdate"
+      responses:
+        "200":
+          description: Updated character
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Character"
+
+  /characters/{id}/equip:
+    post:
+      operationId: equipItem
+      tags: [characters]
+      summary: Equip a weapon or armor piece to a character slot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EquipInput"
+      responses:
+        "200":
+          description: Updated character with new equipment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Character"
+
+  /characters/{id}/skills:
+    get:
+      operationId: getCharacterSkills
+      tags: [characters]
+      summary: Get active skills derived from equipped weapons
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Active skill loadout
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkillLoadout"
+
+  /gamedata/weapons:
+    get:
+      operationId: getWeapons
+      tags: [gamedata]
+      summary: Get all weapons from R2
+      responses:
+        "200":
+          description: All weapons data
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /gamedata/armor:
+    get:
+      operationId: getArmor
+      tags: [gamedata]
+      summary: Get all armor from R2
+      responses:
+        "200":
+          description: All armor data
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /gamedata/classes:
+    get:
+      operationId: getClasses
+      tags: [gamedata]
+      summary: Get all character classes
+      responses:
+        "200":
+          description: Classes data
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /gamedata/races:
+    get:
+      operationId: getRaces
+      tags: [gamedata]
+      summary: Get all races
+      responses:
+        "200":
+          description: Races data
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /gamedata/enemies:
+    get:
+      operationId: getEnemies
+      tags: [gamedata]
+      summary: Get all enemies and their sprite data
+      responses:
+        "200":
+          description: Enemies data
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /gamedata/sprites:
+    get:
+      operationId: getSprites
+      tags: [gamedata]
+      summary: Get all 2D sprite metadata
+      responses:
+        "200":
+          description: Sprites data
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /gamedata/skillTrees:
+    get:
+      operationId: getSkillTrees
+      tags: [gamedata]
+      summary: Get all skill trees by class
+      responses:
+        "200":
+          description: Skill trees
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /gamedata/weaponSkills:
+    get:
+      operationId: getWeaponSkills
+      tags: [gamedata]
+      summary: Get all weapon skill definitions
+      responses:
+        "200":
+          description: Weapon skills
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /bosses:
+    get:
+      operationId: listBosses
+      tags: [bosses]
+      summary: List all generated boss encounters
+      responses:
+        "200":
+          description: Boss encounters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BossEncounter"
+
+  /bosses/generate:
+    post:
+      operationId: generateBoss
+      tags: [bosses]
+      summary: AI-generate a new boss encounter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BossGenerateInput"
+      responses:
+        "201":
+          description: Generated boss
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BossEncounter"
+
+  /bosses/{id}:
+    get:
+      operationId: getBoss
+      tags: [bosses]
+      summary: Get a boss encounter by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Boss encounter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BossEncounter"
+
+  /bosses/{id}/action:
+    post:
+      operationId: getBossAction
+      tags: [bosses]
+      summary: Get AI-decided boss action for current combat state
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CombatStateInput"
+      responses:
+        "200":
+          description: Boss action decision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BossAction"
+
+  /bosses/{id}/defeat:
+    post:
+      operationId: recordBossDefeat
+      tags: [bosses]
+      summary: Record a boss defeat and get loot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DefeatInput"
+      responses:
+        "200":
+          description: Loot and rewards
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LootResult"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +371,251 @@ components:
       required:
         - status
 
+    Character:
+      type: object
+      required: [id, name, class, race, level, attributes, equipment]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        class:
+          type: string
+        race:
+          type: string
+        level:
+          type: integer
+        xp:
+          type: integer
+        attributes:
+          type: object
+          additionalProperties:
+            type: integer
+        equipment:
+          $ref: "#/components/schemas/Equipment"
+        stats:
+          type: object
+          additionalProperties:
+            type: number
+        createdAt:
+          type: string
+
+    CharacterInput:
+      type: object
+      required: [name, class, race]
+      properties:
+        name:
+          type: string
+        class:
+          type: string
+        race:
+          type: string
+
+    CharacterUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        level:
+          type: integer
+        xp:
+          type: integer
+        attributes:
+          type: object
+          additionalProperties:
+            type: integer
+
+    Equipment:
+      type: object
+      properties:
+        mainHand:
+          type: ["string", "null"]
+        offHand:
+          type: ["string", "null"]
+        helm:
+          type: ["string", "null"]
+        chest:
+          type: ["string", "null"]
+        legs:
+          type: ["string", "null"]
+        boots:
+          type: ["string", "null"]
+        gloves:
+          type: ["string", "null"]
+        ring1:
+          type: ["string", "null"]
+        ring2:
+          type: ["string", "null"]
+        amulet:
+          type: ["string", "null"]
+
+    EquipInput:
+      type: object
+      required: [slot, itemId]
+      properties:
+        slot:
+          type: string
+        itemId:
+          type: ["string", "null"]
+
+    SkillLoadout:
+      type: object
+      required: [characterId, activeSkills, passives]
+      properties:
+        characterId:
+          type: integer
+        activeSkills:
+          type: array
+          items:
+            $ref: "#/components/schemas/Skill"
+        passives:
+          type: array
+          items:
+            $ref: "#/components/schemas/Skill"
+
+    Skill:
+      type: object
+      required: [id, name, description]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        cooldown:
+          type: string
+        mana:
+          type: integer
+        icon:
+          type: string
+        weaponType:
+          type: string
+
+    BossEncounter:
+      type: object
+      required: [id, name, title, tier, hp, maxHp, phase, phases, abilities, lore, mechanics]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        title:
+          type: string
+        tier:
+          type: integer
+        hp:
+          type: integer
+        maxHp:
+          type: integer
+        phase:
+          type: integer
+        phases:
+          type: integer
+        abilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/BossAbility"
+        lore:
+          type: string
+        mechanics:
+          type: object
+        assetPack:
+          type: string
+        defeated:
+          type: boolean
+        createdAt:
+          type: string
+
+    BossAbility:
+      type: object
+      required: [id, name, damage, description]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        damage:
+          type: integer
+        description:
+          type: string
+        cooldown:
+          type: integer
+        type:
+          type: string
+
+    BossGenerateInput:
+      type: object
+      properties:
+        tier:
+          type: integer
+        zone:
+          type: string
+        playerClass:
+          type: string
+        playerLevel:
+          type: integer
+        difficulty:
+          type: string
+
+    CombatStateInput:
+      type: object
+      required: [bossHpPercent, playerHpPercent, phase, roundNumber]
+      properties:
+        bossHpPercent:
+          type: number
+        playerHpPercent:
+          type: number
+        phase:
+          type: integer
+        roundNumber:
+          type: integer
+        playerActions:
+          type: array
+          items:
+            type: string
+        statusEffects:
+          type: array
+          items:
+            type: string
+
+    BossAction:
+      type: object
+      required: [ability, reasoning, damage, statusEffect]
+      properties:
+        ability:
+          $ref: "#/components/schemas/BossAbility"
+        reasoning:
+          type: string
+        damage:
+          type: integer
+        statusEffect:
+          type: ["string", "null"]
+        phaseTransition:
+          type: boolean
+        taunt:
+          type: string
+
+    DefeatInput:
+      type: object
+      required: [characterId]
+      properties:
+        characterId:
+          type: integer
+        timeToDefeat:
+          type: integer
+
+    LootResult:
+      type: object
+      required: [xpGained, itemsDropped]
+      properties:
+        xpGained:
+          type: integer
+        itemsDropped:
+          type: array
+          items:
+            type: string
+        goldDropped:
+          type: integer
+        message:
+          type: string
