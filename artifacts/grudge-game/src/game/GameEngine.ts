@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { createEnemyModel, updateEnemyAnimation, makeAnimState, type EnemyModel, type AnimState } from "./EnemyFactory";
 
-const R2_BASE = "https://pub-e7fcf1fd4c9946ecb84b3766bbc7b50d.r2.dev";
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
 
 const CLASS_MODEL: Record<string, string> = {
@@ -11,42 +11,32 @@ const CLASS_MODEL: Record<string, string> = {
   worge:   "Barbarian",
 };
 
-export type AnimName = "idle" | "walk" | "attack1" | "hurt" | "death";
-
-export interface EnemyAnim { file: string; frames: number; }
-
 export interface EnemyTemplate {
   id: string;
   name: string;
+  type: string;       // beast, arachnid, troll, orc, undead, golem, minotaur, dragon, egyptian, titan, reptile, elemental
   tier: number;
   hp: number;
   damage: number;
-  folder: string;
-  frameWidth: number;
-  frameHeight: number;
-  animations: Partial<Record<AnimName, EnemyAnim>>;
 }
 
 export interface EnemyInstance {
   id: string;
   template: EnemyTemplate;
-  mesh: THREE.Mesh;
+  model: EnemyModel;
+  anim: AnimState;
   hp: number;
   maxHp: number;
   state: "idle" | "patrol" | "chase" | "attack" | "hurt" | "death" | "dead";
-  currentAnim: AnimName;
-  frameTime: number;
-  currentFrame: number;
-  textures: Partial<Record<AnimName, THREE.Texture>>;
-  material: THREE.MeshBasicMaterial;
   position: THREE.Vector3;
   patrolTarget: THREE.Vector3;
   spawnPos: THREE.Vector3;
+  facing: number;        // yaw angle (radians)
   attackCooldown: number;
+  hurtTimer: number;
   aggroRange: number;
   attackRange: number;
   speed: number;
-  hurtTimer: number;
 }
 
 export interface DamageNumber {
@@ -92,7 +82,6 @@ export class GameEngine {
   private renderer!: THREE.WebGLRenderer;
   private clock!: THREE.Clock;
   private loader!: GLTFLoader;
-  private textureLoader!: THREE.TextureLoader;
   private animFrameId = 0;
   private floorPlane!: THREE.Mesh;
   private raycaster = new THREE.Raycaster();
@@ -103,7 +92,7 @@ export class GameEngine {
   private playerPos = new THREE.Vector3(0, 0, 0);
   private playerTarget: THREE.Vector3 | null = null;
   private playerSpeed = 6;
-  private playerFacing = 1;
+  private playerFacing = 0;
   private playerAttackCooldown = 0;
   private playerMaxAttackCooldown = 0.75;
   private indicatorRing: THREE.Mesh | null = null;
@@ -117,7 +106,6 @@ export class GameEngine {
   private playerBaseDamage = 35;
   private playerDefense = 5;
   private playerCritChance = 0.15;
-  private playerAttackSpeed = 0.75;
 
   private keys = new Set<string>();
   private enemies: EnemyInstance[] = [];
@@ -132,7 +120,7 @@ export class GameEngine {
 
   private torchLights: THREE.PointLight[] = [];
   private loaded = false;
-  private DUNGEON = 14;
+  private DUNGEON = 16;
 
   init(
     container: HTMLDivElement,
@@ -154,7 +142,7 @@ export class GameEngine {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x060608);
-    this.scene.fog = new THREE.FogExp2(0x060608, 0.022);
+    this.scene.fog = new THREE.FogExp2(0x060608, 0.018);
 
     const aspect = w / h;
     const d = 13;
@@ -176,7 +164,6 @@ export class GameEngine {
 
     this.clock = new THREE.Clock();
     this.loader = new GLTFLoader();
-    this.textureLoader = new THREE.TextureLoader();
 
     this.buildDungeon();
     this.setupLighting();
@@ -370,40 +357,28 @@ export class GameEngine {
   private spawnInitialEnemies() {
     if (this.enemyTemplates.length === 0) return;
 
-    // Pick tier 1-2 enemies for starter dungeon
-    const tier1 = this.enemyTemplates.filter((t) => t.tier === 1);
-    const tier2 = this.enemyTemplates.filter((t) => t.tier === 2);
-    const tier3 = this.enemyTemplates.filter((t) => t.tier === 3);
-
-    // Select up to 4 distinct enemy types from lower tiers, spread across dungeon
-    const picked: EnemyTemplate[] = [];
+    // Pick a mix of tiers for the starter dungeon
+    const byTier = (t: number) => this.enemyTemplates.filter((e) => e.tier === t);
     const shuffle = <T,>(arr: T[]) => [...arr].sort(() => Math.random() - 0.5);
 
-    const t1s = shuffle(tier1).slice(0, 3);
-    const t2s = shuffle(tier2).slice(0, 2);
-    const t3s = shuffle(tier3).slice(0, 1);
-    picked.push(...t1s, ...t2s, ...t3s);
+    const picked: EnemyTemplate[] = [];
+    picked.push(...shuffle(byTier(1)).slice(0, 4));
+    picked.push(...shuffle(byTier(2)).slice(0, 2));
+    picked.push(...shuffle(byTier(3)).slice(0, 1));
+    if (picked.length === 0) picked.push(...shuffle(this.enemyTemplates).slice(0, 5));
 
-    if (picked.length === 0) {
-      // fallback: spawn any
-      picked.push(...shuffle(this.enemyTemplates).slice(0, 4));
-    }
-
-    const configs: Array<{ template: EnemyTemplate; count: number }> = picked.map((t) => ({
-      template: t,
-      count: t.tier === 1 ? 3 : t.tier === 2 ? 2 : 1,
-    }));
+    const configs = picked.map((t) => ({ template: t, count: t.tier === 1 ? 2 : 1 }));
 
     for (const { template, count } of configs) {
       for (let i = 0; i < count; i++) {
-        const D = this.DUNGEON - 2;
+        const D = this.DUNGEON - 3;
         let x = 0, z = 0;
         let attempts = 0;
         do {
           x = (Math.random() * 2 - 1) * D;
           z = (Math.random() * 2 - 1) * D;
           attempts++;
-        } while (Math.sqrt(x * x + z * z) < 5 && attempts < 20);
+        } while (Math.sqrt(x * x + z * z) < 6 && attempts < 20);
         this.createEnemy(template, new THREE.Vector3(x, 0, z));
       }
     }
@@ -411,88 +386,35 @@ export class GameEngine {
 
   private createEnemy(template: EnemyTemplate, pos: THREE.Vector3): EnemyInstance {
     const id = `e${this.enemyIdCounter++}`;
-    // Scale based on frame size and tier
-    const baseScale = Math.max(template.frameWidth, template.frameHeight) / 100;
-    const scale = Math.max(1.8, Math.min(4.5, baseScale * (1.5 + template.tier * 0.3)));
-
-    const geo = new THREE.PlaneGeometry(scale, scale);
-    const mat = new THREE.MeshBasicMaterial({
-      transparent: true,
-      alphaTest: 0.05,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(pos.x, scale / 2, pos.z);
-    mesh.userData.enemyId = id;
-    mesh.userData.spriteScale = scale;
-    this.scene.add(mesh);
+    const model = createEnemyModel(template.name, template.type, template.tier);
+    model.group.position.set(pos.x, model.baseY, pos.z);
+    model.group.userData.enemyId = id;
+    this.scene.add(model.group);
 
     const enemy: EnemyInstance = {
-      id, template, mesh,
-      hp: template.hp, maxHp: template.hp,
-      state: "idle", currentAnim: "idle",
-      frameTime: 0, currentFrame: 0,
-      textures: {}, material: mat,
+      id,
+      template,
+      model,
+      anim: makeAnimState(),
+      hp: template.hp,
+      maxHp: template.hp,
+      state: "idle",
       position: pos.clone(),
       patrolTarget: pos.clone(),
       spawnPos: pos.clone(),
+      facing: Math.random() * Math.PI * 2,
       attackCooldown: Math.random() * 1.5,
-      aggroRange: 6 + template.tier * 0.7,
-      attackRange: 1.6 + template.tier * 0.2,
-      speed: 2.2 + template.tier * 0.45,
       hurtTimer: 0,
+      aggroRange: 6.5 + template.tier * 0.6,
+      attackRange: 1.8 + template.tier * 0.2 + (model.archetype === "dragon" || model.archetype === "golem" ? 1.2 : 0),
+      speed: model.archetype === "flying" ? 3.5 : model.archetype === "golem" ? 1.6 : model.archetype === "dragon" ? 2.4 : 2.4 + template.tier * 0.35,
     };
 
+    // Make every mesh under the enemy carry the enemyId for raycast hits
+    model.group.traverse((c) => { c.userData.enemyId = id; });
+
     this.enemies.push(enemy);
-
-    // Load animations that exist for this enemy
-    for (const anim of ["idle", "walk", "attack1", "hurt", "death"] as AnimName[]) {
-      if (template.animations[anim]) {
-        this.loadEnemyAnim(enemy, anim);
-      }
-    }
-
     return enemy;
-  }
-
-  private loadEnemyAnim(enemy: EnemyInstance, anim: AnimName) {
-    const animData = enemy.template.animations[anim];
-    if (!animData) return;
-
-    const url = `${R2_BASE}/${enemy.template.folder}/${animData.file}`;
-    const tex = this.textureLoader.load(url, (loadedTex) => {
-      // Set repeat AFTER load to know natural image dimensions
-      loadedTex.wrapS = THREE.RepeatWrapping;
-      loadedTex.colorSpace = THREE.SRGBColorSpace;
-      loadedTex.magFilter = THREE.NearestFilter;
-      loadedTex.minFilter = THREE.NearestFilter;
-      loadedTex.repeat.x = 1 / animData.frames;
-      loadedTex.offset.x = 0;
-
-      if (anim === "idle" && !enemy.material.map) {
-        enemy.material.map = loadedTex;
-        enemy.material.needsUpdate = true;
-      }
-      enemy.textures[anim] = loadedTex;
-    });
-    // Pre-set repeat so it's correct if accessed before load completes
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.repeat.x = 1 / animData.frames;
-    tex.offset.x = 0;
-  }
-
-  private playEnemyAnim(enemy: EnemyInstance, anim: AnimName) {
-    const target = enemy.template.animations[anim] ? anim : "idle";
-    if (enemy.currentAnim === target) return;
-    const tex = enemy.textures[target];
-    if (!tex) return;
-    enemy.currentAnim = target;
-    enemy.currentFrame = 0;
-    enemy.frameTime = 0;
-    tex.offset.x = 0;
-    enemy.material.map = tex;
-    enemy.material.needsUpdate = true;
   }
 
   private setupInput(container: HTMLDivElement) {
@@ -526,17 +448,20 @@ export class GameEngine {
     );
     this.raycaster.setFromCamera(mouse, this.camera);
 
-    const liveMeshes = this.enemies
+    // Raycast against all enemy meshes recursively
+    const liveGroups: THREE.Object3D[] = this.enemies
       .filter((en) => en.state !== "dead" && en.state !== "death")
-      .map((en) => en.mesh);
-    const hits = this.raycaster.intersectObjects(liveMeshes);
+      .map((en) => en.model.group);
+    const hits = this.raycaster.intersectObjects(liveGroups, true);
     if (hits.length > 0) {
-      const eid = (hits[0].object as THREE.Mesh).userData.enemyId as string;
-      const enemy = this.enemies.find((en) => en.id === eid);
-      if (enemy) {
-        this.targetEnemy = enemy;
-        this.playerTarget = enemy.position.clone();
-        return;
+      const eid = hits[0].object.userData.enemyId as string | undefined;
+      if (eid) {
+        const enemy = this.enemies.find((en) => en.id === eid);
+        if (enemy) {
+          this.targetEnemy = enemy;
+          this.playerTarget = enemy.position.clone();
+          return;
+        }
       }
     }
 
@@ -566,7 +491,7 @@ export class GameEngine {
       const d = en.position.distanceTo(this.playerPos);
       if (d < nearestDist) { nearestDist = d; nearest = en; }
     }
-    if (nearest && nearestDist < 4) this.doAttack(nearest);
+    if (nearest && nearestDist < 4.5) this.doAttack(nearest);
   }
 
   private doAttack(enemy: EnemyInstance) {
@@ -574,7 +499,7 @@ export class GameEngine {
     if (enemy.state === "dead" || enemy.state === "death") return;
 
     const dist = this.playerPos.distanceTo(enemy.position);
-    if (dist > 3.8) {
+    if (dist > 4.0) {
       this.playerTarget = enemy.position.clone();
       return;
     }
@@ -588,22 +513,23 @@ export class GameEngine {
     enemy.hp = Math.max(0, enemy.hp - dmg);
     this.playerAttackCooldown = this.playerMaxAttackCooldown;
 
+    // Face the enemy
     const dx = enemy.position.x - this.playerPos.x;
-    this.playerFacing = dx >= 0 ? 1 : -1;
+    const dz = enemy.position.z - this.playerPos.z;
+    this.playerFacing = Math.atan2(dx, dz);
 
-    const wp = enemy.mesh.position.clone();
-    wp.y += 1.2;
+    const wp = enemy.model.group.position.clone();
+    wp.y += enemy.model.height * 0.7;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
 
-    const critTxt = isCrit ? " CRIT!" : "";
-    this.log(`You hit ${enemy.template.name} for ${dmg}${critTxt}`);
+    this.log(`You hit ${enemy.template.name} for ${dmg}${isCrit ? " CRIT!" : ""}`);
 
     if (enemy.hp <= 0) {
       this.killEnemy(enemy);
     } else {
-      this.playEnemyAnim(enemy, "hurt");
+      enemy.anim.hurtPhase = 1;
       enemy.state = "hurt";
-      enemy.hurtTimer = 0.5;
+      enemy.hurtTimer = 0.4;
     }
     this.notifyState();
   }
@@ -611,33 +537,35 @@ export class GameEngine {
   private killEnemy(enemy: EnemyInstance) {
     enemy.hp = 0;
     enemy.state = "death";
-    this.playEnemyAnim(enemy, "death");
+    enemy.anim.deathPhase = 0.01;  // trigger death animation
     if (this.targetEnemy === enemy) this.targetEnemy = null;
 
     const xp = enemy.template.tier * 50 + 25;
     this.playerXp += xp;
     this.log(`${enemy.template.name} defeated! +${xp} XP`);
 
-    const deathFrames = enemy.template.animations.death?.frames ?? 4;
-    const deathDuration = (deathFrames * 1000) / 8;
     setTimeout(() => {
       enemy.state = "dead";
-      this.scene.remove(enemy.mesh);
-    }, deathDuration + 200);
+      this.scene.remove(enemy.model.group);
+      // Dispose meshes
+      enemy.model.group.traverse((c) => {
+        const mesh = c as THREE.Mesh;
+        if (mesh.geometry) mesh.geometry.dispose();
+      });
+      for (const mat of enemy.model.bodyMats) mat.dispose();
+    }, 1400);
 
     setTimeout(() => {
       const idx = this.enemies.indexOf(enemy);
       if (idx !== -1) this.enemies.splice(idx, 1);
-      // Respawn same template near spawn point
       const spawnPos = enemy.spawnPos.clone();
-      spawnPos.x += (Math.random() - 0.5) * 3;
-      spawnPos.z += (Math.random() - 0.5) * 3;
+      spawnPos.x += (Math.random() - 0.5) * 4;
+      spawnPos.z += (Math.random() - 0.5) * 4;
       this.createEnemy(enemy.template, spawnPos);
-    }, 12000);
+    }, 14000);
   }
 
   private takeDamage(amount: number, source: string) {
-    // Defense reduces incoming damage
     const mitigated = Math.max(1, amount - Math.floor(this.playerDefense * 0.5));
     this.playerHp = Math.max(0, this.playerHp - mitigated);
     const wp = this.playerPos.clone();
@@ -664,12 +592,14 @@ export class GameEngine {
 
     if (this.playerAttackCooldown > 0) this.playerAttackCooldown -= delta;
 
+    // Keyboard movement
     const raw = new THREE.Vector2();
     if (this.keys.has("KeyW") || this.keys.has("ArrowUp"))    { raw.x -= 1; raw.y -= 1; }
     if (this.keys.has("KeyS") || this.keys.has("ArrowDown"))  { raw.x += 1; raw.y += 1; }
     if (this.keys.has("KeyA") || this.keys.has("ArrowLeft"))  { raw.x -= 1; raw.y += 1; }
     if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) { raw.x += 1; raw.y -= 1; }
 
+    let playerMoving = false;
     if (raw.length() > 0) {
       raw.normalize();
       const D = this.DUNGEON - 1;
@@ -678,21 +608,21 @@ export class GameEngine {
       this.playerTarget = null;
       this.targetEnemy = null;
       if (this.indicatorRing) this.indicatorRing.visible = false;
-      if (raw.x > 0) this.playerFacing = 1;
-      else if (raw.x < 0) this.playerFacing = -1;
+      this.playerFacing = Math.atan2(raw.x, raw.y);
+      playerMoving = true;
     }
 
     if (this.playerTarget) {
       const toTarget = new THREE.Vector3().subVectors(this.playerTarget, this.playerPos);
       const distToTarget = toTarget.length();
-      const stopDist = this.targetEnemy ? 2.5 : 0.2;
+      const stopDist = this.targetEnemy ? 2.8 : 0.2;
       if (distToTarget > stopDist) {
         toTarget.normalize();
         const D = this.DUNGEON - 1;
         this.playerPos.x = Math.max(-D, Math.min(D, this.playerPos.x + toTarget.x * this.playerSpeed * delta));
         this.playerPos.z = Math.max(-D, Math.min(D, this.playerPos.z + toTarget.z * this.playerSpeed * delta));
-        if (toTarget.x > 0.1) this.playerFacing = 1;
-        else if (toTarget.x < -0.1) this.playerFacing = -1;
+        this.playerFacing = Math.atan2(toTarget.x, toTarget.z);
+        playerMoving = true;
       } else {
         if (this.targetEnemy && this.playerAttackCooldown <= 0) {
           this.doAttack(this.targetEnemy);
@@ -705,7 +635,7 @@ export class GameEngine {
 
     if (this.targetEnemy && this.playerAttackCooldown <= 0) {
       const d = this.playerPos.distanceTo(this.targetEnemy.position);
-      if (d <= 3.0 && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death") {
+      if (d <= 3.2 && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death") {
         this.doAttack(this.targetEnemy);
       }
     }
@@ -713,8 +643,9 @@ export class GameEngine {
     if (this.playerGroup) {
       const targetPos = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z);
       this.playerGroup.position.lerp(targetPos, 0.3);
-      this.playerGroup.scale.x = this.playerFacing * Math.abs(this.playerGroup.scale.x);
+      this.playerGroup.rotation.y += (this.playerFacing - this.playerGroup.rotation.y) * 0.2;
     }
+    void playerMoving;
 
     if (this.playerMixer) this.playerMixer.update(delta);
 
@@ -730,7 +661,7 @@ export class GameEngine {
 
     for (const en of this.enemies) {
       if (en.state === "dead") continue;
-      this.updateEnemy(en, delta);
+      this.updateEnemy(en, delta, elapsed);
     }
 
     this.damageNumbers = this.damageNumbers.filter((d) => {
@@ -746,25 +677,28 @@ export class GameEngine {
     this.notifyState();
   }
 
-  private updateEnemy(en: EnemyInstance, delta: number) {
+  private updateEnemy(en: EnemyInstance, delta: number, elapsed: number) {
+    // Cooldown / hurt timers
     if (en.attackCooldown > 0) en.attackCooldown -= delta;
     if (en.hurtTimer > 0) {
       en.hurtTimer -= delta;
-      if (en.hurtTimer <= 0 && en.state === "hurt") {
-        en.state = "chase";
-      }
+      if (en.hurtTimer <= 0 && en.state === "hurt") en.state = "chase";
     }
 
     const distToPlayer = en.position.distanceTo(this.playerPos);
+    en.anim.isWalking = false;
 
     if (en.state !== "hurt" && en.state !== "death") {
       if (distToPlayer < en.aggroRange) {
+        // Face the player
+        const dx = this.playerPos.x - en.position.x;
+        const dz = this.playerPos.z - en.position.z;
+        en.facing = Math.atan2(dx, dz);
+
         if (distToPlayer <= en.attackRange) {
-          if (en.state !== "attack") {
-            en.state = "attack";
-            this.playEnemyAnim(en, "attack1");
-          }
+          en.state = "attack";
           if (en.attackCooldown <= 0) {
+            en.anim.isAttacking = true;
             const dmg = Math.floor(en.template.damage * (0.85 + Math.random() * 0.3));
             this.takeDamage(dmg, en.template.name);
             en.attackCooldown = 1.8 + Math.random() * 0.6;
@@ -775,46 +709,35 @@ export class GameEngine {
           const D = this.DUNGEON - 1;
           en.position.x = Math.max(-D, Math.min(D, en.position.x + dir.x * en.speed * delta));
           en.position.z = Math.max(-D, Math.min(D, en.position.z + dir.z * en.speed * delta));
-          this.playEnemyAnim(en, "walk");
+          en.anim.isWalking = true;
         }
       } else {
         const distToPatrol = en.position.distanceTo(en.patrolTarget);
-        if (distToPatrol < 0.3) {
+        if (distToPatrol < 0.4) {
           en.patrolTarget.set(
-            en.spawnPos.x + (Math.random() * 2 - 1) * 3.5,
+            en.spawnPos.x + (Math.random() * 2 - 1) * 4,
             0,
-            en.spawnPos.z + (Math.random() * 2 - 1) * 3.5
+            en.spawnPos.z + (Math.random() * 2 - 1) * 4
           );
-          this.playEnemyAnim(en, "idle");
           en.state = "idle";
         } else {
           const dir = new THREE.Vector3().subVectors(en.patrolTarget, en.position).normalize();
-          en.position.x += dir.x * en.speed * 0.45 * delta;
-          en.position.z += dir.z * en.speed * 0.45 * delta;
-          this.playEnemyAnim(en, "walk");
+          en.position.x += dir.x * en.speed * 0.5 * delta;
+          en.position.z += dir.z * en.speed * 0.5 * delta;
+          en.facing = Math.atan2(dir.x, dir.z);
+          en.anim.isWalking = true;
           en.state = "patrol";
         }
       }
     }
 
-    const scale = (en.mesh.userData.spriteScale as number) ?? 2.2;
-    en.mesh.position.set(en.position.x, scale / 2, en.position.z);
-    en.mesh.quaternion.copy(this.camera.quaternion);
+    // Sync mesh position + rotation
+    en.model.group.position.x = en.position.x;
+    en.model.group.position.z = en.position.z;
+    en.model.group.rotation.y += (en.facing - en.model.group.rotation.y) * 0.15;
 
-    const facingRight = en.position.x < this.playerPos.x;
-    en.mesh.scale.x = facingRight ? Math.abs(en.mesh.scale.x) : -Math.abs(en.mesh.scale.x);
-
-    const animData = en.template.animations[en.currentAnim];
-    const tex = en.textures[en.currentAnim];
-    if (animData && tex) {
-      const fps = 8;
-      en.frameTime += delta;
-      if (en.frameTime >= 1 / fps) {
-        en.frameTime -= 1 / fps;
-        en.currentFrame = (en.currentFrame + 1) % animData.frames;
-        tex.offset.x = en.currentFrame / animData.frames;
-      }
-    }
+    // Run procedural rig animation
+    updateEnemyAnimation(en.model, en.anim, delta, elapsed);
   }
 
   worldToScreen(worldPos: THREE.Vector3): { x: number; y: number } {
@@ -831,8 +754,8 @@ export class GameEngine {
     const enemyUI = this.enemies
       .filter((e) => e.state !== "dead")
       .map((e) => {
-        const above = e.mesh.position.clone();
-        above.y += ((e.mesh.userData.spriteScale as number) ?? 2) * 0.65;
+        const above = e.model.group.position.clone();
+        above.y += e.model.height + 0.4;
         const sc = this.worldToScreen(above);
         return { id: e.id, name: e.template.name, hp: e.hp, maxHp: e.maxHp, screenX: sc.x, screenY: sc.y, tier: e.template.tier };
       });
@@ -885,9 +808,11 @@ export class GameEngine {
     }
     this.renderer.dispose();
     for (const en of this.enemies) {
-      en.mesh.geometry.dispose();
-      en.material.dispose();
-      for (const tex of Object.values(en.textures)) tex?.dispose();
+      en.model.group.traverse((c) => {
+        const mesh = c as THREE.Mesh;
+        if (mesh.geometry) mesh.geometry.dispose();
+      });
+      for (const mat of en.model.bodyMats) mat.dispose();
     }
   }
 }

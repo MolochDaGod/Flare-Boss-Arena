@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, Component, useMemo, type ReactNode, type ErrorInfo } from "react";
 import { useLocation } from "wouter";
 import { useListCharacters, useGetEnemies, useGetClasses, useGetWeapons } from "@workspace/api-client-react";
-import { GameEngine, type GameState, type EnemyTemplate, type AnimName, type PlayerInitStats } from "@/game/GameEngine";
+import { GameEngine, type GameState, type EnemyTemplate, type PlayerInitStats } from "@/game/GameEngine";
 import { Loader2, ArrowLeft, Swords, Zap, AlertTriangle, Shield, Crosshair } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -45,25 +45,13 @@ function buildEnemyTemplates(enemiesData: unknown): EnemyTemplate[] {
   for (const cat of Object.values(categories)) {
     for (const raw of cat.items ?? []) {
       const e = raw as Record<string, unknown>;
-      const sd = e.spriteData as Record<string, unknown> | undefined;
-      if (!sd?.folder || !(sd.animations as Record<string, unknown>)?.idle) continue;
-
-      const rawAnims = sd.animations as Record<string, { file: string; frames: number }>;
-      const anims: Partial<Record<AnimName, { file: string; frames: number }>> = {};
-      for (const key of ["idle", "walk", "attack1", "hurt", "death"] as AnimName[]) {
-        if (rawAnims[key]) anims[key] = rawAnims[key];
-      }
-
       templates.push({
         id: String(e.id ?? ""),
         name: String(e.name ?? e.id ?? "Unknown"),
+        type: String(e.type ?? "beast"),
         tier: Number(e.tier ?? 1),
         hp: Number(e.hp ?? 100),
         damage: Number(e.damage ?? 10),
-        folder: String(sd.folder),
-        frameWidth: Number(sd.frameWidth ?? 100),
-        frameHeight: Number(sd.frameHeight ?? 100),
-        animations: anims,
       });
     }
   }
