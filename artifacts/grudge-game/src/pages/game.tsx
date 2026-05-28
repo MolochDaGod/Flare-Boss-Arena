@@ -2,8 +2,9 @@ import { useEffect, useRef, useState, useCallback, Component, useMemo, type Reac
 import { useLocation } from "wouter";
 import { useListCharacters, useGetEnemies, useGetClasses, useGetWeapons } from "@workspace/api-client-react";
 import { GameEngine, type GameState, type EnemyTemplate, type PlayerInitStats } from "@/game/GameEngine";
-import { Loader2, ArrowLeft, Swords, Zap, AlertTriangle, Shield, Crosshair } from "lucide-react";
+import { Loader2, ArrowLeft, Swords, Zap, AlertTriangle, Shield, Crosshair, LayoutGrid } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type PanelKey } from "@/components/MainPanel";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
 class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -150,6 +151,14 @@ function Game() {
   const engineRef = useRef<GameEngine | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [showControls, setShowControls] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelTab, setPanelTab] = useState<PanelKey>("equipment");
+  useMainPanelHotkeys(
+    () => setPanelOpen((v) => !v),
+    () => setPanelOpen(false),
+    panelOpen,
+    (idx) => { const k = MAIN_PANEL_KEYS[idx]; if (k) setPanelTab(k); },
+  );
 
   const { data: characters } = useListCharacters();
   const { data: enemiesData } = useGetEnemies();
@@ -411,6 +420,13 @@ function Game() {
         </button>
         <button
           className="flex flex-col items-center gap-1 px-4 py-2 bg-black/70 border border-border/30 rounded font-serif text-xs tracking-widest uppercase text-muted-foreground hover:bg-muted/10 hover:border-border/60 transition-all backdrop-blur-sm active:scale-95"
+          onClick={() => setPanelOpen(true)}
+        >
+          <LayoutGrid className="w-4 h-4" />
+          <span>Panel [C]</span>
+        </button>
+        <button
+          className="flex flex-col items-center gap-1 px-4 py-2 bg-black/70 border border-border/30 rounded font-serif text-xs tracking-widest uppercase text-muted-foreground hover:bg-muted/10 hover:border-border/60 transition-all backdrop-blur-sm active:scale-95"
           onClick={() => setLocation("/equipment")}
         >
           <Shield className="w-4 h-4" />
@@ -424,6 +440,23 @@ function Game() {
           <span>Boss Arena</span>
         </button>
       </div>
+
+      {/* MainPanel overlay (hotkey C) */}
+      <MainPanel
+        open={panelOpen}
+        onClose={() => setPanelOpen(false)}
+        activeTab={panelTab}
+        onActiveTabChange={setPanelTab}
+        character={{
+          name: char.name as string,
+          race: char.race as string,
+          class: char.class as string,
+          level: (char.level as number) ?? 1,
+          faction: (char as { faction?: string }).faction,
+          attributes: (char.attributes as Record<string, number>) ?? {},
+          equipment: (char.equipment as Record<string, string | undefined>) ?? {},
+        } satisfies CharSummary}
+      />
 
       {/* Controls hint */}
       <AnimatePresence>
