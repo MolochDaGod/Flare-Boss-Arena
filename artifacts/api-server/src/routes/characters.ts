@@ -22,12 +22,12 @@ const CLASS_STARTING_ATTRIBUTES: Record<string, Record<string, number>> = {
 };
 
 const RACE_BONUSES: Record<string, Record<string, number>> = {
-  human: { Strength: 1, Intellect: 1, Vitality: 1, Dexterity: 1, Endurance: 1, Wisdom: 1, Agility: 1, Tactics: 1 },
-  orc: { Strength: 3, Vitality: 3, Endurance: 2, Dexterity: 0, Agility: 1, Intellect: 0, Wisdom: 0, Tactics: 0 },
-  elf: { Strength: 0, Intellect: 3, Vitality: 1, Dexterity: 3, Agility: 3, Wisdom: 2, Endurance: 0, Tactics: 1 },
-  dwarf: { Strength: 2, Vitality: 2, Endurance: 4, Dexterity: 1, Agility: 0, Intellect: 0, Wisdom: 1, Tactics: 3 },
-  undead: { Strength: 1, Vitality: 0, Endurance: 2, Dexterity: 2, Agility: 2, Intellect: 3, Wisdom: 3, Tactics: 0 },
-  beastkin: { Strength: 3, Vitality: 2, Endurance: 1, Dexterity: 3, Agility: 4, Intellect: 0, Wisdom: 0, Tactics: 0 },
+  human:     { Strength: 1, Intellect: 1, Vitality: 1, Dexterity: 1, Endurance: 1, Wisdom: 1, Agility: 1, Tactics: 1 },
+  barbarian: { Strength: 3, Vitality: 1, Endurance: 1, Dexterity: 0, Agility: 2, Intellect: 0, Wisdom: 0, Tactics: 1 },
+  dwarf:     { Strength: 1, Vitality: 2, Endurance: 3, Dexterity: 1, Agility: 0, Intellect: 0, Wisdom: 1, Tactics: 0 },
+  elf:       { Strength: 0, Vitality: 0, Endurance: 0, Dexterity: 2, Agility: 2, Intellect: 3, Wisdom: 1, Tactics: 0 },
+  orc:       { Strength: 4, Vitality: 2, Endurance: 2, Dexterity: 0, Agility: 0, Intellect: 0, Wisdom: 0, Tactics: 0 },
+  undead:    { Strength: 1, Vitality: 3, Endurance: 2, Dexterity: 0, Agility: 0, Intellect: 0, Wisdom: 2, Tactics: 0 },
 };
 
 function computeStats(attributes: Record<string, number>) {
