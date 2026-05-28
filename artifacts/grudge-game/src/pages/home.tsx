@@ -1,122 +1,86 @@
-import React, { useEffect, useRef } from "react";
-import * as THREE from "three";
+import React from "react";
 import { useListCharacters, useGetCharacterSkills } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Link } from "wouter";
-import { Sword, Shield, Skull } from "lucide-react";
+import { Link, useLocation } from "wouter";
+import { Sword, Skull, Swords, Flame, Shield, Zap } from "lucide-react";
 
-function CharacterViewport() {
-  const mountRef = useRef<HTMLDivElement>(null);
+const FACTION_COLORS: Record<string, string> = {
+  Crusade: "#d4891a",
+  Fabled: "#22c55e",
+  Legion: "#ef4444",
+};
 
-  useEffect(() => {
-    if (!mountRef.current) return;
-    const w = mountRef.current.clientWidth;
-    const h = mountRef.current.clientHeight;
+const CLASS_ICONS: Record<string, React.ReactNode> = {
+  warrior: <Shield className="w-8 h-8" />,
+  mage: <Zap className="w-8 h-8" />,
+  ranger: <Sword className="w-8 h-8" />,
+  worge: <Flame className="w-8 h-8" />,
+};
 
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0a0c);
+function CharacterPortrait({ char }: { char: { name: string; race: string; class: string; level: number; faction?: string } }) {
+  const faction = (char as { faction?: string }).faction ?? "";
+  const factionColor = FACTION_COLORS[faction] ?? "#d4891a";
+  const classKey = char.class?.toLowerCase() ?? "warrior";
 
-    const aspect = w / h;
-    const d = 5;
-    const camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 1, 1000);
-    
-    // Isometric angle
-    camera.position.set(20, 20, 20);
-    camera.lookAt(scene.position);
+  return (
+    <div
+      className="w-full min-h-[360px] flex flex-col items-center justify-center relative overflow-hidden"
+      style={{ background: "radial-gradient(ellipse at center, #1a0a0030 0%, #060608 70%)" }}
+    >
+      {/* Ambient glow */}
+      <div
+        className="absolute inset-0 opacity-10"
+        style={{ background: `radial-gradient(ellipse at 50% 60%, ${factionColor} 0%, transparent 65%)` }}
+      />
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(w, h);
-    mountRef.current.appendChild(renderer.domElement);
+      {/* Isometric grid lines */}
+      <svg className="absolute inset-0 w-full h-full opacity-5" viewBox="0 0 400 360" preserveAspectRatio="none">
+        {Array.from({ length: 10 }).map((_, i) => (
+          <React.Fragment key={i}>
+            <line x1={i * 44} y1="0" x2={i * 44 + 200} y2="360" stroke="#ffaa00" strokeWidth="0.5" />
+            <line x1={400 - i * 44} y1="0" x2={200 - i * 44} y2="360" stroke="#ffaa00" strokeWidth="0.5" />
+          </React.Fragment>
+        ))}
+      </svg>
 
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
-    scene.add(ambientLight);
+      {/* Class silhouette icon */}
+      <div className="relative z-10 flex flex-col items-center gap-6">
+        <div
+          className="w-28 h-28 rounded-full flex items-center justify-center border-2"
+          style={{
+            background: `radial-gradient(ellipse, ${factionColor}22 0%, #0a0a0c 70%)`,
+            borderColor: `${factionColor}60`,
+            boxShadow: `0 0 40px -8px ${factionColor}`,
+            color: factionColor,
+          }}
+        >
+          {CLASS_ICONS[classKey] ?? <Sword className="w-8 h-8" />}
+        </div>
 
-    const dirLight = new THREE.DirectionalLight(0xffaa00, 1); // Ember glow
-    dirLight.position.set(10, 20, 10);
-    scene.add(dirLight);
+        <div className="text-center">
+          <p className="font-serif text-3xl tracking-widest uppercase text-white">{char.name}</p>
+          <p className="font-serif text-sm tracking-widest mt-1" style={{ color: factionColor }}>
+            Level {char.level} · {char.race} {char.class}
+          </p>
+          {faction && (
+            <p className="font-serif text-xs tracking-[0.3em] uppercase mt-1 text-muted-foreground">{faction} Faction</p>
+          )}
+        </div>
 
-    const fillLight = new THREE.DirectionalLight(0x8a0303, 0.5); // Blood red fill
-    fillLight.position.set(-10, 0, -10);
-    scene.add(fillLight);
-
-    // Character placeholder
-    const group = new THREE.Group();
-
-    // Body
-    const bodyGeo = new THREE.BoxGeometry(1.5, 2, 1);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
-    const body = new THREE.Mesh(bodyGeo, mat);
-    body.position.y = 2;
-    group.add(body);
-
-    // Head
-    const headGeo = new THREE.BoxGeometry(1, 1, 1);
-    const head = new THREE.Mesh(headGeo, mat);
-    head.position.y = 3.5;
-    group.add(head);
-
-    // Weapon arm (right)
-    const armGeo = new THREE.BoxGeometry(0.5, 1.5, 0.5);
-    const armR = new THREE.Mesh(armGeo, mat);
-    armR.position.set(1, 2, 0);
-    group.add(armR);
-
-    // Sword (orange glowing)
-    const swordGeo = new THREE.BoxGeometry(0.2, 3, 0.4);
-    const swordMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, emissive: 0xffaa00, emissiveIntensity: 0.5 });
-    const sword = new THREE.Mesh(swordGeo, swordMat);
-    sword.position.set(1, 3, 1);
-    sword.rotation.x = Math.PI / 4;
-    group.add(sword);
-
-    // Shield arm (left)
-    const armL = new THREE.Mesh(armGeo, mat);
-    armL.position.set(-1, 2, 0);
-    group.add(armL);
-
-    scene.add(group);
-
-    // Floor grid
-    const gridHelper = new THREE.GridHelper(20, 20, 0xffaa00, 0x222222);
-    gridHelper.position.y = 0;
-    scene.add(gridHelper);
-
-    const animate = () => {
-      requestAnimationFrame(animate);
-      group.rotation.y += 0.005;
-      renderer.render(scene, camera);
-    };
-    animate();
-
-    const handleResize = () => {
-      if (!mountRef.current) return;
-      const nw = mountRef.current.clientWidth;
-      const nh = mountRef.current.clientHeight;
-      const naspect = nw / nh;
-      camera.left = -d * naspect;
-      camera.right = d * naspect;
-      camera.top = d;
-      camera.bottom = -d;
-      camera.updateProjectionMatrix();
-      renderer.setSize(nw, nh);
-    };
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      if (mountRef.current && renderer.domElement) {
-        mountRef.current.removeChild(renderer.domElement);
-      }
-      renderer.dispose();
-    };
-  }, []);
-
-  return <div ref={mountRef} className="w-full h-full min-h-[400px]" />;
+        {/* Decorative divider */}
+        <div className="flex items-center gap-3 w-48">
+          <div className="h-px flex-1" style={{ background: `linear-gradient(to right, transparent, ${factionColor}80)` }} />
+          <Flame className="w-3 h-3" style={{ color: factionColor }} />
+          <div className="h-px flex-1" style={{ background: `linear-gradient(to left, transparent, ${factionColor}80)` }} />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function Home() {
+  const [, setLocation] = useLocation();
   const { data: characters, isLoading } = useListCharacters();
   const activeChar = characters?.[0]; // Default to first char for now
   
@@ -131,12 +95,24 @@ export default function Home() {
           <h1 className="text-4xl font-serif text-primary uppercase tracking-widest">War Panel</h1>
           <p className="text-muted-foreground font-serif tracking-widest text-sm mt-2">Prepare for the cull</p>
         </div>
-        <Button asChild size="lg" className="font-serif tracking-widest bg-secondary text-secondary-foreground hover:bg-secondary/80">
-          <Link href="/boss" className="flex items-center gap-2">
-            <Skull className="w-5 h-5" />
-            Enter Arena
-          </Link>
-        </Button>
+        <div className="flex items-center gap-3">
+          {activeChar && (
+            <Button
+              size="lg"
+              className="font-serif tracking-widest bg-primary text-primary-foreground hover:bg-primary/80 shadow-[0_0_20px_-4px_rgba(255,165,0,0.5)]"
+              onClick={() => setLocation("/game")}
+            >
+              <Swords className="w-5 h-5 mr-2" />
+              Enter World
+            </Button>
+          )}
+          <Button asChild size="lg" className="font-serif tracking-widest bg-secondary text-secondary-foreground hover:bg-secondary/80">
+            <Link href="/boss" className="flex items-center gap-2">
+              <Skull className="w-5 h-5" />
+              Boss Arena
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {!activeChar && !isLoading && (
@@ -158,16 +134,7 @@ export default function Home() {
             <Card className="bg-card/40 border-primary/20 shadow-[0_0_30px_-10px_rgba(255,165,0,0.1)] relative overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent z-10 pointer-events-none" />
               <CardContent className="p-0 relative">
-                <CharacterViewport />
-                
-                <div className="absolute bottom-6 left-6 z-20">
-                  <h2 className="text-3xl font-serif text-white uppercase tracking-wider">{activeChar.name}</h2>
-                  <div className="flex items-center gap-3 mt-2 font-serif text-sm tracking-widest">
-                    <span className="text-primary">Level {activeChar.level}</span>
-                    <span className="text-muted-foreground">•</span>
-                    <span className="text-muted-foreground">{activeChar.race} {activeChar.class}</span>
-                  </div>
-                </div>
+                <CharacterPortrait char={{ name: activeChar.name, race: activeChar.race, class: activeChar.class, level: activeChar.level ?? 1, faction: (activeChar as { faction?: string }).faction }} />
               </CardContent>
             </Card>
 

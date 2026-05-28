@@ -11,23 +11,29 @@ import Equipment from "@/pages/equipment";
 import Skills from "@/pages/skills";
 import Boss from "@/pages/boss";
 import Enemies from "@/pages/enemies";
+import Game from "@/pages/game";
 import Shell from "@/components/layout/Shell";
 
 const queryClient = new QueryClient();
 
 function Router() {
   return (
-    <Shell>
-      <Switch>
-        <Route path="/" component={Home} />
-        <Route path="/character/new" component={CharacterNew} />
-        <Route path="/equipment" component={Equipment} />
-        <Route path="/skills" component={Skills} />
-        <Route path="/boss" component={Boss} />
-        <Route path="/enemies" component={Enemies} />
-        <Route component={NotFound} />
-      </Switch>
-    </Shell>
+    <Switch>
+      <Route path="/game" component={Game} />
+      <Route>
+        <Shell>
+          <Switch>
+            <Route path="/" component={Home} />
+            <Route path="/character/new" component={CharacterNew} />
+            <Route path="/equipment" component={Equipment} />
+            <Route path="/skills" component={Skills} />
+            <Route path="/boss" component={Boss} />
+            <Route path="/enemies" component={Enemies} />
+            <Route component={NotFound} />
+          </Switch>
+        </Shell>
+      </Route>
+    </Switch>
   );
 }
 
