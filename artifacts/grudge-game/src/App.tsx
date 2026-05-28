@@ -12,6 +12,7 @@ import Skills from "@/pages/skills";
 import Boss from "@/pages/boss";
 import Enemies from "@/pages/enemies";
 import Game from "@/pages/game";
+import Camp from "@/pages/camp";
 import Shell from "@/components/layout/Shell";
 
 const queryClient = new QueryClient();
@@ -20,6 +21,7 @@ function Router() {
   return (
     <Switch>
       <Route path="/game" component={Game} />
+      <Route path="/camp" component={Camp} />
       <Route>
         <Shell>
           <Switch>

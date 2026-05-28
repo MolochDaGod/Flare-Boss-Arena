@@ -1,13 +1,14 @@
 import React from "react";
 import { Link, useLocation } from "wouter";
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarHeader } from "@/components/ui/sidebar";
-import { Shield, Sword, Skull, Book, Flame, ScrollText } from "lucide-react";
+import { Shield, Sword, Skull, Book, Flame, ScrollText, Tent } from "lucide-react";
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
 
   const navItems = [
     { label: "War Panel", href: "/", icon: Flame },
+    { label: "Sanctuary Camp", href: "/camp", icon: Tent },
     { label: "New Character", href: "/character/new", icon: ScrollText },
     { label: "Equipment", href: "/equipment", icon: Sword },
     { label: "Skills", href: "/skills", icon: Book },

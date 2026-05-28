@@ -3,7 +3,7 @@ import { useListCharacters, useGetCharacterSkills } from "@workspace/api-client-
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
-import { Sword, Skull, Swords, Flame, Shield, Zap } from "lucide-react";
+import { Sword, Skull, Swords, Flame, Shield, Zap, Tent } from "lucide-react";
 
 const FACTION_COLORS: Record<string, string> = {
   Crusade: "#d4891a",
@@ -97,14 +97,25 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-3">
           {activeChar && (
-            <Button
-              size="lg"
-              className="font-serif tracking-widest bg-primary text-primary-foreground hover:bg-primary/80 shadow-[0_0_20px_-4px_rgba(255,165,0,0.5)]"
-              onClick={() => setLocation("/game")}
-            >
-              <Swords className="w-5 h-5 mr-2" />
-              Enter World
-            </Button>
+            <>
+              <Button
+                size="lg"
+                className="font-serif tracking-widest bg-primary text-primary-foreground hover:bg-primary/80 shadow-[0_0_20px_-4px_rgba(255,165,0,0.5)]"
+                onClick={() => setLocation("/camp")}
+              >
+                <Tent className="w-5 h-5 mr-2" />
+                Visit Camp
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                className="font-serif tracking-widest border-primary/40 text-primary hover:bg-primary/10"
+                onClick={() => setLocation("/game")}
+              >
+                <Swords className="w-5 h-5 mr-2" />
+                Enter World
+              </Button>
+            </>
           )}
           <Button asChild size="lg" className="font-serif tracking-widest bg-secondary text-secondary-foreground hover:bg-secondary/80">
             <Link href="/boss" className="flex items-center gap-2">
