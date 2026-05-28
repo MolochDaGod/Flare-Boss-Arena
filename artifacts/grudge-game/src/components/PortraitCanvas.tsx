@@ -28,8 +28,17 @@ interface Props {
   src: string;
   /** Optional fallback URL if `src` fails. */
   fallbackSrc?: string;
-  /** Set of mesh names whose `visible` should be set to false. */
-  hiddenMeshes: Set<string>;
+  /**
+   * Given every mesh name discovered in the loaded GLB, return the set that
+   * should be VISIBLE. Everything else is hidden. Use this for the toon-rts
+   * models where every weapon/body variant is baked into one file.
+   */
+  visibilityFor?: (meshNames: string[]) => Set<string>;
+  /**
+   * Legacy fallback for the KayKit-style "show everything, hide a few" model.
+   * Ignored if `visibilityFor` is supplied.
+   */
+  hiddenMeshes?: Set<string>;
   /** Accent colour for the rim light (matches faction). */
   accent?: string;
 }
@@ -44,10 +53,17 @@ interface Props {
  * inside RAF, no cross-component state. This avoids the "Invalid hook call"
  * surface that the old PlayerPortrait class triggered.
  */
-export function PortraitCanvas({ src, fallbackSrc, hiddenMeshes, accent = "#c9a04e" }: Props) {
+export function PortraitCanvas({ src, fallbackSrc, visibilityFor, hiddenMeshes, accent = "#c9a04e" }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<THREE.Group | null>(null);
   const meshIndexRef = useRef<Map<string, THREE.Object3D>>(new Map());
+  // Stash the latest resolver on a ref so the visibility effect (and the
+  // initial install) always uses the freshest value without re-running the
+  // expensive mount/load effect.
+  const visibilityForRef = useRef(visibilityFor);
+  const hiddenRef = useRef(hiddenMeshes);
+  visibilityForRef.current = visibilityFor;
+  hiddenRef.current = hiddenMeshes;
 
   // ─── Mount / load ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -94,9 +110,17 @@ export function PortraitCanvas({ src, fallbackSrc, hiddenMeshes, accent = "#c9a0
       renderer.render(scene, camera);
     };
 
-    const applyHidden = () => {
-      const hide = hiddenMeshes;
-      meshIndexRef.current.forEach((obj, name) => { obj.visible = !hide.has(name); });
+    const applyVisibility = () => {
+      const idx = meshIndexRef.current;
+      const resolver = visibilityForRef.current;
+      if (resolver) {
+        // toon-rts model: explicit allow-list of visible mesh names.
+        const visible = resolver(Array.from(idx.keys()));
+        idx.forEach((obj, name) => { obj.visible = visible.has(name); });
+      } else {
+        const hide = hiddenRef.current ?? new Set<string>();
+        idx.forEach((obj, name) => { obj.visible = !hide.has(name); });
+      }
     };
 
     const installModel = (group: THREE.Group) => {
@@ -118,7 +142,7 @@ export function PortraitCanvas({ src, fallbackSrc, hiddenMeshes, accent = "#c9a0
 
       rootRef.current = group;
       scene.add(group);
-      applyHidden();
+      applyVisibility();
       tick();
     };
 
@@ -168,9 +192,15 @@ export function PortraitCanvas({ src, fallbackSrc, hiddenMeshes, accent = "#c9a0
 
   // ─── Visibility toggle on equipment change ────────────────────────────────
   useEffect(() => {
-    const hide = hiddenMeshes;
-    meshIndexRef.current.forEach((obj, name) => { obj.visible = !hide.has(name); });
-  }, [hiddenMeshes]);
+    const idx = meshIndexRef.current;
+    if (idx.size === 0) return; // model not loaded yet — install will apply.
+    if (visibilityFor) {
+      const visible = visibilityFor(Array.from(idx.keys()));
+      idx.forEach((obj, name) => { obj.visible = visible.has(name); });
+    } else if (hiddenMeshes) {
+      idx.forEach((obj, name) => { obj.visible = !hiddenMeshes.has(name); });
+    }
+  }, [visibilityFor, hiddenMeshes]);
 
   return (
     <div

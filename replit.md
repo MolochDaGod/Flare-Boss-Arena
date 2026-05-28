@@ -72,26 +72,52 @@ Browser-based isometric ARPG — forge a warlord, enter the dungeon, fight real 
 - Three.js WebGLRenderer will fail in headless/screenshot browsers (no GPU) — GameErrorBoundary handles this gracefully
 - Sprite sheet animation: each animation is its own PNG (horizontal strip), not rows in a single sheet
 - R2 sprite URL: `${R2_BASE}/${folder}/${animationFile}` (e.g. `sprites/werewolf/idle.png`)
-- Character GLB URL: `${OBJECTSTORE_BASE}/models/characters/kaykit/${ModelName}.glb`
-- Available confirmed GLBs: Knight, Mage, Ranger, Barbarian
+- Portrait GLB URL: `https://assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters/<race>.glb`
+- Available race GLBs (HTTP 200): human, elf, dwarf, orc, undead, barbarian
+- KayKit ARPG models (Knight/Mage/Ranger/Barbarian) are used IN-GAME by `GameEngine.ts`, not in the portrait.
 
-## KayKit portrait meshes (toggleable visibility)
+## Toon-RTS portrait meshes (allow-list visibility)
 
-Each character GLB is a single skinned skeleton with named meshes. The
-portrait (`PortraitCanvas` + `computeHiddenMeshes`) shows the body always and
-hides cosmetic meshes when the matching slot is empty. Mesh names are NOT
-shared across classes — every name is class-prefixed in the manifest at
-`artifacts/grudge-game/src/data/characterMeshes.ts`.
+Each race's `.glb` is a single skeleton with the FULL wardrobe baked in —
+every body/head/arms/legs variant + every weapon + every shield + cosmetic
+quiver/bag/wood. All meshes are visible by default, so we must HIDE
+EVERYTHING and explicitly allow-list the meshes for the current loadout.
 
-| Class → GLB | Body meshes (always on)                       | Optional (slot-gated)        |
-| ----------- | --------------------------------------------- | ---------------------------- |
-| warrior → Knight    | Head, Body, ArmLeft, ArmRight, LegLeft, LegRight | Helmet+HelmetVisor (Helm), Cape (Relic) |
-| mage → Mage         | Head, Body, ArmLeft, ArmRight, LegLeft, LegRight | Hat (Helm), Cape (Relic)               |
-| ranger → Ranger     | Head, Body, ArmLeft, ArmRight, LegLeft, LegRight | Cape (Relic), Quiver (ranged Mainhand) |
-| worge → Barbarian   | Head, Body, ArmLeft, ArmRight, LegLeft, LegRight | BearHat (Helm)                         |
+Categorisation + selection lives in `artifacts/grudge-game/src/data/characterMeshes.ts`:
 
-Mesh counts per GLB: Knight=9, Mage=8, Ranger=8, Barbarian=7. The class →
-model map is in `CLASS_TO_MODEL` (race is fallback only via `RACE_TO_MODEL`).
+- `PORTRAIT_URL(race)` returns the GLB URL.
+- `resolveVisibleMeshes(meshNames, race, equip, seed)` returns the SET of mesh
+  names that should be `visible = true`. Everything else is hidden.
+
+Mesh naming is class-prefixed and case-inconsistent — the categoriser uses
+case-insensitive regex on the role suffix (`body`, `head`, `arms`, `legs`,
+`shoulderpads`, `weapon_<type>`, `shield`, `xtra_quiver`, `xtra_bag`,
+`xtra_wood`):
+
+| Race      | Mesh prefix | Body slot infix     | Notes                                   |
+| --------- | ----------- | ------------------- | --------------------------------------- |
+| human     | `WK_`       | `Units_Body_*` etc. | "WK" = workers/units pack               |
+| elf       | `ELF_`      | `Units_Body_*` etc. |                                         |
+| dwarf     | `DWF_`      | `Units_Body_*` etc. |                                         |
+| orc       | `ORC_`      | `Units_Body_*` etc. |                                         |
+| undead    | `UD_`       | `Units_body_*` etc. | lowercase body/head                     |
+| barbarian | `BRB_`      | `body_*`, `head_*`  | no `Units_` infix                       |
+
+Always visible: 1× body, 1× head, 1× arms, 1× legs (variant picked
+deterministically from a hash of the character name so the same warlord
+always looks the same).
+Conditionally visible:
+- Shoulderpads → only if the Shoulder armor slot is equipped.
+- Weapon → mapped from the Mainhand item's `category` via
+  `WEAPON_ROLE_FOR_CATEGORY` (swords→sword, bows→bow, staves→staff, axes→axe,
+  hammers/blunts/maces→hammer or mace, spears/polearms→spear,
+  daggers→dagger, picks→pick). If no weapon equipped, no weapon mesh shows.
+- Shield → if anything is equipped in the Offhand slot.
+- Quiver → if either hand holds a bow/crossbow.
+
+The renderer side (`PortraitCanvas.tsx`) takes a `visibilityFor(meshNames)`
+prop: when present it allow-lists meshes; the legacy `hiddenMeshes` prop is
+kept as a fallback for the old hide-list model.
 
 ## T0 Starter Loadout
 

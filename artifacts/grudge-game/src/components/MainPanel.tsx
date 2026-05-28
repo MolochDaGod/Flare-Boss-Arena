@@ -3,8 +3,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { PortraitCanvas } from "./PortraitCanvas";
 import {
-  CLASS_TO_MODEL, RACE_TO_MODEL, KAYKIT_URL, computeHiddenMeshes,
-  type KayKitModel,
+  PORTRAIT_URL, resolveVisibleMeshes,
+  type RaceId as PortraitRaceId,
 } from "@/data/characterMeshes";
 import { starterLoadout } from "@/data/starterGear";
 
@@ -290,22 +290,20 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
 
   const accent = factionColor ?? RACE_META[selectedRace].color;
 
-  // ─── 3D portrait: pick model by class, hide meshes by equipped slots ─────────
-  // Class drives the body (warrior→Knight, mage→Mage, …); falls back to race
-  // mapping for unknown classes, then Knight as a final default.
-  const portraitModel: KayKitModel =
-    CLASS_TO_MODEL[character.class?.toLowerCase() ?? ""] ??
-    RACE_TO_MODEL[selectedRace] ??
-    "Knight";
-  const hiddenMeshes = useMemo(() => {
-    const slots = new Set(Object.keys(equipped));
-    const hasRanged =
-      equipped.Mainhand?.category === "bows" ||
-      equipped.Mainhand?.category === "crossbows" ||
-      equipped.Offhand?.category === "bows" ||
-      equipped.Offhand?.category === "crossbows";
-    return computeHiddenMeshes(portraitModel, slots, hasRanged);
-  }, [equipped, portraitModel]);
+  // ─── 3D portrait: race-based toon-rts GLB, hide all wardrobe meshes by
+  // default and only show body/head/arms/legs (+ shoulder, weapon, shield,
+  // quiver) matching the equipped loadout. See `data/characterMeshes.ts`.
+  const portraitRace: PortraitRaceId = selectedRace as PortraitRaceId;
+  const visibilityFor = useMemo(() => {
+    const equip = {
+      mainCategory: equipped.Mainhand?.category,
+      offCategory: equipped.Offhand?.category,
+      hasOffhand: !!equipped.Offhand,
+      hasShoulder: !!equipped.Shoulder,
+    };
+    const seed = `${character.name}::${portraitRace}`;
+    return (names: string[]) => resolveVisibleMeshes(names, portraitRace, equip, seed);
+  }, [equipped, portraitRace, character.name]);
 
   return (
     <AnimatePresence>
@@ -428,7 +426,7 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
                       selectedRace={selectedRace} setSelectedRace={setSelectedRace}
                       equipped={equipped} onSlotClick={unequip} stats={stats}
                       onSlotHover={showTip} onSlotMove={moveTip} onSlotLeave={hideTip}
-                      portraitModel={portraitModel} hiddenMeshes={hiddenMeshes}
+                      portraitRace={portraitRace} visibilityFor={visibilityFor}
                     />
                   )}
                   {active === "attributes" && <AttributesTab character={character} />}
@@ -557,7 +555,7 @@ export function useMainPanelHotkeys(
 
 function EquipmentTab({
   character, selectedRace, setSelectedRace, equipped, onSlotClick, stats,
-  onSlotHover, onSlotMove, onSlotLeave, portraitModel, hiddenMeshes,
+  onSlotHover, onSlotMove, onSlotLeave, portraitRace, visibilityFor,
 }: {
   character: CharSummary;
   selectedRace: RaceId; setSelectedRace: (r: RaceId) => void;
@@ -567,8 +565,8 @@ function EquipmentTab({
   onSlotHover: (it: AnyItem, e: MouseEvent, hint?: string) => void;
   onSlotMove: (e: MouseEvent) => void;
   onSlotLeave: () => void;
-  portraitModel: KayKitModel;
-  hiddenMeshes: Set<string>;
+  portraitRace: PortraitRaceId;
+  visibilityFor: (meshNames: string[]) => Set<string>;
 }) {
   const rm = RACE_META[selectedRace];
 
@@ -630,10 +628,11 @@ function EquipmentTab({
               position: "relative",
             }}
           >
-            {/* Three.js portrait — hides KayKit meshes that map to empty slots */}
+            {/* Three.js portrait — toon-rts GLB; only meshes matching the
+                equipped loadout are made visible (see characterMeshes.ts). */}
             <PortraitCanvas
-              src={KAYKIT_URL(portraitModel)}
-              hiddenMeshes={hiddenMeshes}
+              src={PORTRAIT_URL(portraitRace)}
+              visibilityFor={visibilityFor}
               accent={rm.color}
             />
           </div>
