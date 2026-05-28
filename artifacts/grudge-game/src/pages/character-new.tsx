@@ -145,6 +145,7 @@ export default function CharacterNew() {
                       <Label
                         key={cls.id}
                         data-testid={`class-option-${cls.id}`}
+                        onClick={() => setSelectedClass(cls.id)}
                         className={`flex items-start p-3 border rounded-md cursor-pointer transition-all ${active ? 'border-primary bg-primary/10 shadow-[0_0_12px_-4px_rgba(255,170,0,0.3)]' : 'border-border/50 hover:border-primary/40 bg-background/30'}`}
                       >
                         <RadioGroupItem value={cls.id} className="sr-only" />
@@ -196,6 +197,7 @@ export default function CharacterNew() {
                                 <Label
                                   key={race.id}
                                   data-testid={`race-option-${race.id}`}
+                                  onClick={() => setSelectedRace(race.id)}
                                   className={`flex flex-col p-4 border rounded-md cursor-pointer transition-all ${active ? `${f.border} ${f.bg}` : 'border-border/40 hover:border-border/70 bg-background/30'}`}
                                 >
                                   <RadioGroupItem value={race.id} className="sr-only" />
