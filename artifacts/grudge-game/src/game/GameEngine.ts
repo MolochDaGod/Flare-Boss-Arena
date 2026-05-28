@@ -6,14 +6,14 @@ const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
 
 const CLASS_MODEL: Record<string, string> = {
   warrior: "Knight",
-  mage: "Mage",
-  ranger: "Ranger",
-  worge: "Barbarian",
+  mage:    "Mage",
+  ranger:  "Ranger",
+  worge:   "Barbarian",
 };
 
-type AnimName = "idle" | "walk" | "attack1" | "hurt" | "death";
+export type AnimName = "idle" | "walk" | "attack1" | "hurt" | "death";
 
-interface EnemyAnim { file: string; frames: number; }
+export interface EnemyAnim { file: string; frames: number; }
 
 export interface EnemyTemplate {
   id: string;
@@ -26,53 +26,6 @@ export interface EnemyTemplate {
   frameHeight: number;
   animations: Partial<Record<AnimName, EnemyAnim>>;
 }
-
-const ENEMY_TEMPLATES: EnemyTemplate[] = [
-  {
-    id: "dire-wolf", name: "Dire Wolf", tier: 1, hp: 150, damage: 12,
-    folder: "sprites/werewolf", frameWidth: 100, frameHeight: 100,
-    animations: {
-      idle: { file: "idle.png", frames: 6 }, walk: { file: "walk.png", frames: 8 },
-      attack1: { file: "attack1.png", frames: 9 }, hurt: { file: "hurt.png", frames: 4 },
-      death: { file: "death.png", frames: 4 },
-    },
-  },
-  {
-    id: "green-spider", name: "Green Spider", tier: 1, hp: 100, damage: 10,
-    folder: "sprites/enemies/slime", frameWidth: 64, frameHeight: 64,
-    animations: {
-      idle: { file: "idle.png", frames: 6 }, walk: { file: "walk.png", frames: 6 },
-      attack1: { file: "attack1.png", frames: 6 }, hurt: { file: "hurt.png", frames: 4 },
-      death: { file: "death.png", frames: 4 },
-    },
-  },
-  {
-    id: "cave-troll", name: "Cave Troll", tier: 2, hp: 350, damage: 28,
-    folder: "sprites/ogre-boss", frameWidth: 100, frameHeight: 100,
-    animations: {
-      idle: { file: "idle.png", frames: 6 }, walk: { file: "walk.png", frames: 6 },
-      attack1: { file: "attack1.png", frames: 6 }, hurt: { file: "hurt.png", frames: 3 },
-      death: { file: "death.png", frames: 5 },
-    },
-  },
-  {
-    id: "cave-bat", name: "Cave Bat", tier: 1, hp: 80, damage: 8,
-    folder: "sprites/monsters/shadow_bat", frameWidth: 32, frameHeight: 32,
-    animations: {
-      idle: { file: "idle.png", frames: 7 }, attack1: { file: "attack1.png", frames: 10 },
-      hurt: { file: "hurt.png", frames: 3 },
-    },
-  },
-  {
-    id: "arachnid", name: "Mine Arachnid", tier: 3, hp: 450, damage: 32,
-    folder: "sprites/mine-arachnid", frameWidth: 48, frameHeight: 48,
-    animations: {
-      idle: { file: "Arachnid_idle.png", frames: 4 }, walk: { file: "Arachnid_walk.png", frames: 4 },
-      attack1: { file: "Arachnid_attack1.png", frames: 4 }, hurt: { file: "Arachnid_hurt.png", frames: 3 },
-      death: { file: "Arachnid_death.png", frames: 4 },
-    },
-  },
-];
 
 export interface EnemyInstance {
   id: string;
@@ -120,6 +73,19 @@ export interface GameState {
   loaded: boolean;
 }
 
+export interface PlayerInitStats {
+  hp: number;
+  mana: number;
+  level: number;
+  baseDamage: number;
+  defense: number;
+  critChance: number;
+  attackSpeed: number;
+  charName: string;
+  charClass: string;
+  charRace: string;
+}
+
 export class GameEngine {
   private scene!: THREE.Scene;
   private camera!: THREE.OrthographicCamera;
@@ -132,11 +98,9 @@ export class GameEngine {
   private raycaster = new THREE.Raycaster();
   private container: HTMLDivElement | null = null;
 
-  // Player
   private playerGroup: THREE.Group | null = null;
   private playerMixer: THREE.AnimationMixer | null = null;
   private playerPos = new THREE.Vector3(0, 0, 0);
-  private playerVelocity = new THREE.Vector3();
   private playerTarget: THREE.Vector3 | null = null;
   private playerSpeed = 6;
   private playerFacing = 1;
@@ -144,7 +108,6 @@ export class GameEngine {
   private playerMaxAttackCooldown = 0.75;
   private indicatorRing: THREE.Mesh | null = null;
 
-  // Stats
   private playerHp = 500;
   private playerMaxHp = 500;
   private playerMana = 200;
@@ -152,68 +115,56 @@ export class GameEngine {
   private playerLevel = 1;
   private playerXp = 0;
   private playerBaseDamage = 35;
+  private playerDefense = 5;
+  private playerCritChance = 0.15;
+  private playerAttackSpeed = 0.75;
 
-  // Input
   private keys = new Set<string>();
-
-  // Enemies
   private enemies: EnemyInstance[] = [];
+  private enemyTemplates: EnemyTemplate[] = [];
   private enemyIdCounter = 0;
-
-  // Damage numbers
   private damageNumbers: DamageNumber[] = [];
   private idCounter = 0;
-
-  // Combat log
   private combatLog: string[] = [];
-
-  // Targeting
   private targetEnemy: EnemyInstance | null = null;
 
-  // UI callback
   public onStateUpdate: ((s: GameState) => void) | null = null;
 
-  // Lights for torch flicker
   private torchLights: THREE.PointLight[] = [];
-
   private loaded = false;
   private DUNGEON = 14;
-  private characterClass = "warrior";
 
   init(
     container: HTMLDivElement,
-    charClass: string,
-    _charName: string,
-    stats: { hp: number; mana: number; level: number; baseDamage: number }
+    stats: PlayerInitStats,
+    enemyTemplates: EnemyTemplate[],
   ) {
     this.container = container;
-    this.characterClass = charClass;
     this.playerHp = this.playerMaxHp = stats.hp;
     this.playerMana = this.playerMaxMana = stats.mana;
     this.playerLevel = stats.level;
     this.playerBaseDamage = stats.baseDamage;
+    this.playerDefense = stats.defense;
+    this.playerCritChance = stats.critChance;
+    this.playerMaxAttackCooldown = stats.attackSpeed;
+    this.enemyTemplates = enemyTemplates;
 
     const w = container.clientWidth;
     const h = container.clientHeight;
 
-    // Scene
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x060608);
-    this.scene.fog = new THREE.FogExp2(0x060608, 0.025);
+    this.scene.fog = new THREE.FogExp2(0x060608, 0.022);
 
-    // Isometric orthographic camera
     const aspect = w / h;
     const d = 13;
     this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 300);
     this.camera.position.set(18, 18, 18);
     this.camera.lookAt(0, 0, 0);
 
-    // Renderer
-    let canvas: HTMLCanvasElement | undefined;
     try {
-      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, canvas });
+      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     } catch {
-      // Try with WebGL1 fallback
       this.renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
     }
     this.renderer.setSize(w, h);
@@ -229,7 +180,7 @@ export class GameEngine {
 
     this.buildDungeon();
     this.setupLighting();
-    this.loadPlayerModel(charClass);
+    this.loadPlayerModel(stats.charClass);
     this.spawnInitialEnemies();
     this.setupInput(container);
 
@@ -240,7 +191,6 @@ export class GameEngine {
   private buildDungeon() {
     const D = this.DUNGEON;
 
-    // Stone floor tiles
     const mats = [
       new THREE.MeshStandardMaterial({ color: 0x181618, roughness: 0.95 }),
       new THREE.MeshStandardMaterial({ color: 0x111013, roughness: 1.0 }),
@@ -259,7 +209,6 @@ export class GameEngine {
       }
     }
 
-    // Invisible click plane slightly above floor
     const clickPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(D * 2, D * 2),
       new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
@@ -269,7 +218,6 @@ export class GameEngine {
     this.scene.add(clickPlane);
     this.floorPlane = clickPlane;
 
-    // Walls
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 1 });
     const wallH = 4.5;
     const walls: [number, number, number, number][] = [
@@ -286,7 +234,6 @@ export class GameEngine {
       this.scene.add(wall);
     }
 
-    // Interior pillars
     const pillarMat = new THREE.MeshStandardMaterial({ color: 0x0d0c0e, roughness: 0.9 });
     const pillarPositions = [
       [-7, -7], [7, -7], [-7, 7], [7, 7],
@@ -298,13 +245,11 @@ export class GameEngine {
       pillar.castShadow = true;
       pillar.receiveShadow = true;
       this.scene.add(pillar);
-      // Pillar cap
       const cap = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.3, 1.1), pillarMat);
       cap.position.set(px, 4.65, pz);
       this.scene.add(cap);
     }
 
-    // Move target indicator
     const ringGeo = new THREE.RingGeometry(0.3, 0.45, 24);
     const ringMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide });
     this.indicatorRing = new THREE.Mesh(ringGeo, ringMat);
@@ -315,11 +260,9 @@ export class GameEngine {
   }
 
   private setupLighting() {
-    // Ambient
     const ambient = new THREE.AmbientLight(0x120a08, 2.5);
     this.scene.add(ambient);
 
-    // Main directional — ember warmth from the "above-right"
     const sun = new THREE.DirectionalLight(0xff9955, 2.2);
     sun.position.set(20, 30, 20);
     sun.castShadow = true;
@@ -331,12 +274,10 @@ export class GameEngine {
     sun.shadow.bias = -0.001;
     this.scene.add(sun);
 
-    // Cold blue fill from opposite
     const fill = new THREE.DirectionalLight(0x1a2050, 0.6);
     fill.position.set(-15, 8, -15);
     this.scene.add(fill);
 
-    // Torches
     const torchPositions = [
       [-7, -7], [7, -7], [-7, 7], [7, 7],
       [0, -10], [0, 10], [-10, 0], [10, 0],
@@ -347,7 +288,6 @@ export class GameEngine {
       this.scene.add(light);
       this.torchLights.push(light);
 
-      // Flame mesh
       const flame = new THREE.Mesh(
         new THREE.SphereGeometry(0.14, 8, 8),
         new THREE.MeshStandardMaterial({ color: 0xff6600, emissive: 0xff6600, emissiveIntensity: 3 })
@@ -358,7 +298,7 @@ export class GameEngine {
   }
 
   private loadPlayerModel(charClass: string) {
-    const modelName = CLASS_MODEL[charClass] ?? "Knight";
+    const modelName = CLASS_MODEL[charClass?.toLowerCase()] ?? "Knight";
     const url = `${OBJECTSTORE_BASE}/models/characters/kaykit/${modelName}.glb`;
 
     this.loader.load(
@@ -376,14 +316,12 @@ export class GameEngine {
         });
         this.scene.add(this.playerGroup);
 
-        // Animate
         if (gltf.animations.length > 0) {
           this.playerMixer = new THREE.AnimationMixer(this.playerGroup);
           const clip = gltf.animations.find((a) => /idle/i.test(a.name)) ?? gltf.animations[0];
           this.playerMixer.clipAction(clip).play();
         }
 
-        // Player selection ring
         const ring = new THREE.Mesh(
           new THREE.RingGeometry(0.55, 0.7, 32),
           new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide })
@@ -397,7 +335,6 @@ export class GameEngine {
       },
       undefined,
       () => {
-        // Fallback character
         this.playerGroup = this.buildFallbackPlayer();
         this.scene.add(this.playerGroup);
         this.loaded = true;
@@ -431,17 +368,36 @@ export class GameEngine {
   }
 
   private spawnInitialEnemies() {
-    const configs: Array<{ template: EnemyTemplate; count: number }> = [
-      { template: ENEMY_TEMPLATES[0], count: 4 }, // dire wolf
-      { template: ENEMY_TEMPLATES[1], count: 3 }, // green spider
-      { template: ENEMY_TEMPLATES[2], count: 2 }, // cave troll
-      { template: ENEMY_TEMPLATES[3], count: 3 }, // cave bat
-    ];
+    if (this.enemyTemplates.length === 0) return;
+
+    // Pick tier 1-2 enemies for starter dungeon
+    const tier1 = this.enemyTemplates.filter((t) => t.tier === 1);
+    const tier2 = this.enemyTemplates.filter((t) => t.tier === 2);
+    const tier3 = this.enemyTemplates.filter((t) => t.tier === 3);
+
+    // Select up to 4 distinct enemy types from lower tiers, spread across dungeon
+    const picked: EnemyTemplate[] = [];
+    const shuffle = <T,>(arr: T[]) => [...arr].sort(() => Math.random() - 0.5);
+
+    const t1s = shuffle(tier1).slice(0, 3);
+    const t2s = shuffle(tier2).slice(0, 2);
+    const t3s = shuffle(tier3).slice(0, 1);
+    picked.push(...t1s, ...t2s, ...t3s);
+
+    if (picked.length === 0) {
+      // fallback: spawn any
+      picked.push(...shuffle(this.enemyTemplates).slice(0, 4));
+    }
+
+    const configs: Array<{ template: EnemyTemplate; count: number }> = picked.map((t) => ({
+      template: t,
+      count: t.tier === 1 ? 3 : t.tier === 2 ? 2 : 1,
+    }));
 
     for (const { template, count } of configs) {
       for (let i = 0; i < count; i++) {
         const D = this.DUNGEON - 2;
-        let x: number, z: number;
+        let x = 0, z = 0;
         let attempts = 0;
         do {
           x = (Math.random() * 2 - 1) * D;
@@ -455,10 +411,17 @@ export class GameEngine {
 
   private createEnemy(template: EnemyTemplate, pos: THREE.Vector3): EnemyInstance {
     const id = `e${this.enemyIdCounter++}`;
-    const scale = template.tier <= 1 ? 2.2 : template.tier <= 2 ? 2.8 : 3.4;
+    // Scale based on frame size and tier
+    const baseScale = Math.max(template.frameWidth, template.frameHeight) / 100;
+    const scale = Math.max(1.8, Math.min(4.5, baseScale * (1.5 + template.tier * 0.3)));
 
     const geo = new THREE.PlaneGeometry(scale, scale);
-    const mat = new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.05, side: THREE.DoubleSide, depthWrite: false });
+    const mat = new THREE.MeshBasicMaterial({
+      transparent: true,
+      alphaTest: 0.05,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(pos.x, scale / 2, pos.z);
     mesh.userData.enemyId = id;
@@ -466,7 +429,8 @@ export class GameEngine {
     this.scene.add(mesh);
 
     const enemy: EnemyInstance = {
-      id, template, mesh, hp: template.hp, maxHp: template.hp,
+      id, template, mesh,
+      hp: template.hp, maxHp: template.hp,
       state: "idle", currentAnim: "idle",
       frameTime: 0, currentFrame: 0,
       textures: {}, material: mat,
@@ -474,18 +438,20 @@ export class GameEngine {
       patrolTarget: pos.clone(),
       spawnPos: pos.clone(),
       attackCooldown: Math.random() * 1.5,
-      aggroRange: 6.5 + template.tier * 0.5,
-      attackRange: 1.8 + template.tier * 0.2,
-      speed: 2.5 + template.tier * 0.4,
+      aggroRange: 6 + template.tier * 0.7,
+      attackRange: 1.6 + template.tier * 0.2,
+      speed: 2.2 + template.tier * 0.45,
       hurtTimer: 0,
     };
 
     this.enemies.push(enemy);
 
-    // Load all animations for this enemy
-    (["idle", "walk", "attack1", "hurt", "death"] as AnimName[]).forEach((anim) => {
-      this.loadEnemyAnim(enemy, anim);
-    });
+    // Load animations that exist for this enemy
+    for (const anim of ["idle", "walk", "attack1", "hurt", "death"] as AnimName[]) {
+      if (template.animations[anim]) {
+        this.loadEnemyAnim(enemy, anim);
+      }
+    }
 
     return enemy;
   }
@@ -495,26 +461,33 @@ export class GameEngine {
     if (!animData) return;
 
     const url = `${R2_BASE}/${enemy.template.folder}/${animData.file}`;
-    const tex = this.textureLoader.load(url, () => {
+    const tex = this.textureLoader.load(url, (loadedTex) => {
+      // Set repeat AFTER load to know natural image dimensions
+      loadedTex.wrapS = THREE.RepeatWrapping;
+      loadedTex.colorSpace = THREE.SRGBColorSpace;
+      loadedTex.magFilter = THREE.NearestFilter;
+      loadedTex.minFilter = THREE.NearestFilter;
+      loadedTex.repeat.x = 1 / animData.frames;
+      loadedTex.offset.x = 0;
+
       if (anim === "idle" && !enemy.material.map) {
-        enemy.material.map = tex;
+        enemy.material.map = loadedTex;
         enemy.material.needsUpdate = true;
       }
+      enemy.textures[anim] = loadedTex;
     });
+    // Pre-set repeat so it's correct if accessed before load completes
     tex.wrapS = THREE.RepeatWrapping;
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.magFilter = THREE.NearestFilter;
-    tex.minFilter = THREE.NearestFilter;
     tex.repeat.x = 1 / animData.frames;
     tex.offset.x = 0;
-    enemy.textures[anim] = tex;
   }
 
   private playEnemyAnim(enemy: EnemyInstance, anim: AnimName) {
-    if (enemy.currentAnim === anim) return;
-    const tex = enemy.textures[anim];
+    const target = enemy.template.animations[anim] ? anim : "idle";
+    if (enemy.currentAnim === target) return;
+    const tex = enemy.textures[target];
     if (!tex) return;
-    enemy.currentAnim = anim;
+    enemy.currentAnim = target;
     enemy.currentFrame = 0;
     enemy.frameTime = 0;
     tex.offset.x = 0;
@@ -528,7 +501,6 @@ export class GameEngine {
 
     this._keyDownHandler = (e: KeyboardEvent) => {
       this.keys.add(e.code);
-      // F or Space = attack nearest
       if (e.code === "KeyF" || e.code === "Space") {
         e.preventDefault();
         this.attackNearest();
@@ -552,10 +524,8 @@ export class GameEngine {
       ((e.clientX - rect.left) / rect.width) * 2 - 1,
       -((e.clientY - rect.top) / rect.height) * 2 + 1
     );
-
     this.raycaster.setFromCamera(mouse, this.camera);
 
-    // Check enemy hits
     const liveMeshes = this.enemies
       .filter((en) => en.state !== "dead" && en.state !== "death")
       .map((en) => en.mesh);
@@ -570,7 +540,6 @@ export class GameEngine {
       }
     }
 
-    // Floor click — move
     const floorHit = this.raycaster.intersectObject(this.floorPlane);
     if (floorHit.length > 0) {
       const pt = floorHit[0].point;
@@ -581,8 +550,6 @@ export class GameEngine {
         Math.max(-D, Math.min(D, pt.z))
       );
       this.targetEnemy = null;
-
-      // Show move ring
       if (this.indicatorRing) {
         this.indicatorRing.position.set(this.playerTarget.x, 0.08, this.playerTarget.z);
         this.indicatorRing.visible = true;
@@ -599,9 +566,7 @@ export class GameEngine {
       const d = en.position.distanceTo(this.playerPos);
       if (d < nearestDist) { nearestDist = d; nearest = en; }
     }
-    if (nearest && nearestDist < 4) {
-      this.doAttack(nearest);
-    }
+    if (nearest && nearestDist < 4) this.doAttack(nearest);
   }
 
   private doAttack(enemy: EnemyInstance) {
@@ -610,25 +575,22 @@ export class GameEngine {
 
     const dist = this.playerPos.distanceTo(enemy.position);
     if (dist > 3.8) {
-      // Move toward enemy
       this.playerTarget = enemy.position.clone();
       return;
     }
 
-    // Damage calc
     const base = this.playerBaseDamage;
     const variance = 0.8 + Math.random() * 0.4;
-    const isCrit = Math.random() < 0.18;
-    const dmg = Math.max(1, Math.floor(base * variance * (isCrit ? 1.75 : 1)));
+    const isCrit = Math.random() < this.playerCritChance;
+    const rawDmg = Math.max(1, Math.floor(base * variance * (isCrit ? 1.75 : 1)));
+    const dmg = Math.max(1, rawDmg - Math.floor(enemy.template.tier * 2));
 
     enemy.hp = Math.max(0, enemy.hp - dmg);
     this.playerAttackCooldown = this.playerMaxAttackCooldown;
 
-    // Face the enemy
     const dx = enemy.position.x - this.playerPos.x;
     this.playerFacing = dx >= 0 ? 1 : -1;
 
-    // Damage number
     const wp = enemy.mesh.position.clone();
     wp.y += 1.2;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
@@ -643,7 +605,6 @@ export class GameEngine {
       enemy.state = "hurt";
       enemy.hurtTimer = 0.5;
     }
-
     this.notifyState();
   }
 
@@ -664,23 +625,25 @@ export class GameEngine {
       this.scene.remove(enemy.mesh);
     }, deathDuration + 200);
 
-    // Respawn
     setTimeout(() => {
       const idx = this.enemies.indexOf(enemy);
       if (idx !== -1) this.enemies.splice(idx, 1);
+      // Respawn same template near spawn point
       const spawnPos = enemy.spawnPos.clone();
       spawnPos.x += (Math.random() - 0.5) * 3;
       spawnPos.z += (Math.random() - 0.5) * 3;
       this.createEnemy(enemy.template, spawnPos);
-    }, 10000);
+    }, 12000);
   }
 
   private takeDamage(amount: number, source: string) {
-    this.playerHp = Math.max(0, this.playerHp - amount);
+    // Defense reduces incoming damage
+    const mitigated = Math.max(1, amount - Math.floor(this.playerDefense * 0.5));
+    this.playerHp = Math.max(0, this.playerHp - mitigated);
     const wp = this.playerPos.clone();
     wp.y += 2.5;
-    this.damageNumbers.push({ id: `d${this.idCounter++}`, value: amount, worldPos: wp, age: 0, isPlayer: true, isCrit: false });
-    this.log(`${source} hits you for ${amount}`);
+    this.damageNumbers.push({ id: `d${this.idCounter++}`, value: mitigated, worldPos: wp, age: 0, isPlayer: true, isCrit: false });
+    this.log(`${source} hits you for ${mitigated}`);
     this.notifyState();
   }
 
@@ -699,14 +662,12 @@ export class GameEngine {
   private update(delta: number) {
     const elapsed = this.clock.getElapsedTime();
 
-    // Cooldowns
     if (this.playerAttackCooldown > 0) this.playerAttackCooldown -= delta;
 
-    // WASD input — rotated 45° for isometric
     const raw = new THREE.Vector2();
-    if (this.keys.has("KeyW") || this.keys.has("ArrowUp")) { raw.x -= 1; raw.y -= 1; }
-    if (this.keys.has("KeyS") || this.keys.has("ArrowDown")) { raw.x += 1; raw.y += 1; }
-    if (this.keys.has("KeyA") || this.keys.has("ArrowLeft")) { raw.x -= 1; raw.y += 1; }
+    if (this.keys.has("KeyW") || this.keys.has("ArrowUp"))    { raw.x -= 1; raw.y -= 1; }
+    if (this.keys.has("KeyS") || this.keys.has("ArrowDown"))  { raw.x += 1; raw.y += 1; }
+    if (this.keys.has("KeyA") || this.keys.has("ArrowLeft"))  { raw.x -= 1; raw.y += 1; }
     if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) { raw.x += 1; raw.y -= 1; }
 
     if (raw.length() > 0) {
@@ -721,11 +682,9 @@ export class GameEngine {
       else if (raw.x < 0) this.playerFacing = -1;
     }
 
-    // Click-to-move / chase target
     if (this.playerTarget) {
       const toTarget = new THREE.Vector3().subVectors(this.playerTarget, this.playerPos);
       const distToTarget = toTarget.length();
-
       const stopDist = this.targetEnemy ? 2.5 : 0.2;
       if (distToTarget > stopDist) {
         toTarget.normalize();
@@ -735,7 +694,6 @@ export class GameEngine {
         if (toTarget.x > 0.1) this.playerFacing = 1;
         else if (toTarget.x < -0.1) this.playerFacing = -1;
       } else {
-        // Reached target
         if (this.targetEnemy && this.playerAttackCooldown <= 0) {
           this.doAttack(this.targetEnemy);
         } else if (!this.targetEnemy) {
@@ -745,7 +703,6 @@ export class GameEngine {
       }
     }
 
-    // Auto-attack target in range
     if (this.targetEnemy && this.playerAttackCooldown <= 0) {
       const d = this.playerPos.distanceTo(this.targetEnemy.position);
       if (d <= 3.0 && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death") {
@@ -753,44 +710,37 @@ export class GameEngine {
       }
     }
 
-    // Move player model
     if (this.playerGroup) {
-      const targetModelPos = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z);
-      this.playerGroup.position.lerp(targetModelPos, 0.3);
+      const targetPos = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z);
+      this.playerGroup.position.lerp(targetPos, 0.3);
       this.playerGroup.scale.x = this.playerFacing * Math.abs(this.playerGroup.scale.x);
     }
 
-    // Player mixer
     if (this.playerMixer) this.playerMixer.update(delta);
 
-    // Camera follow player
     const camOffset = new THREE.Vector3(18, 18, 18);
     const camTarget = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z).add(camOffset);
     this.camera.position.lerp(camTarget, 0.07);
     this.camera.lookAt(this.playerPos.x, 0, this.playerPos.z);
 
-    // Torch flicker
     for (let i = 0; i < this.torchLights.length; i++) {
       const t = this.torchLights[i];
       t.intensity = 2.5 + Math.sin(elapsed * 5.7 + i * 2.3) * 0.5 + Math.sin(elapsed * 13.1 + i * 1.7) * 0.25;
     }
 
-    // Update enemies
     for (const en of this.enemies) {
       if (en.state === "dead") continue;
       this.updateEnemy(en, delta);
     }
 
-    // Update damage numbers
     this.damageNumbers = this.damageNumbers.filter((d) => {
       d.worldPos.y += delta * 1.8;
       d.age += delta;
       return d.age < 1.4;
     });
 
-    // HP regen
     if (this.playerHp < this.playerMaxHp) {
-      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + delta * 8);
+      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + delta * 6);
     }
 
     this.notifyState();
@@ -810,7 +760,6 @@ export class GameEngine {
     if (en.state !== "hurt" && en.state !== "death") {
       if (distToPlayer < en.aggroRange) {
         if (distToPlayer <= en.attackRange) {
-          // Attack
           if (en.state !== "attack") {
             en.state = "attack";
             this.playEnemyAnim(en, "attack1");
@@ -821,7 +770,6 @@ export class GameEngine {
             en.attackCooldown = 1.8 + Math.random() * 0.6;
           }
         } else {
-          // Chase
           en.state = "chase";
           const dir = new THREE.Vector3().subVectors(this.playerPos, en.position).normalize();
           const D = this.DUNGEON - 1;
@@ -830,7 +778,6 @@ export class GameEngine {
           this.playEnemyAnim(en, "walk");
         }
       } else {
-        // Patrol
         const distToPatrol = en.position.distanceTo(en.patrolTarget);
         if (distToPatrol < 0.3) {
           en.patrolTarget.set(
@@ -850,18 +797,13 @@ export class GameEngine {
       }
     }
 
-    // Sync mesh
-    const scale = (en.mesh.userData.spriteScale as number | undefined) ?? 2.2;
+    const scale = (en.mesh.userData.spriteScale as number) ?? 2.2;
     en.mesh.position.set(en.position.x, scale / 2, en.position.z);
-
-    // Billboard
     en.mesh.quaternion.copy(this.camera.quaternion);
 
-    // Flip sprite to face player
     const facingRight = en.position.x < this.playerPos.x;
-    en.mesh.scale.x = facingRight ? 1 : -1;
+    en.mesh.scale.x = facingRight ? Math.abs(en.mesh.scale.x) : -Math.abs(en.mesh.scale.x);
 
-    // Animate sprite frames
     const animData = en.template.animations[en.currentAnim];
     const tex = en.textures[en.currentAnim];
     if (animData && tex) {
@@ -890,7 +832,7 @@ export class GameEngine {
       .filter((e) => e.state !== "dead")
       .map((e) => {
         const above = e.mesh.position.clone();
-        above.y += ((e.mesh.userData.spriteScale as number | undefined) ?? 2) * 0.6;
+        above.y += ((e.mesh.userData.spriteScale as number) ?? 2) * 0.65;
         const sc = this.worldToScreen(above);
         return { id: e.id, name: e.template.name, hp: e.hp, maxHp: e.maxHp, screenX: sc.x, screenY: sc.y, tier: e.template.tier };
       });
@@ -907,11 +849,11 @@ export class GameEngine {
       playerMaxMana: this.playerMaxMana,
       playerLevel: this.playerLevel,
       playerXp: this.playerXp,
-      playerAttackCooldown: this.playerAttackCooldown / this.playerMaxAttackCooldown,
+      playerAttackCooldown: Math.max(0, this.playerAttackCooldown / this.playerMaxAttackCooldown),
       enemies: enemyUI,
       damageNumbers: dmgUI,
       combatLog: [...this.combatLog],
-      zone: "Starter Island — Grudge Dungeon",
+      zone: "Grudge Dungeon — Starter Island",
       loaded: this.loaded,
     });
   }

@@ -172,7 +172,7 @@ export default function Home() {
                 <CardTitle className="text-sm font-serif tracking-widest uppercase text-muted-foreground">Attributes</CardTitle>
               </CardHeader>
               <CardContent className="pt-6 space-y-4">
-                {Object.entries(activeChar.attributes).map(([attr, val]) => (
+                {Object.entries((activeChar.attributes as Record<string, unknown>) ?? {}).map(([attr, val]) => (
                   <div key={attr} className="flex justify-between items-center">
                     <span className="text-sm font-serif tracking-widest text-muted-foreground uppercase">{attr}</span>
                     <span className="font-mono text-primary">{String(val)}</span>

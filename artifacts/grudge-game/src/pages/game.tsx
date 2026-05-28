@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, useCallback, Component, type ReactNode, type ErrorInfo } from "react";
+import { useEffect, useRef, useState, useCallback, Component, useMemo, type ReactNode, type ErrorInfo } from "react";
 import { useLocation } from "wouter";
-import { useListCharacters } from "@workspace/api-client-react";
-import { GameEngine, type GameState } from "@/game/GameEngine";
-import { Loader2, ArrowLeft, Swords, Zap, AlertTriangle } from "lucide-react";
+import { useListCharacters, useGetEnemies, useGetClasses, useGetWeapons } from "@workspace/api-client-react";
+import { GameEngine, type GameState, type EnemyTemplate, type AnimName, type PlayerInitStats } from "@/game/GameEngine";
+import { Loader2, ArrowLeft, Swords, Zap, AlertTriangle, Shield, Crosshair } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
+// ─── Error Boundary ────────────────────────────────────────────────────────────
 class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
   state = { hasError: false, message: "" };
   static getDerivedStateFromError(err: Error) {
@@ -31,14 +32,130 @@ class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: b
   }
 }
 
+// ─── Data helpers ──────────────────────────────────────────────────────────────
+
+/** Build EnemyTemplate[] from the R2 enemies JSON (categories → items) */
+function buildEnemyTemplates(enemiesData: unknown): EnemyTemplate[] {
+  if (!enemiesData || typeof enemiesData !== "object") return [];
+  const d = enemiesData as Record<string, unknown>;
+  const categories = d.categories as Record<string, { items?: unknown[] }> | undefined;
+  if (!categories) return [];
+
+  const templates: EnemyTemplate[] = [];
+  for (const cat of Object.values(categories)) {
+    for (const raw of cat.items ?? []) {
+      const e = raw as Record<string, unknown>;
+      const sd = e.spriteData as Record<string, unknown> | undefined;
+      if (!sd?.folder || !(sd.animations as Record<string, unknown>)?.idle) continue;
+
+      const rawAnims = sd.animations as Record<string, { file: string; frames: number }>;
+      const anims: Partial<Record<AnimName, { file: string; frames: number }>> = {};
+      for (const key of ["idle", "walk", "attack1", "hurt", "death"] as AnimName[]) {
+        if (rawAnims[key]) anims[key] = rawAnims[key];
+      }
+
+      templates.push({
+        id: String(e.id ?? ""),
+        name: String(e.name ?? e.id ?? "Unknown"),
+        tier: Number(e.tier ?? 1),
+        hp: Number(e.hp ?? 100),
+        damage: Number(e.damage ?? 10),
+        folder: String(sd.folder),
+        frameWidth: Number(sd.frameWidth ?? 100),
+        frameHeight: Number(sd.frameHeight ?? 100),
+        animations: anims,
+      });
+    }
+  }
+  return templates;
+}
+
+/** Compute real player stats from class data + character attributes + equipped weapon */
+function computePlayerStats(
+  char: Record<string, unknown>,
+  classesData: unknown,
+  weaponsData: unknown,
+): PlayerInitStats {
+  const attrs = (char.attributes as Record<string, number>) ?? {};
+  const level = Number(char.level ?? 1);
+  const charClass = String(char.class ?? "warrior").toLowerCase();
+  const charRace = String(char.race ?? "human");
+  const charName = String(char.name ?? "Warlord");
+
+  // Class base attributes from R2
+  const classes = (classesData as Record<string, unknown>)?.classes as Record<string, Record<string, unknown>> | undefined;
+  const classData = classes?.[charClass] ?? classes?.["warrior"];
+  const classStart = (classData?.startingAttributes as Record<string, number>) ?? {};
+
+  // Merged attributes: class base + character's stored attributes
+  const str = (classStart.Strength ?? 5)  + (attrs.Strength ?? 0);
+  const vit = (classStart.Vitality ?? 3)  + (attrs.Vitality ?? 0);
+  const end_ = (classStart.Endurance ?? 2) + (attrs.Endurance ?? 0);
+  const dex = (classStart.Dexterity ?? 1) + (attrs.Dexterity ?? 0);
+  const agi = (classStart.Agility ?? 1)   + (attrs.Agility ?? 0);
+  const int_ = (classStart.Intellect ?? 0) + (attrs.Intellect ?? 0);
+  const wis = (classStart.Wisdom ?? 0)    + (attrs.Wisdom ?? 0);
+
+  // Base stat formulas
+  const baseHp = 200 + vit * 50 + end_ * 20 + level * 20;
+  const baseMana = 100 + int_ * 20 + wis * 10 + level * 10;
+  let baseDamage = 15 + str * 4 + dex * 2 + agi * 1 + level * 3;
+  let defense = 5 + end_ * 2 + level * 1;
+  let critChance = 0.10 + dex * 0.01 + agi * 0.005;
+  let attackSpeed = 0.80 - dex * 0.01;
+
+  // Equipped weapon — pull from weaponsData using the mainHand item id
+  const equipment = (char.equipment as Record<string, string>) ?? {};
+  const mainHandId = equipment.mainHand;
+  if (mainHandId && weaponsData && typeof weaponsData === "object") {
+    const wd = weaponsData as Record<string, unknown>;
+    const cats = wd.categories as Record<string, { items?: unknown[] }> | undefined;
+    if (cats) {
+      outer: for (const cat of Object.values(cats)) {
+        for (const raw of cat.items ?? []) {
+          const w = raw as Record<string, unknown>;
+          if (w.id === mainHandId) {
+            const ws = w.stats as Record<string, number> | undefined;
+            if (ws) {
+              baseDamage += ws.damageBase ?? 0;
+              critChance += (ws.critBase ?? 0) / 100;
+              attackSpeed = Math.max(0.3, attackSpeed - (ws.speedBase ?? 0) / 1000);
+            }
+            break outer;
+          }
+        }
+      }
+    }
+  }
+
+  // Equipped armor — sum defense from all armor slots
+  if (char.equipment && typeof weaponsData === "object") {
+    // Defense bonus from equipped armor approximated from endurance/level for now
+    defense += level * 2;
+  }
+
+  return {
+    hp: Math.round(baseHp),
+    mana: Math.round(baseMana),
+    level,
+    baseDamage: Math.round(baseDamage),
+    defense: Math.round(defense),
+    critChance: Math.min(0.60, critChance),
+    attackSpeed: Math.max(0.30, Math.min(1.5, attackSpeed)),
+    charName,
+    charClass,
+    charRace,
+  };
+}
+
+// ─── Tier colours ──────────────────────────────────────────────────────────────
 const TIER_COLORS: Record<number, string> = {
-  1: "#9ca3af",
-  2: "#22c55e",
-  3: "#3b82f6",
-  4: "#a855f7",
-  5: "#f59e0b",
+  1: "#9ca3af", 2: "#22c55e", 3: "#3b82f6",
+  4: "#a855f7", 5: "#f59e0b", 6: "#f97316",
+  7: "#ef4444", 8: "#ec4899",
 };
 
+// ─── Main Game component ───────────────────────────────────────────────────────
 function Game() {
   const [, setLocation] = useLocation();
   const mountRef = useRef<HTMLDivElement>(null);
@@ -47,47 +164,56 @@ function Game() {
   const [showControls, setShowControls] = useState(true);
 
   const { data: characters } = useListCharacters();
+  const { data: enemiesData } = useGetEnemies();
+  const { data: classesData } = useGetClasses();
+  const { data: weaponsData } = useGetWeapons();
+
   const char = characters?.[0];
 
   const handleStateUpdate = useCallback((state: GameState) => {
     setGameState(state);
   }, []);
 
-  useEffect(() => {
-    if (!mountRef.current || !char) return;
+  // Build enemy templates from real R2 data
+  const enemyTemplates = useMemo(() => buildEnemyTemplates(enemiesData), [enemiesData]);
 
-    const attrs = (char.attributes as Record<string, number>) ?? {};
-    const stats = char.stats as Record<string, number> ?? {};
-    const hp = Math.round((stats.hp as number) ?? (250 + (attrs.Vitality ?? 0) * 25));
-    const mana = Math.round((stats.mana as number) ?? (100 + (attrs.Intellect ?? 0) * 9));
-    const level = char.level ?? 1;
-    const str = attrs.Strength ?? 5;
-    const dex = attrs.Dexterity ?? 2;
-    const baseDamage = 20 + str * 3 + dex * 1.5 + level * 4;
+  // Compute player stats from real class/weapon data
+  const playerStats = useMemo(() => {
+    if (!char) return null;
+    return computePlayerStats(
+      char as unknown as Record<string, unknown>,
+      classesData,
+      weaponsData,
+    );
+  }, [char, classesData, weaponsData]);
+
+  // Only start the engine once we have enemies + stats
+  const ready = !!char && enemyTemplates.length > 0 && !!playerStats;
+
+  useEffect(() => {
+    if (!mountRef.current || !ready || !playerStats) return;
 
     const engine = new GameEngine();
     engine.onStateUpdate = handleStateUpdate;
-    engine.init(mountRef.current, char.class?.toLowerCase() ?? "warrior", char.name, {
-      hp, mana, level, baseDamage: Math.round(baseDamage),
-    });
+    engine.init(mountRef.current, playerStats, enemyTemplates);
     engineRef.current = engine;
 
     return () => {
       engine.dispose();
       engineRef.current = null;
     };
-  }, [char, handleStateUpdate]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
 
-  // Hide controls hint after 5s
   useEffect(() => {
-    const t = setTimeout(() => setShowControls(false), 5000);
+    const t = setTimeout(() => setShowControls(false), 6000);
     return () => clearTimeout(t);
   }, []);
 
   if (!char) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-6 bg-background">
-        <p className="font-serif text-muted-foreground tracking-widest text-lg">No Warlord Found</p>
+        <p className="font-serif text-muted-foreground tracking-widest text-lg uppercase">No Warlord Found</p>
         <button
           onClick={() => setLocation("/character/new")}
           className="font-serif text-sm tracking-widest uppercase text-primary border border-primary/40 px-6 py-2 rounded hover:bg-primary/10 transition-colors"
@@ -98,25 +224,40 @@ function Game() {
     );
   }
 
-  const hpPct = gameState ? (gameState.playerHp / gameState.playerMaxHp) * 100 : 100;
+  const hpPct   = gameState ? (gameState.playerHp / gameState.playerMaxHp) * 100 : 100;
   const manaPct = gameState ? (gameState.playerMana / gameState.playerMaxMana) * 100 : 100;
-  const atkPct = gameState ? (1 - gameState.playerAttackCooldown) * 100 : 100;
+  const atkPct  = gameState ? (1 - gameState.playerAttackCooldown) * 100 : 100;
   const hpColor = hpPct > 50 ? "#22c55e" : hpPct > 25 ? "#f59e0b" : "#ef4444";
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col" style={{ zIndex: 50 }}>
-      {/* 3D game canvas */}
+      {/* 3D canvas */}
       <div ref={mountRef} className="absolute inset-0" style={{ cursor: "crosshair" }} />
 
       {/* Loading overlay */}
       {(!gameState || !gameState.loaded) && (
-        <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-4 z-20">
+        <div className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center gap-4 z-20">
           <Loader2 className="w-10 h-10 animate-spin text-primary" />
-          <p className="font-serif text-primary uppercase tracking-widest text-sm animate-pulse">Entering the Dungeon...</p>
+          <p className="font-serif text-primary uppercase tracking-widest text-sm animate-pulse">
+            {!ready ? "Loading Grudge Data..." : "Entering the Dungeon..."}
+          </p>
+          {playerStats && (
+            <div className="text-center space-y-1 mt-2">
+              <p className="text-[11px] font-serif tracking-widest text-muted-foreground uppercase">
+                {playerStats.charName} · {playerStats.charRace} {playerStats.charClass}
+              </p>
+              <p className="text-[10px] font-mono text-muted-foreground/70">
+                HP {playerStats.hp} · MP {playerStats.mana} · DMG {playerStats.baseDamage} · DEF {playerStats.defense}
+              </p>
+              <p className="text-[10px] font-mono text-muted-foreground/50">
+                CRIT {Math.round(playerStats.critChance * 100)}% · {enemyTemplates.length} enemy types loaded
+              </p>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Top bar — zone + back button */}
+      {/* Top — zone + back */}
       <div className="absolute top-0 left-0 right-0 flex items-start justify-between px-4 pt-3 z-10 pointer-events-none">
         <button
           className="pointer-events-auto flex items-center gap-2 px-3 py-1.5 bg-black/60 border border-white/10 rounded text-xs font-serif tracking-widest uppercase text-muted-foreground hover:text-white hover:border-white/30 transition-colors backdrop-blur-sm"
@@ -126,27 +267,39 @@ function Game() {
           War Panel
         </button>
 
-        <div className="text-center pointer-events-none">
-          <p className="text-[10px] font-serif uppercase tracking-[0.2em] text-muted-foreground/70">{gameState?.zone ?? "..."}</p>
+        <div className="text-center">
+          <p className="text-[10px] font-serif uppercase tracking-[0.2em] text-muted-foreground/60">{gameState?.zone ?? ""}</p>
         </div>
 
-        <div className="w-24" />
+        {/* Mini stats top-right */}
+        {playerStats && gameState && (
+          <div className="pointer-events-auto bg-black/60 border border-white/10 backdrop-blur-sm rounded px-3 py-1.5 text-right">
+            <p className="text-[10px] font-serif uppercase tracking-widest text-primary">{playerStats.charName}</p>
+            <p className="text-[9px] font-mono text-muted-foreground">
+              Lv {gameState.playerLevel} · {playerStats.charRace} {playerStats.charClass}
+            </p>
+            <p className="text-[9px] font-mono text-muted-foreground/70">
+              DMG {playerStats.baseDamage} · DEF {playerStats.defense} · CRIT {Math.round(playerStats.critChance * 100)}%
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Player HUD — bottom left */}
       {gameState && (
-        <div className="absolute bottom-4 left-4 z-10 w-64 space-y-2">
-          {/* Character name */}
+        <div className="absolute bottom-4 left-4 z-10 w-56 space-y-2">
           <div className="flex items-center justify-between mb-1">
-            <span className="font-serif text-sm tracking-widest text-primary uppercase">{char.name}</span>
+            <span className="font-serif text-sm tracking-widest text-primary uppercase">{char.name as string}</span>
             <span className="font-serif text-xs text-muted-foreground tracking-widest">Lv {gameState.playerLevel}</span>
           </div>
 
-          {/* HP bar */}
-          <div className="space-y-1">
+          {/* HP */}
+          <div className="space-y-0.5">
             <div className="flex justify-between items-center">
               <span className="text-[10px] font-mono uppercase text-muted-foreground tracking-widest">HP</span>
-              <span className="text-[10px] font-mono" style={{ color: hpColor }}>{Math.round(gameState.playerHp)} / {gameState.playerMaxHp}</span>
+              <span className="text-[10px] font-mono" style={{ color: hpColor }}>
+                {Math.round(gameState.playerHp)} / {gameState.playerMaxHp}
+              </span>
             </div>
             <div className="h-3 bg-black/60 border border-white/10 rounded-sm overflow-hidden">
               <div
@@ -156,11 +309,13 @@ function Game() {
             </div>
           </div>
 
-          {/* Mana bar */}
-          <div className="space-y-1">
+          {/* Mana */}
+          <div className="space-y-0.5">
             <div className="flex justify-between items-center">
               <span className="text-[10px] font-mono uppercase text-muted-foreground tracking-widest">MP</span>
-              <span className="text-[10px] font-mono text-blue-400">{Math.round(gameState.playerMana)} / {gameState.playerMaxMana}</span>
+              <span className="text-[10px] font-mono text-blue-400">
+                {Math.round(gameState.playerMana)} / {gameState.playerMaxMana}
+              </span>
             </div>
             <div className="h-2 bg-black/60 border border-white/10 rounded-sm overflow-hidden">
               <div
@@ -170,11 +325,19 @@ function Game() {
             </div>
           </div>
 
-          {/* Attack cooldown */}
+          {/* Attack cooldown strip */}
           <div className="h-1.5 bg-black/60 border border-white/10 rounded-sm overflow-hidden">
             <div
               className="h-full rounded-sm transition-all duration-75"
               style={{ width: `${atkPct}%`, background: "#ffaa00", boxShadow: "0 0 4px #ffaa0066" }}
+            />
+          </div>
+
+          {/* XP bar */}
+          <div className="h-1 bg-black/40 border border-white/5 rounded-sm overflow-hidden">
+            <div
+              className="h-full rounded-sm"
+              style={{ width: `${Math.min(100, (gameState.playerXp % 500) / 5)}%`, background: "#a855f7" }}
             />
           </div>
         </div>
@@ -184,14 +347,22 @@ function Game() {
       {gameState && gameState.combatLog.length > 0 && (
         <div className="absolute bottom-4 right-4 z-10 w-72 space-y-1 pointer-events-none">
           <AnimatePresence initial={false}>
-            {gameState.combatLog.slice(0, 6).map((msg, i) => (
+            {gameState.combatLog.slice(0, 7).map((msg, i) => (
               <motion.div
                 key={msg + i}
                 initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1 - i * 0.12, x: 0 }}
+                animate={{ opacity: Math.max(0.15, 1 - i * 0.12), x: 0 }}
                 exit={{ opacity: 0 }}
                 className="text-right text-[11px] font-serif tracking-wide"
-                style={{ color: msg.includes("hit you") || msg.includes("hits you") ? "#ef4444" : msg.includes("defeated") || msg.includes("XP") ? "#f59e0b" : msg.includes("CRIT") ? "#ff6600" : "#d1d5db" }}
+                style={{
+                  color: msg.includes("hits you") || msg.includes("hit you")
+                    ? "#ef4444"
+                    : msg.includes("defeated") || msg.includes("XP")
+                    ? "#f59e0b"
+                    : msg.includes("CRIT")
+                    ? "#ff6600"
+                    : "#d1d5db",
+                }}
               >
                 {msg}
               </motion.div>
@@ -200,19 +371,21 @@ function Game() {
         </div>
       )}
 
-      {/* Enemy health bars — floating in world space */}
+      {/* Floating enemy health bars */}
       {gameState && gameState.enemies.map((en) => {
-        if (en.screenX < 0 || en.screenX > window.innerWidth) return null;
+        if (en.screenX < 0 || en.screenX > window.innerWidth || en.screenY < 0 || en.screenY > window.innerHeight) return null;
         const pct = (en.hp / en.maxHp) * 100;
-        const col = en.hp / en.maxHp > 0.5 ? "#22c55e" : en.hp / en.maxHp > 0.25 ? "#f59e0b" : "#ef4444";
+        const col = pct > 50 ? "#22c55e" : pct > 25 ? "#f59e0b" : "#ef4444";
         const tierColor = TIER_COLORS[en.tier] ?? "#9ca3af";
         return (
           <div
             key={en.id}
             className="absolute pointer-events-none z-10"
-            style={{ left: en.screenX - 40, top: en.screenY - 32, width: 80 }}
+            style={{ left: en.screenX - 44, top: en.screenY - 36, width: 88 }}
           >
-            <p className="text-center text-[9px] font-serif tracking-widest uppercase mb-0.5" style={{ color: tierColor }}>{en.name}</p>
+            <p className="text-center text-[9px] font-serif tracking-widest uppercase mb-0.5 truncate" style={{ color: tierColor }}>
+              {en.name}
+            </p>
             <div className="h-1.5 bg-black/70 border border-white/10 rounded-sm overflow-hidden">
               <div className="h-full rounded-sm transition-all duration-150" style={{ width: `${pct}%`, background: col }} />
             </div>
@@ -224,23 +397,22 @@ function Game() {
       {gameState && gameState.damageNumbers.map((d) => (
         <div
           key={d.id}
-          className="absolute pointer-events-none font-mono font-bold z-20"
+          className="absolute pointer-events-none font-mono font-bold z-20 select-none"
           style={{
             left: d.x,
             top: d.y,
-            fontSize: d.isCrit ? 18 : d.isPlayer ? 14 : 13,
+            fontSize: d.isCrit ? 20 : d.isPlayer ? 15 : 13,
             color: d.isPlayer ? "#ef4444" : d.isCrit ? "#ff6600" : "#ffffff",
             textShadow: "0 1px 4px rgba(0,0,0,0.9)",
             opacity: Math.max(0, 1 - d.age / 1.4),
-            transform: `translate(-50%, -${d.age * 30}px)`,
-            transition: "none",
+            transform: `translate(-50%, -${d.age * 32}px)`,
           }}
         >
-          {d.isCrit ? `${d.value}!` : `-${d.value}`}
+          {d.isCrit ? `${d.value}!` : d.isPlayer ? `-${d.value}` : `-${d.value}`}
         </div>
       ))}
 
-      {/* Action buttons */}
+      {/* Action buttons — bottom centre */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex gap-3">
         <button
           className="flex flex-col items-center gap-1 px-4 py-2 bg-black/70 border border-primary/40 rounded font-serif text-xs tracking-widest uppercase text-primary hover:bg-primary/10 hover:border-primary/70 transition-all backdrop-blur-sm active:scale-95"
@@ -248,6 +420,13 @@ function Game() {
         >
           <Swords className="w-4 h-4" />
           <span>Attack [F]</span>
+        </button>
+        <button
+          className="flex flex-col items-center gap-1 px-4 py-2 bg-black/70 border border-border/30 rounded font-serif text-xs tracking-widest uppercase text-muted-foreground hover:bg-muted/10 hover:border-border/60 transition-all backdrop-blur-sm active:scale-95"
+          onClick={() => setLocation("/equipment")}
+        >
+          <Shield className="w-4 h-4" />
+          <span>Armory</span>
         </button>
         <button
           className="flex flex-col items-center gap-1 px-4 py-2 bg-black/70 border border-blue-500/40 rounded font-serif text-xs tracking-widest uppercase text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/70 transition-all backdrop-blur-sm active:scale-95"
@@ -265,12 +444,17 @@ function Game() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="absolute top-12 left-1/2 -translate-x-1/2 z-10 pointer-events-none"
+            className="absolute top-14 left-1/2 -translate-x-1/2 z-10 pointer-events-none"
           >
-            <div className="bg-black/70 border border-white/10 rounded px-4 py-2 text-center backdrop-blur-sm">
+            <div className="bg-black/75 border border-white/10 rounded px-5 py-3 text-center backdrop-blur-sm space-y-1">
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <Crosshair className="w-3 h-3 text-primary" />
+                <p className="text-[10px] font-serif text-primary uppercase tracking-widest">Controls</p>
+              </div>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">WASD / Arrow Keys — Move</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Click Enemy — Target &amp; Attack</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Left Click Enemy — Target &amp; Chase</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F / Space — Attack Nearest</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Left Click Ground — Move To</p>
             </div>
           </motion.div>
         )}
