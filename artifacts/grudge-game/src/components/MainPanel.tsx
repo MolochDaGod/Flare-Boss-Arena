@@ -1,23 +1,85 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type MouseEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Sword, Heart, GitBranch, Sparkles, ArrowUpCircle, Hammer, ScrollText, Users } from "lucide-react";
-import { PlayerPortrait } from "@/game/PlayerPortrait";
-import { fetchWeaponSkills, classWeaponList, type WeaponSkillsData, type WeaponTypeDef, type WeaponSkill } from "@/game/weaponSkills";
+import { X } from "lucide-react";
 
-export type PanelKey =
-  | "equipment" | "attribute" | "skillTree" | "classSkill"
-  | "upgrade"   | "craft"     | "quest"     | "guild";
+// ─── Spec-driven design tokens ─────────────────────────────────────────────────
+// Mirrors https://info.grudge-studio.com/main-panel.html theme (grudge-theme.css).
+const THEME = {
+  bg: "#0d0908",
+  panel: "#1a120c",
+  card: "#221710",
+  border: "#3a2a1a",
+  gold: "#c9a04e",
+  goldLight: "#f0d890",
+  goldDark: "#8a6a30",
+  goldDim: "rgba(212,175,55,0.22)",
+  text: "#e8dec2",
+  muted: "#9a8e7a",
+  dim: "#6a5e4a",
+  green: "#44ff44",
+  red: "#ff4444",
+  blue: "#4a9eff",
+  fontDisplay: "'Cinzel Decorative','Cinzel',serif",
+  fontHeading: "'Cinzel',serif",
+  fontBody: "'Spectral SC','Segoe UI',serif",
+  fontMono: "'JetBrains Mono',Consolas,monospace",
+} as const;
 
-const PANELS: Array<{ key: PanelKey; label: string; Icon: React.ComponentType<{ className?: string }> }> = [
-  { key: "equipment", label: "Equipment",  Icon: Sword },
-  { key: "attribute", label: "Attribute",  Icon: Heart },
-  { key: "skillTree", label: "Skill Tree", Icon: GitBranch },
-  { key: "classSkill",label: "Class Skill",Icon: Sparkles },
-  { key: "upgrade",   label: "Upgrade",    Icon: ArrowUpCircle },
-  { key: "craft",     label: "Craft",      Icon: Hammer },
-  { key: "quest",     label: "Quest",      Icon: ScrollText },
-  { key: "guild",     label: "Guild",      Icon: Users },
+const TIER_COLORS: Record<number, string> = {
+  1: "#8b7355", 2: "#a8a8a8", 3: "#4a9eff", 4: "#9d4dff",
+  5: "#ff4d4d", 6: "#ffaa00", 7: "#d4a84b", 8: "#f0d890",
+};
+const TIER_LABELS: Record<number, string> = {
+  1: "Common", 2: "Uncommon", 3: "Rare", 4: "Epic",
+  5: "Heroic", 6: "Mythic", 7: "Ancient", 8: "Legendary",
+};
+
+// ─── Race & class meta ─────────────────────────────────────────────────────────
+type RaceId = "human" | "orc" | "elf" | "dwarf" | "undead" | "barbarian";
+
+const RACE_IDS: RaceId[] = ["human", "orc", "elf", "dwarf", "undead", "barbarian"];
+const RACE_META: Record<RaceId, { name: string; display: string; faction: string; color: string; mount: string }> = {
+  human:     { name: "Human",     display: "Western Kingdoms", faction: "Crusade", color: "#c9a04e", mount: "Horse" },
+  orc:       { name: "Orc",       display: "Orcs",             faction: "Legion",  color: "#8b2020", mount: "Wolf" },
+  elf:       { name: "Elf",       display: "Elves",            faction: "Fabled",  color: "#7ec8e3", mount: "Stag" },
+  dwarf:     { name: "Dwarf",     display: "Dwarves",          faction: "Fabled",  color: "#7ec8e3", mount: "Boar" },
+  undead:    { name: "Undead",    display: "Undead",           faction: "Legion",  color: "#8b2020", mount: "Skeletal Horse" },
+  barbarian: { name: "Barbarian", display: "Barbarians",       faction: "Crusade", color: "#c9a04e", mount: "Warhorse" },
+};
+
+// Asset CDNs (spec primary 404s right now → KayKit fallback always wins).
+const SPEC_GLB = (race: RaceId) =>
+  `https://assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters/${race}.glb`;
+const KAYKIT_GLB = (model: "Knight" | "Mage" | "Ranger" | "Barbarian") =>
+  `https://molochdagod.github.io/ObjectStore/models/characters/kaykit/${model}.glb`;
+const RACE_FALLBACK_KAYKIT: Record<RaceId, "Knight" | "Mage" | "Ranger" | "Barbarian"> = {
+  human: "Knight", elf: "Ranger", dwarf: "Barbarian",
+  orc: "Barbarian", undead: "Mage", barbarian: "Barbarian",
+};
+
+const ARMOR_SLOTS = ["Helm", "Shoulder", "Chest", "Hands", "Feet", "Relic"] as const;
+const WEAPON_SLOTS = ["Mainhand", "Offhand"] as const;
+const JEWELRY_SLOTS = ["Ring", "Necklace"] as const;
+const ALL_SLOTS = [...ARMOR_SLOTS, ...WEAPON_SLOTS, ...JEWELRY_SLOTS] as const;
+type SlotName = typeof ALL_SLOTS[number];
+
+const SLOT_ICONS: Record<SlotName, string> = {
+  Helm: "🪖", Shoulder: "🛡", Chest: "🎽", Hands: "🧤", Feet: "🥾", Relic: "🔮",
+  Mainhand: "⚔", Offhand: "🛡", Ring: "💍", Necklace: "📿",
+};
+
+// ─── Public types ──────────────────────────────────────────────────────────────
+export type PanelKey = "equipment" | "attributes" | "skills" | "crafting" | "quests";
+
+const PANELS: Array<{ key: PanelKey; label: string }> = [
+  { key: "equipment",  label: "Equipment" },
+  { key: "attributes", label: "Attributes" },
+  { key: "skills",     label: "Skills" },
+  { key: "crafting",   label: "Crafting" },
+  { key: "quests",     label: "Quests" },
 ];
+
+export const MAIN_PANEL_KEYS: PanelKey[] = PANELS.map((p) => p.key);
 
 export interface CharSummary {
   name: string;
@@ -27,6 +89,8 @@ export interface CharSummary {
   faction?: string;
   attributes?: Record<string, number>;
   equipment?: Record<string, string | undefined>;
+  xp?: number;          // 0..1
+  gold?: number;
 }
 
 interface Props {
@@ -34,196 +98,400 @@ interface Props {
   onClose: () => void;
   character: CharSummary;
   factionColor?: string;
-  /** Optional: parent-controlled active tab (used by [1-8] hotkeys) */
   activeTab?: PanelKey;
   onActiveTabChange?: (k: PanelKey) => void;
 }
 
-const FACTION_COLORS: Record<string, string> = {
-  Crusade: "#d4891a",
-  Fabled:  "#22c55e",
-  Legion:  "#ef4444",
-};
+// Loose item shape — matches both R2 weapons.json and armor.json.
+interface AnyItem {
+  id?: string;
+  uuid?: string;
+  name: string;
+  type?: string;
+  category?: string;
+  tier?: number;
+  iconUrl?: string;
+  slotType?: string;
+  material?: string;
+  description?: string;
+  lore?: string;
+  stats?: Record<string, number>;
+  abilities?: string[];
+  passives?: string[];
+}
 
+// ─── Data fetcher (uses our R2-backed /api/gamedata; matches spec fall-through) ─
+async function fetchJSON<T = unknown>(paths: string[]): Promise<T | null> {
+  for (const url of paths) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      return (await res.json()) as T;
+    } catch {
+      /* try next */
+    }
+  }
+  return null;
+}
+
+const BASE = (typeof window !== "undefined" ? (import.meta.env.BASE_URL ?? "/") : "/").replace(/\/$/, "");
+const R2 = "https://pub-e7fcf1fd4c9946ecb84b3766bbc7b50d.r2.dev/api/v1";
+
+async function loadMasterData(): Promise<{ items: AnyItem[]; armor: AnyItem[] }> {
+  // R2 returns categorical structures, not flat arrays — flatten on the way in.
+  const [wpn, arm] = await Promise.all([
+    fetchJSON<{ categories?: Record<string, { items: AnyItem[] }> }>([`${R2}/weapons.json`]),
+    fetchJSON<{ materials?: Record<string, { items: AnyItem[] }> }>([`${R2}/armor.json`]),
+  ]);
+  const items: AnyItem[] = [];
+  if (wpn?.categories) {
+    for (const [cat, group] of Object.entries(wpn.categories)) {
+      for (const it of group.items ?? []) items.push({ ...it, type: "weapon", category: cat });
+    }
+  }
+  const armor: AnyItem[] = [];
+  if (arm?.materials) {
+    for (const [mat, group] of Object.entries(arm.materials)) {
+      for (const it of group.items ?? []) armor.push({ ...it, type: "armor", material: mat });
+    }
+  }
+  return { items, armor };
+}
+
+// ─── Component ─────────────────────────────────────────────────────────────────
 export function MainPanel({ open, onClose, character, factionColor, activeTab, onActiveTabChange }: Props) {
   const [activeLocal, setActiveLocal] = useState<PanelKey>("equipment");
   const active = activeTab ?? activeLocal;
   const setActive = (k: PanelKey) => { onActiveTabChange?.(k); setActiveLocal(k); };
-  const [equippedWeapon, setEquippedWeapon] = useState<string>("SWORD");
-  const [skillsData, setSkillsData] = useState<WeaponSkillsData | null>(null);
-  const portraitRef = useRef<HTMLDivElement>(null);
-  const portraitInst = useRef<PlayerPortrait | null>(null);
-  const color = factionColor ?? FACTION_COLORS[character.faction ?? ""] ?? "#d4891a";
 
-  // Load weapon-skills JSON once
+  const initialRace = useMemo<RaceId>(() => {
+    const r = (character.race ?? "human").toLowerCase();
+    return (RACE_IDS as readonly string[]).includes(r) ? (r as RaceId) : "human";
+  }, [character.race]);
+  const [selectedRace, setSelectedRace] = useState<RaceId>(initialRace);
+  useEffect(() => { setSelectedRace(initialRace); }, [initialRace]);
+
+  const [data, setData] = useState<{ items: AnyItem[]; armor: AnyItem[] } | null>(null);
   useEffect(() => {
-    fetchWeaponSkills().then(setSkillsData).catch(() => {});
+    let live = true;
+    loadMasterData().then((d) => { if (live) setData(d); }).catch(() => { if (live) setData({ items: [], armor: [] }); });
+    return () => { live = false; };
   }, []);
 
-  // Default weapon = first weapon allowed for the char's class
+  // Demo equipped state — keyed by SlotName. Auto-fills T1 pieces once data loads.
+  const [equipped, setEquipped] = useState<Partial<Record<SlotName, AnyItem>>>({});
+  const [inventory, setInventory] = useState<AnyItem[]>([]);
+
   useEffect(() => {
-    if (skillsData) {
-      const allowed = classWeaponList(skillsData, character.class);
-      if (allowed.length && !allowed.includes(equippedWeapon)) {
-        setEquippedWeapon(allowed[0]);
+    if (!data) return;
+    const next: Partial<Record<SlotName, AnyItem>> = {};
+    for (const s of ARMOR_SLOTS) {
+      const piece = data.armor.find((i) => i.slotType === s && i.tier === 1);
+      if (piece) next[s] = piece;
+    }
+    for (const s of JEWELRY_SLOTS) {
+      const j = data.armor.find((i) => i.slotType === s && i.tier === 1);
+      if (j) next[s] = j;
+    }
+    const main = data.items.find((i) => i.type === "weapon" && i.tier === 1);
+    if (main) next.Mainhand = main;
+    const off = data.items.find((i) => i.type === "weapon" && i.category === "daggers" && i.tier === 1)
+      ?? data.armor.find((i) => i.slotType === "Offhand" && i.tier === 1);
+    if (off) next.Offhand = off;
+    setEquipped(next);
+
+    const inv: AnyItem[] = [];
+    inv.push(...data.items.filter((i) => i.type === "weapon" && (i.tier ?? 1) <= 2).slice(0, 8));
+    inv.push(...data.armor.filter((i) => (i.tier ?? 1) === 2).slice(0, 6));
+    setInventory(inv);
+  }, [data]);
+
+  // ─── Derived stats (spec's computeStats, simplified) ─────────────────────────
+  const stats = useMemo(() => {
+    const s = { health: 250, mana: 100, stamina: 100, damage: 0, defense: 0, speed: 1.0, crit: 0, block: 0 };
+    for (const it of Object.values(equipped)) {
+      if (!it?.stats) continue;
+      for (const [k, v] of Object.entries(it.stats)) {
+        if (k.startsWith("damage")) s.damage += v;
+        else if (k.startsWith("defense") || k === "armor") s.defense += v;
+        else if (k === "crit") s.crit += v;
+        else if (k === "block") s.block += v;
+        else if (k === "speed") s.speed += v / 100;
+        else if (k === "hp" || k === "health" || k === "healthBase") s.health += v;
+        else if (k === "mana" || k === "manaBase") s.mana += v;
       }
     }
-  }, [skillsData, character.class, equippedWeapon]);
+    return s;
+  }, [equipped]);
 
-  // Mount/dispose the Three.js portrait
-  useEffect(() => {
-    if (!open || !portraitRef.current) return;
-    const p = new PlayerPortrait({ charClass: character.class, weaponType: equippedWeapon, factionColor: color });
-    portraitInst.current = p;
-    p.mount(portraitRef.current);
-    return () => {
-      portraitInst.current = null;
-      p.dispose();
-    };
-  }, [open, character.class, color]); // intentionally not equippedWeapon
+  // ─── Hover tooltip (single fixed element, fed by data-uuid) ───────────────────
+  const [tooltip, setTooltip] = useState<{ item: AnyItem; x: number; y: number; hint?: string } | null>(null);
+  const showTip = (item: AnyItem, e: MouseEvent, hint?: string) => setTooltip({ item, x: e.clientX, y: e.clientY, hint });
+  const moveTip = (e: MouseEvent) => setTooltip((t) => (t ? { ...t, x: e.clientX, y: e.clientY } : t));
+  const hideTip = () => setTooltip(null);
 
-  // Live weapon swap without remounting the whole scene
-  useEffect(() => {
-    portraitInst.current?.setWeapon(equippedWeapon);
-  }, [equippedWeapon]);
+  // ─── Equip / unequip ─────────────────────────────────────────────────────────
+  const slotFor = (item: AnyItem): SlotName | null => {
+    if (item.type === "armor" && item.slotType && (ALL_SLOTS as readonly string[]).includes(item.slotType)) {
+      return item.slotType as SlotName;
+    }
+    if (item.type === "weapon") {
+      const offCats = new Set(["shields", "tomes", "daggers"]);
+      return offCats.has(item.category ?? "") ? "Offhand" : "Mainhand";
+    }
+    return null;
+  };
+  // Atomic equip/unequip: compute prev inside the functional updater so both
+  // setState calls see the same authoritative `equipped` snapshot, then commit
+  // inventory using the captured prev (no closure staleness, no nested setState).
+  const equipFromInv = (item: AnyItem) => {
+    const slot = slotFor(item);
+    if (!slot) return;
+    let displaced: AnyItem | undefined;
+    setEquipped((e) => { displaced = e[slot]; return { ...e, [slot]: item }; });
+    setInventory((inv) => {
+      const itemKey = item.uuid ?? item.id;
+      const next = inv.filter((i) => (i.uuid ?? i.id) !== itemKey);
+      if (displaced) next.push(displaced);
+      return next;
+    });
+    hideTip();
+  };
+  const unequip = (slot: SlotName) => {
+    let removed: AnyItem | undefined;
+    setEquipped((e) => { removed = e[slot]; const n = { ...e }; delete n[slot]; return n; });
+    setInventory((inv) => (removed ? [...inv, removed] : inv));
+    hideTip();
+  };
+
+  const accent = factionColor ?? RACE_META[selectedRace].color;
 
   return (
     <AnimatePresence>
       {open && (
-      <motion.div
-        key="main-panel"
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        transition={{ duration: 0.15 }}
-        className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
-        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      >
         <motion.div
-          initial={{ scale: 0.95, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95 }}
-          transition={{ type: "spring", stiffness: 280, damping: 26 }}
-          className="w-full max-w-6xl h-[88vh] bg-[#08080b] border rounded-md overflow-hidden flex flex-col shadow-2xl"
-          style={{ borderColor: `${color}55`, boxShadow: `0 0 60px -10px ${color}66` }}
+          key="main-panel"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="fixed inset-0 z-[60] flex items-stretch justify-center"
+          style={{ background: "rgba(0,0,0,0.78)", backdropFilter: "blur(4px)", fontFamily: THEME.fontBody, color: THEME.text }}
+          onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
         >
-          {/* Tab bar */}
-          <div className="flex items-center border-b" style={{ borderColor: `${color}33` }}>
-            <div className="px-4 py-2 border-r" style={{ borderColor: `${color}33` }}>
-              <p className="font-serif text-[10px] tracking-[0.3em] uppercase text-muted-foreground">Warlord</p>
-              <p className="font-serif text-base tracking-widest uppercase" style={{ color }}>{character.name}</p>
-            </div>
-            <div className="flex-1 flex overflow-x-auto">
-              {PANELS.map(({ key, label, Icon }) => {
-                const isActive = active === key;
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setActive(key)}
-                    className="px-4 py-3 flex items-center gap-2 font-serif text-[11px] tracking-widest uppercase transition-colors whitespace-nowrap border-r"
-                    style={{
-                      color: isActive ? color : "#8a8580",
-                      background: isActive ? `${color}14` : "transparent",
-                      borderColor: `${color}22`,
-                      borderBottom: isActive ? `2px solid ${color}` : "2px solid transparent",
-                    }}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-            <button
-              onClick={onClose}
-              className="px-4 py-3 text-muted-foreground hover:text-white transition-colors"
-              title="Close [C / Esc]"
+          <motion.div
+            initial={{ scale: 0.96, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96 }}
+            transition={{ type: "spring", stiffness: 280, damping: 26 }}
+            className="m-auto w-[min(1280px,96vw)] h-[min(820px,94vh)] overflow-hidden flex flex-col"
+            style={{ background: THEME.bg, border: `2px solid ${THEME.gold}`, borderRadius: 8, boxShadow: `0 20px 80px rgba(0,0,0,0.6), 0 0 40px ${accent}33` }}
+          >
+            {/* ── Top bar ─────────────────────────────────────────────────── */}
+            <header
+              className="flex items-center justify-between px-4 py-2"
+              style={{ background: "linear-gradient(90deg,#1a100a,#221710,#1a100a)", borderBottom: `2px solid ${THEME.gold}` }}
             >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Body — 3-column: left(stats) | middle(portrait) | right(panel content) */}
-          <div className="flex-1 grid grid-cols-12 gap-0 overflow-hidden">
-            {/* Left: persistent character info */}
-            <div className="col-span-3 border-r p-4 overflow-y-auto" style={{ borderColor: `${color}22` }}>
-              <p className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Identity</p>
-              <div className="space-y-1 mb-5">
-                <p className="font-serif text-sm text-white">{character.race} {character.class}</p>
-                <p className="font-serif text-xs" style={{ color }}>Level {character.level}</p>
-                {character.faction && <p className="font-serif text-[10px] tracking-widest uppercase text-muted-foreground">{character.faction} Faction</p>}
+              <div className="flex items-center gap-3">
+                <h1 style={{ fontFamily: THEME.fontDisplay, fontSize: 15, color: THEME.gold, letterSpacing: 2, textTransform: "uppercase" }}>
+                  Grudge Warlords
+                </h1>
               </div>
+              <div className="flex items-center gap-3" style={{ fontSize: 12 }}>
+                <span style={{ color: THEME.gold, fontFamily: THEME.fontDisplay, fontWeight: 700 }}>{character.name}</span>
+                <span style={{ color: THEME.muted, fontSize: 11 }}>Lv.{character.level} {character.class}</span>
+                <div style={{ width: 120, height: 6, background: "#2a1e14", borderRadius: 3, border: `1px solid ${THEME.border}`, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${Math.round((character.xp ?? 0.35) * 100)}%`, background: `linear-gradient(90deg, ${THEME.goldDark}, ${THEME.gold})`, transition: "width 0.3s" }} />
+                </div>
+                <button
+                  onClick={onClose}
+                  title="Close [C / Esc]"
+                  className="ml-2 transition-colors"
+                  style={{ color: THEME.muted, background: "transparent", border: 0, cursor: "pointer", padding: 4 }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = THEME.gold)}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = THEME.muted)}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </header>
 
-              <p className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Attributes</p>
-              <div className="space-y-1.5">
-                {Object.entries(character.attributes ?? {}).map(([k, v]) => (
-                  <div key={k} className="flex justify-between text-xs">
-                    <span className="font-serif tracking-widest uppercase text-muted-foreground">{k}</span>
-                    <span className="font-mono" style={{ color }}>{v}</span>
+            {/* ── 3-col body ──────────────────────────────────────────────── */}
+            <div className="flex-1 flex min-h-0">
+              {/* Left: combat stats + data sources */}
+              <aside
+                className="overflow-y-auto p-3 hidden lg:block"
+                style={{ width: 260, flexShrink: 0, background: THEME.panel, borderRight: `2px solid ${THEME.border}` }}
+              >
+                <SectionTitle>Combat Stats</SectionTitle>
+                <StatRow k="Health"  v={String(stats.health)} />
+                <StatRow k="Mana"    v={String(stats.mana)} />
+                <StatRow k="Stamina" v={String(stats.stamina)} />
+                <StatRow k="Damage"  v={String(stats.damage)} positive />
+                <StatRow k="Crit %"  v={`${stats.crit}%`} />
+                <StatRow k="Defense" v={String(stats.defense)} />
+                <StatRow k="Block %" v={`${stats.block}%`} />
+                <StatRow k="Speed"   v={stats.speed.toFixed(1)} />
+
+                <SectionTitle style={{ marginTop: 20 }}>Identity</SectionTitle>
+                <div style={{ fontSize: 11, color: THEME.muted, lineHeight: 1.6 }}>
+                  Race: <span style={{ color: THEME.gold }}>{RACE_META[selectedRace].name}</span><br />
+                  Class: <span style={{ color: THEME.gold }}>{character.class}</span><br />
+                  Faction: <span style={{ color: THEME.gold }}>{character.faction ?? RACE_META[selectedRace].faction}</span><br />
+                  Mount: <span style={{ color: THEME.gold }}>{RACE_META[selectedRace].mount}</span>
+                </div>
+
+                <SectionTitle style={{ marginTop: 20 }}>Data Sources</SectionTitle>
+                <div style={{ fontSize: 9, color: THEME.dim, lineHeight: 1.6, fontFamily: THEME.fontMono }}>
+                  Items: {data?.items.length ?? "…"}<br />
+                  Armor: {data?.armor.length ?? "…"}<br />
+                  Slots filled: {Object.keys(equipped).length} / {ALL_SLOTS.length}<br />
+                  Source: r2.dev / api v1
+                </div>
+              </aside>
+
+              {/* Center: tab strip + content */}
+              <main className="flex-1 flex flex-col min-w-0">
+                <nav
+                  className="flex overflow-x-auto"
+                  style={{ background: "#14100a", borderBottom: `2px solid ${THEME.gold}`, flexShrink: 0 }}
+                >
+                  {PANELS.map(({ key, label }) => {
+                    const isActive = active === key;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setActive(key)}
+                        style={{
+                          border: 0,
+                          background: isActive ? "rgba(255,215,0,0.08)" : "transparent",
+                          color: isActive ? THEME.gold : THEME.muted,
+                          cursor: "pointer",
+                          padding: "10px 16px",
+                          fontFamily: THEME.fontHeading,
+                          fontSize: 10,
+                          textTransform: "uppercase",
+                          letterSpacing: 1,
+                          fontWeight: 700,
+                          borderBottom: `2px solid ${isActive ? THEME.gold : "transparent"}`,
+                          whiteSpace: "nowrap",
+                          transition: "all 0.15s",
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </nav>
+
+                <div className="flex-1 overflow-y-auto p-4">
+                  {active === "equipment" && (
+                    <EquipmentTab
+                      character={character}
+                      selectedRace={selectedRace} setSelectedRace={setSelectedRace}
+                      equipped={equipped} onSlotClick={unequip} stats={stats}
+                      onSlotHover={showTip} onSlotMove={moveTip} onSlotLeave={hideTip}
+                    />
+                  )}
+                  {active === "attributes" && <AttributesTab character={character} />}
+                  {active === "skills"     && <SkillsTab character={character} />}
+                  {active === "crafting"   && <CraftingTab />}
+                  {active === "quests"     && <QuestsTab />}
+                </div>
+              </main>
+
+              {/* Right: inventory */}
+              <aside
+                className="hidden lg:flex flex-col"
+                style={{ width: 280, flexShrink: 0, background: THEME.panel, borderLeft: `2px solid ${THEME.border}` }}
+              >
+                <div className="flex items-center justify-between" style={{ padding: "10px 12px", borderBottom: `1px solid ${THEME.border}` }}>
+                  <h3 style={{ fontFamily: THEME.fontHeading, fontSize: 12, color: THEME.gold, textTransform: "uppercase" }}>Inventory</h3>
+                  <div className="flex items-center gap-2">
+                    <span style={{ fontSize: 10, color: THEME.dim }}>{inventory.length}/42</span>
+                    <span style={{ fontFamily: THEME.fontMono, fontSize: 12, color: THEME.gold }}>{character.gold ?? 250} Gold</span>
                   </div>
-                ))}
-                {(!character.attributes || Object.keys(character.attributes).length === 0) && (
-                  <p className="text-[10px] text-muted-foreground font-mono">No attributes</p>
-                )}
-              </div>
+                </div>
+                <div
+                  className="grid flex-1 overflow-y-auto"
+                  style={{ gridTemplateColumns: "repeat(6,1fr)", gap: 4, padding: 8, alignContent: "start" }}
+                >
+                  {Array.from({ length: 42 }).map((_, i) => {
+                    const it = inventory[i];
+                    if (!it) {
+                      return <div key={i} style={{ aspectRatio: "1", border: `2px solid ${THEME.border}`, borderRadius: 6, background: THEME.card }} />;
+                    }
+                    const tier = it.tier ?? 1;
+                    const tc = TIER_COLORS[tier];
+                    return (
+                      <button
+                        key={(it.uuid ?? it.id ?? "") + i}
+                        onClick={() => equipFromInv(it)}
+                        onMouseEnter={(e) => showTip(it, e, "Click to equip")}
+                        onMouseMove={moveTip}
+                        onMouseLeave={hideTip}
+                        style={{
+                          aspectRatio: "1", border: `2px solid ${tc}`, borderRadius: 6,
+                          background: THEME.card, cursor: "pointer", padding: 0, position: "relative",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                        }}
+                      >
+                        {it.iconUrl ? (
+                          <img src={it.iconUrl} alt={it.name} style={{ width: "100%", height: "100%", objectFit: "contain", padding: 4, imageRendering: "pixelated" }} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                        ) : (
+                          <span style={{ fontSize: 18, opacity: 0.4 }}>{SLOT_ICONS[(it.slotType as SlotName) ?? "Mainhand"] ?? "◻"}</span>
+                        )}
+                        <span style={{ position: "absolute", top: 1, right: 2, fontSize: 7, fontWeight: 700, padding: "0 3px", borderRadius: 2, background: tc, color: "#000" }}>T{tier}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </aside>
             </div>
 
-            {/* Middle: 3D self-camera portrait */}
-            <div className="col-span-5 relative overflow-hidden" style={{ background: `radial-gradient(ellipse at center, ${color}18 0%, #050507 70%)` }}>
-              <div ref={portraitRef} className="absolute inset-0" />
-              {/* Equipped weapon strip — overlaid bottom */}
-              <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/80 to-transparent">
-                <p className="font-serif text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-2">Equipped Weapon</p>
-                <p className="font-serif text-sm tracking-widest uppercase" style={{ color }}>{equippedWeapon}</p>
-              </div>
-            </div>
+            {/* ── Bottom hotbar ───────────────────────────────────────────── */}
+            <footer
+              className="flex items-center justify-center"
+              style={{ padding: 6, background: "#120c06", borderTop: `2px solid ${THEME.gold}`, gap: 4, flexShrink: 0 }}
+            >
+              {[1, 2, 3, 4].map((n) => <HotSlot key={n} num={n} kind="skill" />)}
+              <div style={{ width: 2, height: 30, background: THEME.border, margin: "0 4px", borderRadius: 1 }} />
+              {[6, 7, 8].map((n) => <HotSlot key={n} num={n} kind="consumable" />)}
+            </footer>
 
-            {/* Right: tab-specific content */}
-            <div className="col-span-4 border-l overflow-y-auto" style={{ borderColor: `${color}22` }}>
-              {active === "equipment"  && <EquipmentPanel character={character} skillsData={skillsData} equippedWeapon={equippedWeapon} setEquippedWeapon={setEquippedWeapon} color={color} />}
-              {active === "attribute"  && <AttributePanel character={character} color={color} />}
-              {active === "skillTree"  && <SkillTreePanel character={character} color={color} />}
-              {active === "classSkill" && <ClassSkillPanel skillsData={skillsData} equippedWeapon={equippedWeapon} color={color} />}
-              {active === "upgrade"    && <StubPanel title="Upgrade" hint="Reforge equipment with grudge essence." color={color} />}
-              {active === "craft"      && <StubPanel title="Craft"   hint="Forge new gear from dungeon loot." color={color} />}
-              {active === "quest"      && <StubPanel title="Quest"   hint="Active grudges to be settled." color={color} />}
-              {active === "guild"      && <StubPanel title="Guild"   hint="Your clan and clan wars." color={color} />}
+            {/* ── Hotkey hint ─────────────────────────────────────────────── */}
+            <div
+              className="flex justify-between"
+              style={{ borderTop: `1px solid ${THEME.border}`, padding: "4px 12px", fontSize: 9, fontFamily: THEME.fontMono, color: THEME.dim, letterSpacing: 2, textTransform: "uppercase", flexShrink: 0 }}
+            >
+              <span>[ C ] toggle</span><span>[ Esc ] close</span><span>[ 1–5 ] tab</span>
             </div>
-          </div>
+          </motion.div>
 
-          <div className="border-t px-4 py-2 flex justify-between text-[10px] font-mono tracking-widest uppercase text-muted-foreground" style={{ borderColor: `${color}22` }}>
-            <span>[ C ] toggle panel</span>
-            <span>[ Esc ] close</span>
-            <span>[ 1-8 ] tab</span>
-          </div>
+          {/* Tooltip — pointer-events none, follows cursor */}
+          {tooltip && <Tooltip item={tooltip.item} x={tooltip.x} y={tooltip.y} hint={tooltip.hint} />}
         </motion.div>
-      </motion.div>
       )}
     </AnimatePresence>
   );
 }
 
-/** Hook: open with hotkey C, close with Esc, [1-8] selects tab when open. */
+// ─── Hotkey hook (ref-stable, no remount churn) ────────────────────────────────
 export function useMainPanelHotkeys(
   onToggle: () => void,
   onClose: () => void,
   isOpen: boolean,
   onSelectTab?: (idx: number) => void,
 ) {
-  const toggleRef = useRef(onToggle);
-  const closeRef = useRef(onClose);
-  const tabRef = useRef(onSelectTab);
-  const openRef = useRef(isOpen);
-  toggleRef.current = onToggle;
-  closeRef.current = onClose;
-  tabRef.current = onSelectTab;
-  openRef.current = isOpen;
+  const refs = useRef({ onToggle, onClose, isOpen, onSelectTab });
+  refs.current = { onToggle, onClose, isOpen, onSelectTab };
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.repeat) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      if (e.key === "c" || e.key === "C") { e.preventDefault(); toggleRef.current(); return; }
-      if (e.key === "Escape" && openRef.current) { e.preventDefault(); closeRef.current(); return; }
-      if (openRef.current && tabRef.current && /^[1-8]$/.test(e.key)) {
+      const r = refs.current;
+      if (e.key === "c" || e.key === "C") { e.preventDefault(); r.onToggle(); return; }
+      if (e.key === "Escape" && r.isOpen) { e.preventDefault(); r.onClose(); return; }
+      if (r.isOpen && r.onSelectTab && /^[1-5]$/.test(e.key)) {
         e.preventDefault();
-        tabRef.current(parseInt(e.key, 10) - 1);
+        r.onSelectTab(parseInt(e.key, 10) - 1);
       }
     };
     window.addEventListener("keydown", handler);
@@ -231,82 +499,210 @@ export function useMainPanelHotkeys(
   }, []);
 }
 
-/** Exported so callers can wire [1-8] hotkeys to setActive. */
-export const MAIN_PANEL_KEYS: PanelKey[] = PANELS.map((p) => p.key);
+// ─── Sub-views ─────────────────────────────────────────────────────────────────
 
-// ─── Sub-panels ────────────────────────────────────────────────────────────────
+function EquipmentTab({
+  character, selectedRace, setSelectedRace, equipped, onSlotClick, stats,
+  onSlotHover, onSlotMove, onSlotLeave,
+}: {
+  character: CharSummary;
+  selectedRace: RaceId; setSelectedRace: (r: RaceId) => void;
+  equipped: Partial<Record<SlotName, AnyItem>>;
+  onSlotClick: (s: SlotName) => void;
+  stats: { damage: number; defense: number; health: number; crit: number; block: number; speed: number };
+  onSlotHover: (it: AnyItem, e: MouseEvent, hint?: string) => void;
+  onSlotMove: (e: MouseEvent) => void;
+  onSlotLeave: () => void;
+}) {
+  const rm = RACE_META[selectedRace];
+  const [glbSrc, setGlbSrc] = useState<string>(SPEC_GLB(selectedRace));
+  // Token guards stale model-viewer onError firing AFTER a newer race was chosen.
+  const raceTokenRef = useRef(selectedRace);
+  useEffect(() => {
+    raceTokenRef.current = selectedRace;
+    setGlbSrc(SPEC_GLB(selectedRace));
+  }, [selectedRace]);
+  const onModelError = (race: RaceId) => () => {
+    if (raceTokenRef.current !== race) return;
+    setGlbSrc(KAYKIT_GLB(RACE_FALLBACK_KAYKIT[race]));
+  };
 
-function EquipmentPanel({
-  character, skillsData, equippedWeapon, setEquippedWeapon, color,
-}: { character: CharSummary; skillsData: WeaponSkillsData | null; equippedWeapon: string; setEquippedWeapon: (s: string) => void; color: string }) {
-  const slots = ["mainHand", "offHand", "helm", "chest", "legs", "boots", "gloves", "amulet", "ring1", "ring2"];
-  const allowed = useMemo(
-    () => (skillsData ? classWeaponList(skillsData, character.class) : []),
-    [skillsData, character.class],
-  );
   return (
-    <div className="p-4 space-y-5">
-      <div>
-        <p className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Weapon Loadout</p>
-        <div className="grid grid-cols-3 gap-2">
-          {allowed.map((w) => {
-            const active = w === equippedWeapon;
-            return (
-              <button
-                key={w}
-                onClick={() => setEquippedWeapon(w)}
-                className="rounded p-2 border text-[10px] font-serif tracking-widest uppercase transition-all"
-                style={{
-                  borderColor: active ? color : "#222226",
-                  background: active ? `${color}1a` : "#0c0c10",
-                  color: active ? color : "#9a958e",
-                }}
-              >
-                {w}
-              </button>
-            );
-          })}
-          {allowed.length === 0 && <p className="col-span-3 text-[10px] text-muted-foreground font-mono">Loading…</p>}
+    <div>
+      {/* Race pills */}
+      <div className="flex justify-center flex-wrap" style={{ gap: 6, marginBottom: 10 }}>
+        {RACE_IDS.map((id) => {
+          const m = RACE_META[id];
+          const a = id === selectedRace;
+          return (
+            <button
+              key={id}
+              onClick={() => setSelectedRace(id)}
+              style={{
+                border: `2px solid ${a ? m.color : THEME.border}`,
+                background: a ? `${m.color}22` : "transparent",
+                color: a ? m.color : THEME.muted,
+                padding: "4px 12px", borderRadius: 16,
+                fontSize: 10, fontFamily: THEME.fontHeading, cursor: "pointer",
+                fontWeight: a ? 700 : 400, letterSpacing: 1, textTransform: "uppercase",
+                transition: "all 0.15s",
+              }}
+            >
+              {m.name}
+            </button>
+          );
+        })}
+      </div>
+
+      <p style={{ textAlign: "center", fontFamily: THEME.fontHeading, fontSize: 11, color: THEME.muted, letterSpacing: 2, textTransform: "uppercase", marginBottom: 12 }}>
+        {rm.name} · {character.class}
+      </p>
+
+      {/* 3-column equipment layout */}
+      <div className="flex items-stretch" style={{ minHeight: 420 }}>
+        <div className="flex flex-col justify-center" style={{ gap: 6, padding: "8px 6px", width: 92, flexShrink: 0 }}>
+          {ARMOR_SLOTS.map((s) => (
+            <EqSlot key={s} name={s} item={equipped[s]} onClick={() => equipped[s] && onSlotClick(s)} onHover={onSlotHover} onMove={onSlotMove} onLeave={onSlotLeave} />
+          ))}
+        </div>
+
+        <div
+          className="flex-1 flex flex-col items-center justify-center"
+          style={{
+            background: `radial-gradient(ellipse at center, ${rm.color}10 0%, transparent 70%)`,
+            borderLeft: `1px solid ${THEME.goldDim}`, borderRight: `1px solid ${THEME.goldDim}`, minWidth: 180,
+          }}
+        >
+          <div style={{ fontFamily: THEME.fontDisplay, fontSize: 16, color: rm.color, letterSpacing: 1 }}>{rm.name}</div>
+          <div style={{ fontSize: 9, color: THEME.muted, textTransform: "uppercase", letterSpacing: 2, margin: "2px 0 8px" }}>
+            {rm.display} · {rm.faction}
+          </div>
+          <div
+            style={{
+              width: 200, height: 280, borderRadius: 8, overflow: "hidden",
+              border: `2px solid ${rm.color}55`,
+              background: "linear-gradient(180deg,rgba(30,20,12,0.95),rgba(20,14,8,0.8))",
+              position: "relative",
+            }}
+          >
+            {/* model-viewer custom element with KayKit fallback on error */}
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            {(() => {
+              const MV: any = "model-viewer";
+              return (
+                <MV
+                  src={glbSrc}
+                  alt={rm.name}
+                  auto-rotate
+                  camera-controls
+                  interaction-prompt="none"
+                  ar-status="not-presenting"
+                  camera-orbit="0deg 80deg 2.4m"
+                  min-camera-orbit="auto auto 1.5m"
+                  max-camera-orbit="auto auto 4m"
+                  exposure="0.9"
+                  style={{ width: "100%", height: "100%", background: "transparent" }}
+                  onError={onModelError(selectedRace)}
+                />
+              );
+            })()}
+          </div>
+          <div style={{ fontSize: 8, color: THEME.dim, marginTop: 6 }}>Mount: {rm.mount}</div>
+        </div>
+
+        <div className="flex flex-col justify-center" style={{ gap: 6, padding: "8px 6px", width: 92, flexShrink: 0 }}>
+          {[...WEAPON_SLOTS, ...JEWELRY_SLOTS].map((s) => (
+            <EqSlot key={s} name={s} item={equipped[s]} onClick={() => equipped[s] && onSlotClick(s)} onHover={onSlotHover} onMove={onSlotMove} onLeave={onSlotLeave} />
+          ))}
         </div>
       </div>
 
-      <div>
-        <p className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground mb-2">Slots</p>
-        <div className="space-y-1.5">
-          {slots.map((s) => {
-            const id = character.equipment?.[s];
-            return (
-              <div key={s} className="flex items-center gap-2 p-2 rounded border" style={{ borderColor: "#222226", background: "#0c0c10" }}>
-                <div className="w-7 h-7 rounded bg-black/60 border border-white/10 flex items-center justify-center text-[9px] uppercase font-mono text-muted-foreground shrink-0">
-                  {s.slice(0, 2)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[9px] font-serif tracking-widest text-muted-foreground uppercase">{s}</p>
-                  <p className="text-xs font-serif truncate" style={{ color: id ? color : "#5a554f" }}>{id || "— empty —"}</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      {/* Stat summary */}
+      <div
+        className="flex justify-center flex-wrap"
+        style={{ gap: 12, marginTop: 14, padding: 10, background: "rgba(0,0,0,0.2)", borderRadius: 8, border: `1px solid ${THEME.goldDim}` }}
+      >
+        <SumStat label="Damage" v={stats.damage} />
+        <SumStat label="Defense" v={stats.defense} />
+        <SumStat label="Health" v={stats.health} />
+        <SumStat label="Crit" v={`${stats.crit}%`} />
+        <SumStat label="Block" v={`${stats.block}%`} />
+        <SumStat label="Speed" v={stats.speed.toFixed(1)} />
       </div>
+
+      <p style={{ textAlign: "center", marginTop: 10, fontSize: 10, color: THEME.dim }}>
+        Click an inventory item to equip · Click an equipped slot to unequip
+      </p>
     </div>
   );
 }
 
-function AttributePanel({ character, color }: { character: CharSummary; color: string }) {
+function EqSlot({
+  name, item, onClick, onHover, onMove, onLeave,
+}: {
+  name: SlotName; item: AnyItem | undefined; onClick: () => void;
+  onHover: (it: AnyItem, e: MouseEvent, hint?: string) => void;
+  onMove: (e: MouseEvent) => void; onLeave: () => void;
+}) {
+  const tier = item?.tier ?? 0;
+  const tc = item ? TIER_COLORS[tier] ?? THEME.border : THEME.border;
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={item ? (e) => onHover(item, e, "Click to unequip") : undefined}
+      onMouseMove={item ? onMove : undefined}
+      onMouseLeave={item ? onLeave : undefined}
+      style={{
+        width: 76, height: 76,
+        border: `2px solid ${item ? tc : THEME.goldDim}`,
+        borderRadius: 8,
+        background: item
+          ? `linear-gradient(180deg, ${tc}22 0%, #221710 100%)`
+          : "linear-gradient(180deg, #2e1f14 0%, #221710 100%)",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        cursor: item ? "pointer" : "default", fontSize: 8, color: THEME.muted,
+        textTransform: "uppercase", position: "relative",
+        boxShadow: "inset 0 2px 4px rgba(0,0,0,0.4)",
+        transition: "all 0.2s", padding: 0,
+      }}
+    >
+      {item ? (
+        <>
+          {item.iconUrl ? (
+            <img src={item.iconUrl} alt={item.name} style={{ width: 48, height: 48, objectFit: "contain", imageRendering: "pixelated", filter: "drop-shadow(0 0 4px rgba(212,175,55,0.3))" }} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+          ) : (
+            <span style={{ fontSize: 26 }}>{SLOT_ICONS[name]}</span>
+          )}
+          <span style={{ position: "absolute", top: 2, right: 3, fontSize: 7, fontWeight: 700, padding: "1px 4px", borderRadius: 3, background: tc, color: "#000" }}>T{tier}</span>
+        </>
+      ) : (
+        <>
+          <span style={{ fontSize: 20, opacity: 0.18, marginBottom: 2 }}>{SLOT_ICONS[name]}</span>
+          <span style={{ fontSize: 7, color: THEME.dim, letterSpacing: 1 }}>{name}</span>
+        </>
+      )}
+    </button>
+  );
+}
+
+function AttributesTab({ character }: { character: CharSummary }) {
   const entries = Object.entries(character.attributes ?? {});
   return (
-    <div className="p-4 space-y-3">
-      <p className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground">Allocated Attributes</p>
-      {entries.length === 0 && <p className="text-xs text-muted-foreground font-mono">None recorded.</p>}
+    <div>
+      <SectionTitle>Character Attributes</SectionTitle>
+      <div className="flex items-center" style={{ gap: 12, padding: "10px 0" }}>
+        <span style={{ fontSize: 11, color: THEME.muted }}>Available Points:</span>
+        <span style={{ fontFamily: THEME.fontMono, fontSize: 14, color: THEME.gold, fontWeight: 700 }}>20</span>
+      </div>
+      {entries.length === 0 && <p style={{ fontSize: 11, color: THEME.muted }}>No attributes recorded.</p>}
       {entries.map(([k, v]) => (
-        <div key={k} className="space-y-1">
-          <div className="flex justify-between text-xs">
-            <span className="font-serif tracking-widest uppercase">{k}</span>
-            <span className="font-mono" style={{ color }}>{v}</span>
+        <div key={k} className="mb-2" style={{ background: "linear-gradient(180deg, #221710 0%, #1a120c 100%)", border: `2px solid ${THEME.border}`, borderLeft: `3px solid ${THEME.gold}`, borderRadius: 8, padding: 12 }}>
+          <div className="flex items-center justify-between">
+            <span style={{ fontFamily: THEME.fontHeading, fontSize: 13, color: THEME.goldLight, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>{k}</span>
+            <span style={{ fontFamily: THEME.fontMono, fontSize: 14, color: THEME.gold, fontWeight: 700 }}>{v}</span>
           </div>
-          <div className="h-1.5 bg-black/50 rounded-sm overflow-hidden">
-            <div className="h-full rounded-sm" style={{ width: `${Math.min(100, v * 8)}%`, background: color }} />
+          <div style={{ height: 6, background: "rgba(0,0,0,0.4)", borderRadius: 3, marginTop: 6, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${Math.min(100, Number(v) * 5)}%`, background: `linear-gradient(90deg, ${THEME.goldDark}, ${THEME.gold})` }} />
           </div>
         </div>
       ))}
@@ -314,81 +710,149 @@ function AttributePanel({ character, color }: { character: CharSummary; color: s
   );
 }
 
-function SkillTreePanel({ character, color }: { character: CharSummary; color: string }) {
-  const BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
-  // Map class → which icon pack to feature
-  const classMap: Record<string, string> = {
-    mage: "FireMage_Free", warrior: "EarthMage_Free", ranger: "Hunter_Free", worge: "Necromancer_Free",
-  };
-  const pack = classMap[character.class.toLowerCase()] ?? "EarthMage_Free";
-  // Hardcoded short icon list (icons we copied via skill-tree zip).
-  // Rather than fetch a directory listing, sample known filenames from `contact-sheets`.
-  const sample = ["mage-mana-shield.png"];
+function SkillsTab(_: { character: CharSummary }) {
   return (
-    <div className="p-4 space-y-3">
-      <p className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground">Skill Tree — {pack.replace("_Free", "")}</p>
-      <img
-        src={`${BASE}/icons/skilltree/${pack}-sheet.png`}
-        alt={pack}
-        className="w-full rounded border"
-        style={{ borderColor: `${color}33`, background: "#0a0a0c" }}
-        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-      />
-      <div className="grid grid-cols-5 gap-2">
-        {sample.map((s) => (
-          <img key={s} src={`${BASE}/icons/skilltree/${s}`} alt={s}
-            className="aspect-square rounded border object-contain" style={{ borderColor: `${color}33`, background: "#0a0a0c" }}
-            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-        ))}
-      </div>
-      <p className="text-[10px] text-muted-foreground font-mono">Full tree editor coming.</p>
+    <div>
+      <SectionTitle>Skill Trees</SectionTitle>
+      <p style={{ fontSize: 11, color: THEME.muted }}>Class skill trees and weapon skills load from R2. Detailed editor coming next.</p>
     </div>
   );
 }
 
-function ClassSkillPanel({ skillsData, equippedWeapon, color }: { skillsData: WeaponSkillsData | null; equippedWeapon: string; color: string }) {
-  if (!skillsData) return <div className="p-4 text-xs text-muted-foreground font-mono">Loading weapon skills…</div>;
-  const def: WeaponTypeDef | undefined = skillsData.weaponTypes[equippedWeapon];
-  if (!def) return <div className="p-4 text-xs text-muted-foreground font-mono">No data for {equippedWeapon}.</div>;
+function CraftingTab() {
   return (
-    <div className="p-4 space-y-4">
-      <div>
-        <p className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground">Weapon Skills</p>
-        <p className="font-serif text-base tracking-widest uppercase" style={{ color }}>{def.name}</p>
+    <div>
+      <SectionTitle>Crafting</SectionTitle>
+      <p style={{ fontSize: 11, color: THEME.muted }}>Recipe browser coming next. Pulls from <span style={{ fontFamily: THEME.fontMono, color: THEME.gold }}>master-recipes.json</span> when published.</p>
+    </div>
+  );
+}
+
+function QuestsTab() {
+  return (
+    <div>
+      <SectionTitle>Active Quests</SectionTitle>
+      <p style={{ fontSize: 11, color: THEME.muted }}>No active quests. Connect to the Grudge backend to surface live objectives.</p>
+    </div>
+  );
+}
+
+// ─── Small UI atoms ────────────────────────────────────────────────────────────
+
+function SectionTitle({ children, style }: { children: ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div
+      style={{
+        fontFamily: THEME.fontHeading, fontSize: 12, color: THEME.gold,
+        textTransform: "uppercase", letterSpacing: 1, margin: "10px 0 10px",
+        paddingLeft: 10, borderLeft: `3px solid ${THEME.gold}`,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function StatRow({ k, v, positive }: { k: string; v: string; positive?: boolean }) {
+  return (
+    <div className="flex justify-between" style={{ padding: "4px 0", fontSize: 12, borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+      <span style={{ color: THEME.muted, fontWeight: 600 }}>{k}</span>
+      <span style={{ fontFamily: THEME.fontMono, fontSize: 11, color: positive ? THEME.green : THEME.text }}>{v}</span>
+    </div>
+  );
+}
+
+function SumStat({ label, v }: { label: string; v: number | string }) {
+  return (
+    <div style={{ textAlign: "center", minWidth: 56 }}>
+      <div style={{ fontFamily: THEME.fontMono, fontSize: 13, fontWeight: 700, color: THEME.green }}>{v}</div>
+      <div style={{ fontSize: 8, color: THEME.dim, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</div>
+    </div>
+  );
+}
+
+function HotSlot({ num, kind }: { num: number; kind: "skill" | "consumable" }) {
+  return (
+    <div
+      style={{
+        width: 44, height: 44, borderRadius: 6,
+        border: `2px solid ${kind === "skill" ? "#4a3520" : "#2a3520"}`,
+        background: "#2a1e14", display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 9, color: THEME.dim, position: "relative", cursor: "pointer",
+      }}
+    >
+      <span style={{ position: "absolute", top: 2, left: 4, fontSize: 8, color: THEME.muted, fontFamily: THEME.fontMono }}>{num}</span>
+    </div>
+  );
+}
+
+function Tooltip({ item, x, y, hint }: { item: AnyItem; x: number; y: number; hint?: string }) {
+  const tier = item.tier ?? 1;
+  const tc = TIER_COLORS[tier];
+  const tl = TIER_LABELS[tier];
+  const W = 320;
+  const left = x + W + 16 > window.innerWidth ? x - W - 16 : x + 16;
+  const top = Math.max(8, Math.min(y + 16, window.innerHeight - 420));
+  return (
+    <div
+      style={{
+        position: "fixed", left, top, zIndex: 9999, width: W, maxHeight: 480, overflowY: "auto",
+        background: "linear-gradient(180deg, hsl(225 25% 14%) 0%, hsl(225 28% 10%) 50%, hsl(225 25% 8%) 100%)",
+        border: `2px solid ${tc}`, borderRadius: 8, padding: 14, pointerEvents: "none",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.7), 0 0 16px rgba(212,175,55,0.15)",
+        fontFamily: THEME.fontBody, color: THEME.text,
+      }}
+    >
+      <div className="flex" style={{ gap: 12, alignItems: "flex-start", marginBottom: 10 }}>
+        <div style={{ width: 52, height: 52, borderRadius: 8, border: `2px solid ${tc}`, background: `linear-gradient(135deg,${tc}33,rgba(0,0,0,0.3))`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+          {item.iconUrl ? <img src={item.iconUrl} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 24 }}>{SLOT_ICONS[(item.slotType as SlotName) ?? "Mainhand"] ?? "◻"}</span>}
+        </div>
+        <div>
+          <div style={{ fontFamily: THEME.fontHeading, fontSize: 14, fontWeight: 700, color: tc, letterSpacing: 0.5 }}>{item.name}</div>
+          <div style={{ color: THEME.muted, fontSize: 10, marginTop: 2, textTransform: "uppercase", letterSpacing: 1 }}>
+            {item.type ?? ""}{item.category ? ` · ${item.category}` : ""}
+          </div>
+          <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 3, fontSize: 9, fontWeight: 700, marginTop: 4, background: tc, color: "#000" }}>{tl} — T{tier}</span>
+        </div>
       </div>
-      {def.slots.map((slot) => (
-        <div key={slot.type} className="space-y-2">
-          <p className="text-[10px] font-mono tracking-[0.3em] uppercase text-muted-foreground">{slot.label} · unlock t{slot.unlockTier}</p>
-          <div className="space-y-1.5">
-            {slot.skills.map((s: WeaponSkill) => (
-              <div key={s.id} className="p-2 rounded border" style={{ borderColor: `${color}22`, background: "#0a0a0c" }}>
-                <div className="flex justify-between items-baseline">
-                  <span className="font-serif text-xs" style={{ color }}>{s.name}</span>
-                  <span className="text-[9px] font-mono text-muted-foreground">
-                    T{s.tier} · {s.damage} dmg · {s.cooldown}s
-                  </span>
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-0.5">{s.description}</p>
-                {s.effects?.length > 0 && (
-                  <p className="text-[9px] font-mono mt-1" style={{ color: `${color}99` }}>
-                    {s.effects.join(" · ")}
-                  </p>
-                )}
+      {item.stats && Object.keys(item.stats).length > 0 && (
+        <Section title="Stats">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+            {Object.entries(item.stats).map(([k, v]) => (
+              <div key={k} style={{ background: "rgba(0,0,0,0.3)", padding: "4px 8px", borderRadius: 4, borderLeft: `2px solid ${THEME.green}` }}>
+                <div style={{ fontSize: 8, color: THEME.dim, textTransform: "uppercase" }}>{k.replace(/([A-Z])/g, " $1").trim()}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: THEME.green, fontFamily: THEME.fontMono }}>+{v}</div>
               </div>
             ))}
           </div>
-        </div>
-      ))}
+        </Section>
+      )}
+      {item.abilities && item.abilities.length > 0 && (
+        <Section title="Abilities">
+          {item.abilities.map((a, i) => <div key={i} style={{ padding: "3px 0", fontSize: 10, borderBottom: "1px solid rgba(255,255,255,0.03)" }}>⚡ {a}</div>)}
+        </Section>
+      )}
+      {(item.lore || item.description) && (
+        <Section title="Lore">
+          <p style={{ fontStyle: "italic", color: THEME.dim, fontSize: 10, lineHeight: 1.4 }}>“{item.lore ?? item.description}”</p>
+        </Section>
+      )}
+      {(item.uuid || item.id) && (
+        <div style={{ fontFamily: THEME.fontMono, fontSize: 8, color: THEME.dim, marginTop: 8, wordBreak: "break-all" }}>{item.uuid ?? item.id}</div>
+      )}
+      {hint && (
+        <div style={{ fontSize: 9, color: THEME.gold, marginTop: 8, textAlign: "center", padding: 4, background: "rgba(212,175,55,0.08)", borderRadius: 4 }}>{hint}</div>
+      )}
     </div>
   );
 }
 
-function StubPanel({ title, hint, color }: { title: string; hint: string; color: string }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="p-6 flex flex-col items-center justify-center text-center h-full gap-3">
-      <p className="font-serif text-sm tracking-widest uppercase" style={{ color }}>{title}</p>
-      <p className="text-xs text-muted-foreground font-serif max-w-xs">{hint}</p>
-      <p className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground/60 mt-3">— Coming soon —</p>
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(212,175,55,0.15)" }}>
+      <div style={{ fontSize: 8, textTransform: "uppercase", color: THEME.dim, letterSpacing: 1, marginBottom: 6, fontWeight: 700 }}>{title}</div>
+      {children}
     </div>
   );
 }

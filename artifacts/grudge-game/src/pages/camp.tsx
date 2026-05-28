@@ -33,10 +33,10 @@ class CampErrorBoundary extends Component<{ children: ReactNode }, { hasError: b
 }
 
 const STATION_TO_PANEL: Partial<Record<CampStationId, PanelKey>> = {
-  anvil: "craft",
-  skills: "skillTree",
-  stats: "attribute",
-  quests: "quest",
+  anvil: "crafting",
+  skills: "skills",
+  stats: "attributes",
+  quests: "quests",
   stash: "equipment",
 };
 
