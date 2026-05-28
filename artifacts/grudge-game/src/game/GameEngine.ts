@@ -166,6 +166,7 @@ export class GameEngine {
     this.loader = new GLTFLoader();
 
     this.buildDungeon();
+    this.loadEnvironment();
     this.setupLighting();
     this.loadPlayerModel(stats.charClass);
     this.spawnInitialEnemies();
@@ -178,24 +179,9 @@ export class GameEngine {
   private buildDungeon() {
     const D = this.DUNGEON;
 
-    const mats = [
-      new THREE.MeshStandardMaterial({ color: 0x181618, roughness: 0.95 }),
-      new THREE.MeshStandardMaterial({ color: 0x111013, roughness: 1.0 }),
-      new THREE.MeshStandardMaterial({ color: 0x1a0f0f, roughness: 0.9 }),
-    ];
-    const tileGeo = new THREE.BoxGeometry(1, 0.12, 1);
-
-    for (let x = -D; x <= D; x++) {
-      for (let z = -D; z <= D; z++) {
-        const n = Math.sin(x * 5.3 + z * 7.1) * Math.sin(x * 2.7 + z * 4.3);
-        const mat = n > 0.3 ? mats[2] : (x + z) % 2 === 0 ? mats[0] : mats[1];
-        const tile = new THREE.Mesh(tileGeo, mat);
-        tile.position.set(x, -0.06, z);
-        tile.receiveShadow = true;
-        this.scene.add(tile);
-      }
-    }
-
+    // Invisible click plane — covers the playable area for click-to-move
+    // raycasting. The visible dungeon geometry is loaded asynchronously in
+    // `loadEnvironment()` (forge-scene.glb) on top of this plane.
     const clickPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(D * 2, D * 2),
       new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
@@ -205,38 +191,6 @@ export class GameEngine {
     this.scene.add(clickPlane);
     this.floorPlane = clickPlane;
 
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 1 });
-    const wallH = 4.5;
-    const walls: [number, number, number, number][] = [
-      [0, D + 0.5, D * 2 + 1, 1],
-      [0, -D - 0.5, D * 2 + 1, 1],
-      [D + 0.5, 0, 1, D * 2 + 2],
-      [-D - 0.5, 0, 1, D * 2 + 2],
-    ];
-    for (const [wx, wz, ww, wl] of walls) {
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(ww, wallH, wl), wallMat);
-      wall.position.set(wx, wallH / 2, wz);
-      wall.castShadow = true;
-      wall.receiveShadow = true;
-      this.scene.add(wall);
-    }
-
-    const pillarMat = new THREE.MeshStandardMaterial({ color: 0x0d0c0e, roughness: 0.9 });
-    const pillarPositions = [
-      [-7, -7], [7, -7], [-7, 7], [7, 7],
-      [0, -10], [0, 10], [-10, 0], [10, 0],
-    ];
-    for (const [px, pz] of pillarPositions) {
-      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.9, 4.5, 0.9), pillarMat);
-      pillar.position.set(px, 2.25, pz);
-      pillar.castShadow = true;
-      pillar.receiveShadow = true;
-      this.scene.add(pillar);
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.3, 1.1), pillarMat);
-      cap.position.set(px, 4.65, pz);
-      this.scene.add(cap);
-    }
-
     const ringGeo = new THREE.RingGeometry(0.3, 0.45, 24);
     const ringMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide });
     this.indicatorRing = new THREE.Mesh(ringGeo, ringMat);
@@ -244,6 +198,52 @@ export class GameEngine {
     this.indicatorRing.position.y = 0.08;
     this.indicatorRing.visible = false;
     this.scene.add(this.indicatorRing);
+  }
+
+  /**
+   * Load the forge dungeon GLB (~5.6 MB, 822 meshes, Synty SD_* asset pack)
+   * from `public/models/forge-scene.glb`, recenter its XZ bbox to the origin,
+   * scale it to fit the playable area (DUNGEON*2), drop it so the floor sits
+   * at y=0, and enable shadow casting/receiving on every mesh.
+   */
+  private loadEnvironment() {
+    const url = `${import.meta.env.BASE_URL}models/forge-scene.glb`;
+    this.loader.load(
+      url,
+      (gltf) => {
+        const root = gltf.scene;
+        // Measure the raw bbox so we can recenter + scale uniformly.
+        const bbox = new THREE.Box3().setFromObject(root);
+        const size = new THREE.Vector3(); bbox.getSize(size);
+        const center = new THREE.Vector3(); bbox.getCenter(center);
+
+        // Fit the longer XZ extent into the playable square (DUNGEON*2 * 0.95
+        // leaves a small margin against the walls of the click plane).
+        const targetExtent = this.DUNGEON * 2 * 0.95;
+        const longestXZ = Math.max(size.x, size.z) || 1;
+        const scale = targetExtent / longestXZ;
+
+        root.scale.setScalar(scale);
+        // After scaling, recenter so (cx, cz) lands at origin and floor sits at y≈0.
+        root.position.set(-center.x * scale, -bbox.min.y * scale, -center.z * scale);
+
+        root.traverse((child) => {
+          const m = child as THREE.Mesh;
+          if (m.isMesh) {
+            m.castShadow = true;
+            m.receiveShadow = true;
+          }
+        });
+
+        this.scene.add(root);
+      },
+      undefined,
+      (err) => {
+        // Non-fatal: gameplay still works on the invisible click plane.
+        // eslint-disable-next-line no-console
+        console.warn("[GameEngine] forge-scene.glb failed to load:", err);
+      },
+    );
   }
 
   private setupLighting() {
