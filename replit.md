@@ -75,6 +75,40 @@ Browser-based isometric ARPG — forge a warlord, enter the dungeon, fight real 
 - Character GLB URL: `${OBJECTSTORE_BASE}/models/characters/kaykit/${ModelName}.glb`
 - Available confirmed GLBs: Knight, Mage, Ranger, Barbarian
 
+## KayKit portrait meshes (toggleable visibility)
+
+Each character GLB is a single skinned skeleton with named meshes. The
+portrait (`PortraitCanvas` + `computeHiddenMeshes`) shows the body always and
+hides cosmetic meshes when the matching slot is empty. Mesh names are NOT
+shared across classes — every name is class-prefixed in the manifest at
+`artifacts/grudge-game/src/data/characterMeshes.ts`.
+
+| Class → GLB | Body meshes (always on)                       | Optional (slot-gated)        |
+| ----------- | --------------------------------------------- | ---------------------------- |
+| warrior → Knight    | Head, Body, ArmLeft, ArmRight, LegLeft, LegRight | Helmet+HelmetVisor (Helm), Cape (Relic) |
+| mage → Mage         | Head, Body, ArmLeft, ArmRight, LegLeft, LegRight | Hat (Helm), Cape (Relic)               |
+| ranger → Ranger     | Head, Body, ArmLeft, ArmRight, LegLeft, LegRight | Cape (Relic), Quiver (ranged Mainhand) |
+| worge → Barbarian   | Head, Body, ArmLeft, ArmRight, LegLeft, LegRight | BearHat (Helm)                         |
+
+Mesh counts per GLB: Knight=9, Mage=8, Ranger=8, Barbarian=7. The class →
+model map is in `CLASS_TO_MODEL` (race is fallback only via `RACE_TO_MODEL`).
+
+## T0 Starter Loadout
+
+Every new warlord spawns with (`src/data/starterGear.ts` → `starterLoadout`):
+
+- **Class weapon (T0)** — Iron Shortsword (warrior), Apprentice Staff (mage), Hunter's Shortbow (ranger), Knotted Club (worge)
+- **Worn Hatchet** 🪓 — gather wood (tool, no CD)
+- **Worn Pickaxe** ⛏ — gather stone/ore (tool, no CD)
+- **Lesser Healing Potion** 🧪 ×2 — restores 60 HP, 30 s CD per use
+- **Hearthstone** 🔥 — 8-second channel to recall to bound camp, 30 min CD (1.8M ms)
+
+Cooldowns are tracked in `localStorage` keyed by character id via
+`startCooldown(charId, itemId, ms)` and read with `cooldownRemaining(charId, itemId)`
+(returns ms remaining; reads the per-item expiry written by `startCooldown`).
+Consumables/utilities are auto-displayed on hotbar slots 6/7/8 by filtering
+`inventory` for `type === "consumable" || type === "utility"`.
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

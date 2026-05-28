@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type MouseEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
+import { PortraitCanvas } from "./PortraitCanvas";
+import {
+  CLASS_TO_MODEL, RACE_TO_MODEL, KAYKIT_URL, computeHiddenMeshes,
+  type KayKitModel,
+} from "@/data/characterMeshes";
+import { starterLoadout } from "@/data/starterGear";
 
 // ─── Spec-driven design tokens ─────────────────────────────────────────────────
 // Mirrors https://info.grudge-studio.com/main-panel.html theme (grudge-theme.css).
@@ -47,15 +53,7 @@ const RACE_META: Record<RaceId, { name: string; display: string; faction: string
   barbarian: { name: "Barbarian", display: "Barbarians",       faction: "Crusade", color: "#c9a04e", mount: "Warhorse" },
 };
 
-// Asset CDNs (spec primary 404s right now → KayKit fallback always wins).
-const SPEC_GLB = (race: RaceId) =>
-  `https://assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters/${race}.glb`;
-const KAYKIT_GLB = (model: "Knight" | "Mage" | "Ranger" | "Barbarian") =>
-  `https://molochdagod.github.io/ObjectStore/models/characters/kaykit/${model}.glb`;
-const RACE_FALLBACK_KAYKIT: Record<RaceId, "Knight" | "Mage" | "Ranger" | "Barbarian"> = {
-  human: "Knight", elf: "Ranger", dwarf: "Barbarian",
-  orc: "Barbarian", undead: "Mage", barbarian: "Barbarian",
-};
+// Portrait model resolution + asset URLs live in `@/data/characterMeshes`.
 
 const ARMOR_SLOTS = ["Helm", "Shoulder", "Chest", "Hands", "Feet", "Relic"] as const;
 const WEAPON_SLOTS = ["Mainhand", "Offhand"] as const;
@@ -102,15 +100,17 @@ interface Props {
   onActiveTabChange?: (k: PanelKey) => void;
 }
 
-// Loose item shape — matches both R2 weapons.json and armor.json.
+// Loose item shape — matches R2 weapons.json + armor.json AND our T0 starter
+// items (which add glyph/count/cooldownMs for tools, consumables, utilities).
 interface AnyItem {
   id?: string;
   uuid?: string;
   name: string;
-  type?: string;
+  type?: string;          // "weapon" | "armor" | "tool" | "consumable" | "utility"
   category?: string;
-  tier?: number;
+  tier?: number;          // 0..8 (0 = starter)
   iconUrl?: string;
+  glyph?: string;         // emoji fallback for items without iconUrl
   slotType?: string;
   material?: string;
   description?: string;
@@ -118,6 +118,8 @@ interface AnyItem {
   stats?: Record<string, number>;
   abilities?: string[];
   passives?: string[];
+  count?: number;         // stack count for consumables
+  cooldownMs?: number;    // intrinsic cooldown for usable items
 }
 
 // ─── Data fetcher (uses our R2-backed /api/gamedata; matches spec fall-through) ─
@@ -178,12 +180,28 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
     return () => { live = false; };
   }, []);
 
-  // Demo equipped state — keyed by SlotName. Auto-fills T1 pieces once data loads.
+  // Equipped slots + inventory. Inventory is seeded with the T0 starter loadout
+  // (class weapon + hatchet + pickaxe + 2× lesser healing potion + hearthstone)
+  // immediately on mount, so a freshly-created warlord always has tools/portal.
+  // Once R2 master data loads we top up the inventory with a handful of T1/T2
+  // demo items so the panel has interesting things to equip.
   const [equipped, setEquipped] = useState<Partial<Record<SlotName, AnyItem>>>({});
-  const [inventory, setInventory] = useState<AnyItem[]>([]);
+  const [inventory, setInventory] = useState<AnyItem[]>(() => starterLoadout(character.class));
+
+  // If the character identity changes (different warlord opened), reset to
+  // their own starter loadout instead of carrying state across characters.
+  const characterKey = `${character.name}::${character.class}`;
+  const seededKeyRef = useRef<string>(characterKey);
+  useEffect(() => {
+    if (seededKeyRef.current === characterKey) return;
+    seededKeyRef.current = characterKey;
+    setInventory(starterLoadout(character.class));
+    setEquipped({});
+  }, [characterKey, character.class]);
 
   useEffect(() => {
     if (!data) return;
+    // Demo: auto-equip a T1 set so the slots aren't all empty.
     const next: Partial<Record<SlotName, AnyItem>> = {};
     for (const s of ARMOR_SLOTS) {
       const piece = data.armor.find((i) => i.slotType === s && i.tier === 1);
@@ -193,18 +211,24 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
       const j = data.armor.find((i) => i.slotType === s && i.tier === 1);
       if (j) next[s] = j;
     }
-    const main = data.items.find((i) => i.type === "weapon" && i.tier === 1);
-    if (main) next.Mainhand = main;
-    const off = data.items.find((i) => i.type === "weapon" && i.category === "daggers" && i.tier === 1)
-      ?? data.armor.find((i) => i.slotType === "Offhand" && i.tier === 1);
-    if (off) next.Offhand = off;
-    setEquipped(next);
+    setEquipped((cur) => ({ ...next, ...cur })); // don't clobber user equips
 
-    const inv: AnyItem[] = [];
-    inv.push(...data.items.filter((i) => i.type === "weapon" && (i.tier ?? 1) <= 2).slice(0, 8));
-    inv.push(...data.armor.filter((i) => (i.tier ?? 1) === 2).slice(0, 6));
-    setInventory(inv);
-  }, [data]);
+    // Top up inventory with a few R2 samples — but never duplicate starter items.
+    // Depends on `characterKey` too so switching characters re-runs the top-up
+    // (the character-switch effect above wipes inventory to the new starter
+    // loadout, and this effect then adds R2 samples back in).
+    setInventory((cur) => {
+      const have = new Set(cur.map((i) => i.uuid ?? i.id));
+      const extras: AnyItem[] = [];
+      for (const w of data.items.filter((i) => i.type === "weapon" && (i.tier ?? 1) <= 2).slice(0, 6)) {
+        if (!have.has(w.uuid ?? w.id)) extras.push(w);
+      }
+      for (const a of data.armor.filter((i) => (i.tier ?? 1) === 2).slice(0, 4)) {
+        if (!have.has(a.uuid ?? a.id)) extras.push(a);
+      }
+      return [...cur, ...extras];
+    });
+  }, [data, characterKey]);
 
   // ─── Derived stats (spec's computeStats, simplified) ─────────────────────────
   const stats = useMemo(() => {
@@ -265,6 +289,23 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
   };
 
   const accent = factionColor ?? RACE_META[selectedRace].color;
+
+  // ─── 3D portrait: pick model by class, hide meshes by equipped slots ─────────
+  // Class drives the body (warrior→Knight, mage→Mage, …); falls back to race
+  // mapping for unknown classes, then Knight as a final default.
+  const portraitModel: KayKitModel =
+    CLASS_TO_MODEL[character.class?.toLowerCase() ?? ""] ??
+    RACE_TO_MODEL[selectedRace] ??
+    "Knight";
+  const hiddenMeshes = useMemo(() => {
+    const slots = new Set(Object.keys(equipped));
+    const hasRanged =
+      equipped.Mainhand?.category === "bows" ||
+      equipped.Mainhand?.category === "crossbows" ||
+      equipped.Offhand?.category === "bows" ||
+      equipped.Offhand?.category === "crossbows";
+    return computeHiddenMeshes(portraitModel, slots, hasRanged);
+  }, [equipped, portraitModel]);
 
   return (
     <AnimatePresence>
@@ -387,6 +428,7 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
                       selectedRace={selectedRace} setSelectedRace={setSelectedRace}
                       equipped={equipped} onSlotClick={unequip} stats={stats}
                       onSlotHover={showTip} onSlotMove={moveTip} onSlotLeave={hideTip}
+                      portraitModel={portraitModel} hiddenMeshes={hiddenMeshes}
                     />
                   )}
                   {active === "attributes" && <AttributesTab character={character} />}
@@ -434,10 +476,15 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
                       >
                         {it.iconUrl ? (
                           <img src={it.iconUrl} alt={it.name} style={{ width: "100%", height: "100%", objectFit: "contain", padding: 4, imageRendering: "pixelated" }} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                        ) : it.glyph ? (
+                          <span style={{ fontSize: 26 }}>{it.glyph}</span>
                         ) : (
                           <span style={{ fontSize: 18, opacity: 0.4 }}>{SLOT_ICONS[(it.slotType as SlotName) ?? "Mainhand"] ?? "◻"}</span>
                         )}
                         <span style={{ position: "absolute", top: 1, right: 2, fontSize: 7, fontWeight: 700, padding: "0 3px", borderRadius: 2, background: tc, color: "#000" }}>T{tier}</span>
+                        {(it.count ?? 1) > 1 && (
+                          <span style={{ position: "absolute", bottom: 1, right: 2, fontSize: 9, fontWeight: 700, padding: "0 3px", borderRadius: 2, background: "rgba(0,0,0,0.7)", color: THEME.gold }}>×{it.count}</span>
+                        )}
                       </button>
                     );
                   })}
@@ -450,9 +497,16 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
               className="flex items-center justify-center"
               style={{ padding: 6, background: "#120c06", borderTop: `2px solid ${THEME.gold}`, gap: 4, flexShrink: 0 }}
             >
-              {[1, 2, 3, 4].map((n) => <HotSlot key={n} num={n} kind="skill" />)}
+              {[1, 2, 3, 4].map((n) => <HotSlot key={n} num={n} item={undefined} kind="skill" />)}
               <div style={{ width: 2, height: 30, background: THEME.border, margin: "0 4px", borderRadius: 1 }} />
-              {[6, 7, 8].map((n) => <HotSlot key={n} num={n} kind="consumable" />)}
+              {(() => {
+                // Hotbar consumables/utilities are pulled from the inventory so the
+                // T0 hearthstone + healing potions appear without manual placement.
+                const usables = inventory.filter((i) => i.type === "consumable" || i.type === "utility").slice(0, 3);
+                return [6, 7, 8].map((n, i) => (
+                  <HotSlot key={n} num={n} item={usables[i]} kind="consumable" onHover={showTip} onMove={moveTip} onLeave={hideTip} />
+                ));
+              })()}
             </footer>
 
             {/* ── Hotkey hint ─────────────────────────────────────────────── */}
@@ -503,7 +557,7 @@ export function useMainPanelHotkeys(
 
 function EquipmentTab({
   character, selectedRace, setSelectedRace, equipped, onSlotClick, stats,
-  onSlotHover, onSlotMove, onSlotLeave,
+  onSlotHover, onSlotMove, onSlotLeave, portraitModel, hiddenMeshes,
 }: {
   character: CharSummary;
   selectedRace: RaceId; setSelectedRace: (r: RaceId) => void;
@@ -513,19 +567,10 @@ function EquipmentTab({
   onSlotHover: (it: AnyItem, e: MouseEvent, hint?: string) => void;
   onSlotMove: (e: MouseEvent) => void;
   onSlotLeave: () => void;
+  portraitModel: KayKitModel;
+  hiddenMeshes: Set<string>;
 }) {
   const rm = RACE_META[selectedRace];
-  const [glbSrc, setGlbSrc] = useState<string>(SPEC_GLB(selectedRace));
-  // Token guards stale model-viewer onError firing AFTER a newer race was chosen.
-  const raceTokenRef = useRef(selectedRace);
-  useEffect(() => {
-    raceTokenRef.current = selectedRace;
-    setGlbSrc(SPEC_GLB(selectedRace));
-  }, [selectedRace]);
-  const onModelError = (race: RaceId) => () => {
-    if (raceTokenRef.current !== race) return;
-    setGlbSrc(KAYKIT_GLB(RACE_FALLBACK_KAYKIT[race]));
-  };
 
   return (
     <div>
@@ -585,27 +630,12 @@ function EquipmentTab({
               position: "relative",
             }}
           >
-            {/* model-viewer custom element with KayKit fallback on error */}
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            {(() => {
-              const MV: any = "model-viewer";
-              return (
-                <MV
-                  src={glbSrc}
-                  alt={rm.name}
-                  auto-rotate
-                  camera-controls
-                  interaction-prompt="none"
-                  ar-status="not-presenting"
-                  camera-orbit="0deg 80deg 2.4m"
-                  min-camera-orbit="auto auto 1.5m"
-                  max-camera-orbit="auto auto 4m"
-                  exposure="0.9"
-                  style={{ width: "100%", height: "100%", background: "transparent" }}
-                  onError={onModelError(selectedRace)}
-                />
-              );
-            })()}
+            {/* Three.js portrait — hides KayKit meshes that map to empty slots */}
+            <PortraitCanvas
+              src={KAYKIT_URL(portraitModel)}
+              hiddenMeshes={hiddenMeshes}
+              accent={rm.color}
+            />
           </div>
           <div style={{ fontSize: 8, color: THEME.dim, marginTop: 6 }}>Mount: {rm.mount}</div>
         </div>
@@ -772,17 +802,37 @@ function SumStat({ label, v }: { label: string; v: number | string }) {
   );
 }
 
-function HotSlot({ num, kind }: { num: number; kind: "skill" | "consumable" }) {
+function HotSlot({
+  num, kind, item, onHover, onMove, onLeave,
+}: {
+  num: number;
+  kind: "skill" | "consumable";
+  item?: AnyItem;
+  onHover?: (it: AnyItem, e: MouseEvent, hint?: string) => void;
+  onMove?: (e: MouseEvent) => void;
+  onLeave?: () => void;
+}) {
   return (
     <div
+      onMouseEnter={item && onHover ? (e) => onHover(item, e, item.cooldownMs ? `CD ${Math.round(item.cooldownMs / 1000)}s` : undefined) : undefined}
+      onMouseMove={item && onMove ? onMove : undefined}
+      onMouseLeave={item && onLeave ? onLeave : undefined}
       style={{
         width: 44, height: 44, borderRadius: 6,
         border: `2px solid ${kind === "skill" ? "#4a3520" : "#2a3520"}`,
         background: "#2a1e14", display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 9, color: THEME.dim, position: "relative", cursor: "pointer",
+        fontSize: 9, color: THEME.dim, position: "relative", cursor: item ? "pointer" : "default",
       }}
     >
-      <span style={{ position: "absolute", top: 2, left: 4, fontSize: 8, color: THEME.muted, fontFamily: THEME.fontMono }}>{num}</span>
+      <span style={{ position: "absolute", top: 2, left: 4, fontSize: 8, color: THEME.muted, fontFamily: THEME.fontMono, zIndex: 1 }}>{num}</span>
+      {item && (
+        <>
+          <span style={{ fontSize: 22 }}>{item.glyph ?? "◻"}</span>
+          {(item.count ?? 1) > 1 && (
+            <span style={{ position: "absolute", bottom: 1, right: 3, fontSize: 9, fontWeight: 700, color: THEME.gold, textShadow: "0 0 2px #000" }}>×{item.count}</span>
+          )}
+        </>
+      )}
     </div>
   );
 }
