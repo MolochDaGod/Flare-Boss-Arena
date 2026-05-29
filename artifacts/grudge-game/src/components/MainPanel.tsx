@@ -7,6 +7,7 @@ import {
   type RaceId as PortraitRaceId,
 } from "@/data/characterMeshes";
 import { starterLoadout } from "@/data/starterGear";
+import { useResolvedSkills } from "@/data/skillsResolver";
 
 // ─── Spec-driven design tokens ─────────────────────────────────────────────────
 // Mirrors https://info.grudge-studio.com/main-panel.html theme (grudge-theme.css).
@@ -430,7 +431,7 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
                     />
                   )}
                   {active === "attributes" && <AttributesTab character={character} />}
-                  {active === "skills"     && <SkillsTab character={character} />}
+                  {active === "skills"     && <SkillsTab character={character} mainCategory={equipped.Mainhand?.category} />}
                   {active === "crafting"   && <CraftingTab />}
                   {active === "quests"     && <QuestsTab />}
                 </div>
@@ -739,11 +740,70 @@ function AttributesTab({ character }: { character: CharSummary }) {
   );
 }
 
-function SkillsTab(_: { character: CharSummary }) {
+function SkillsTab({ character, mainCategory }: { character: CharSummary; mainCategory?: string }) {
+  const { classSkills, weaponType, weaponSlots, isLoading } = useResolvedSkills(character.class, mainCategory);
+
   return (
     <div>
-      <SectionTitle>Skill Trees</SectionTitle>
-      <p style={{ fontSize: 11, color: THEME.muted }}>Class skill trees and weapon skills load from R2. Detailed editor coming next.</p>
+      <SectionTitle>Class Skills{classSkills ? ` — ${classSkills.name}` : ""}</SectionTitle>
+      {classSkills?.skills?.length ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 8, marginBottom: 8 }}>
+          {classSkills.skills.map((sk) => (
+            <div
+              key={sk.id}
+              style={{
+                display: "flex", gap: 8, padding: 8, borderRadius: 8,
+                background: "linear-gradient(180deg,#221710,#1a120c)",
+                border: `2px solid ${sk.isSignature ? THEME.gold : THEME.border}`,
+                borderLeft: `3px solid ${sk.isSignature ? THEME.gold : THEME.goldDark}`,
+              }}
+            >
+              <div style={{ fontSize: 22, width: 32, textAlign: "center", flexShrink: 0 }}>{sk.glyph}</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="flex items-center justify-between" style={{ gap: 6 }}>
+                  <span style={{ fontFamily: THEME.fontHeading, fontSize: 11, color: THEME.goldLight, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>{sk.name}</span>
+                  {sk.isSignature && <span style={{ fontSize: 7, color: "#000", background: THEME.gold, padding: "1px 4px", borderRadius: 3, fontWeight: 700, textTransform: "uppercase" }}>Sig</span>}
+                </div>
+                <p style={{ fontSize: 9, color: THEME.muted, lineHeight: 1.4, margin: "2px 0 0" }}>{sk.description}</p>
+                <div style={{ display: "flex", gap: 8, marginTop: 4, fontFamily: THEME.fontMono, fontSize: 8, color: THEME.dim }}>
+                  {sk.cooldown ? <span>CD {sk.cooldown}t</span> : null}
+                  {sk.manaCost ? <span style={{ color: THEME.blue }}>MP {sk.manaCost}</span> : null}
+                  {sk.staminaCost ? <span style={{ color: THEME.green }}>SP {sk.staminaCost}</span> : null}
+                  {sk.damage ? <span style={{ color: THEME.red }}>{sk.damage}x</span> : null}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p style={{ fontSize: 11, color: THEME.muted }}>No class skills recorded for this discipline.</p>
+      )}
+
+      <SectionTitle style={{ marginTop: 18 }}>
+        {weaponType ? `${weaponType.name} Skills` : "Weapon Skills"}
+      </SectionTitle>
+      {isLoading ? (
+        <p style={{ fontSize: 11, color: THEME.muted }}>Loading weapon mastery…</p>
+      ) : weaponSlots.length ? (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 8 }}>
+          {weaponSlots.map((slot) => (
+            <div key={slot.type} style={{ padding: 8, borderRadius: 8, background: THEME.card, border: `2px solid ${THEME.border}` }}>
+              <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
+                <span style={{ fontFamily: THEME.fontHeading, fontSize: 9, color: THEME.gold, textTransform: "uppercase", letterSpacing: 1 }}>{slot.label}</span>
+                <span style={{ fontFamily: THEME.fontMono, fontSize: 8, color: THEME.dim }}>T{slot.unlockTier}</span>
+              </div>
+              {slot.skills.map((sk) => (
+                <div key={sk.id} style={{ display: "flex", justifyContent: "space-between", gap: 6, padding: "2px 0", borderTop: `1px solid rgba(255,255,255,0.03)` }}>
+                  <span style={{ fontSize: 10, color: THEME.text, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sk.name}</span>
+                  <span style={{ fontFamily: THEME.fontMono, fontSize: 9, color: THEME.red, flexShrink: 0 }}>{sk.damage || ""}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p style={{ fontSize: 11, color: THEME.muted }}>Equip a weapon in your main hand to channel its mastery.</p>
+      )}
     </div>
   );
 }

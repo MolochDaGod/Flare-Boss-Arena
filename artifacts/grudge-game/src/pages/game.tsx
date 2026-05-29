@@ -5,6 +5,9 @@ import { GameEngine, type GameState, type EnemyTemplate, type PlayerInitStats } 
 import { Loader2, ArrowLeft, Swords, Zap, AlertTriangle, Shield, Crosshair, LayoutGrid } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type PanelKey } from "@/components/MainPanel";
+import { getSelectedSkin } from "@/data/skins";
+import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
+import { useResolvedSkills } from "@/data/skillsResolver";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
 class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -184,15 +187,26 @@ function Game() {
     );
   }, [char, classesData, weaponsData]);
 
+  // Resolve class + weapon skills for the in-game HUD skill bar.
+  const hudClass = char ? String((char as unknown as Record<string, unknown>).class ?? "warrior").toLowerCase() : null;
+  const hudMainCategory = hudClass ? CLASS_STARTER_WEAPON[hudClass]?.category : null;
+  const { classSkills: hudClassSkills, weaponSlots: hudWeaponSlots } = useResolvedSkills(hudClass, hudMainCategory);
+
   // Only start the engine once we have enemies + stats
   const ready = !!char && enemyTemplates.length > 0 && !!playerStats;
 
   useEffect(() => {
     if (!mountRef.current || !ready || !playerStats) return;
 
+    const c = char as unknown as Record<string, unknown>;
+    const charId = c.id as string | number;
+    const charClass = String(c.class ?? "warrior").toLowerCase();
+    const equipMainCategory = CLASS_STARTER_WEAPON[charClass]?.category;
+    const skinId = charId != null ? getSelectedSkin(charId) : null;
+
     const engine = new GameEngine();
     engine.onStateUpdate = handleStateUpdate;
-    engine.init(mountRef.current, playerStats, enemyTemplates);
+    engine.init(mountRef.current, { ...playerStats, skinId, equipMainCategory }, enemyTemplates);
     engineRef.current = engine;
 
     return () => {
@@ -408,6 +422,54 @@ function Game() {
           {d.isCrit ? `${d.value}!` : d.isPlayer ? `-${d.value}` : `-${d.value}`}
         </div>
       ))}
+
+      {/* Skill bar — class + weapon skills, above the action buttons */}
+      {gameState && (hudClassSkills || hudWeaponSlots.length > 0) && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 flex items-end gap-4">
+          {hudClassSkills && (
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-[9px] font-serif tracking-widest uppercase text-muted-foreground">Class · {hudClassSkills.name}</span>
+              <div className="flex gap-1.5">
+                {hudClassSkills.skills.slice(0, 5).map((s, i) => (
+                  <div
+                    key={s.id}
+                    title={`${s.name}${s.cooldown ? ` · CD ${s.cooldown}` : ""}\n${s.description}`}
+                    className="relative w-10 h-10 rounded bg-black/70 border border-primary/40 flex items-center justify-center text-lg backdrop-blur-sm hover:border-primary/80 transition-colors"
+                  >
+                    <span>{s.glyph}</span>
+                    <span className="absolute -top-1 -left-1 text-[8px] font-mono text-primary/80 bg-black/80 rounded px-0.5">{i + 1}</span>
+                    {s.isSignature && <span className="absolute -bottom-1 -right-1 text-[9px] leading-none">★</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {hudWeaponSlots.length > 0 && (
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-[9px] font-serif tracking-widest uppercase text-muted-foreground">Weapon</span>
+              <div className="flex gap-1.5">
+                {hudWeaponSlots.map((slot) => {
+                  const sk = slot.skills[0];
+                  if (!sk) return null;
+                  return (
+                    <div
+                      key={slot.type}
+                      title={`${slot.label}: ${sk.name}${sk.cooldown ? ` · CD ${sk.cooldown}` : ""}\n${sk.description}`}
+                      className="w-10 h-10 rounded bg-black/70 border border-amber-500/40 flex items-center justify-center overflow-hidden backdrop-blur-sm hover:border-amber-500/80 transition-colors"
+                    >
+                      {sk.icon ? (
+                        <img src={`https://molochdagod.github.io/ObjectStore/icons/skill_nobg/${sk.icon}`} alt={sk.name} className="w-7 h-7 object-contain" />
+                      ) : (
+                        <Swords className="w-5 h-5 text-amber-400" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Action buttons — bottom centre */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex gap-3">

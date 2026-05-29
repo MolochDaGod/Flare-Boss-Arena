@@ -3,7 +3,8 @@ import { useListCharacters, useGetCharacterSkills } from "@workspace/api-client-
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
-import { Sword, Skull, Swords, Flame, Shield, Zap, Tent } from "lucide-react";
+import { Sword, Skull, Swords, Flame, Shield, Zap, Tent, Sparkles } from "lucide-react";
+import { SKINS, getSelectedSkin, setSelectedSkin } from "@/data/skins";
 
 const FACTION_COLORS: Record<string, string> = {
   Crusade: "#d4891a",
@@ -87,6 +88,17 @@ export default function Home() {
   const { data: skills } = useGetCharacterSkills(activeChar?.id ?? 0, {
     query: { enabled: !!activeChar?.id, queryKey: ["skills", activeChar?.id] }
   });
+
+  const [skinId, setSkinId] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (activeChar?.id != null) setSkinId(getSelectedSkin(activeChar.id));
+  }, [activeChar?.id]);
+
+  const chooseSkin = (id: string | null) => {
+    if (activeChar?.id == null) return;
+    setSelectedSkin(activeChar.id, id);
+    setSkinId(id);
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -214,6 +226,46 @@ export default function Home() {
                     </div>
                   );
                 })}
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50 bg-card/50">
+              <CardHeader className="pb-3 border-b border-border/50 flex flex-row items-center gap-2">
+                <Sparkles className="w-4 h-4 text-primary" />
+                <CardTitle className="text-sm font-serif tracking-widest uppercase text-muted-foreground">Champion Skin</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6 space-y-3">
+                <p className="text-[11px] text-muted-foreground tracking-wide leading-relaxed">
+                  Override your warlord's in-world model. Skins use their own animations. Default keeps your race model.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => chooseSkin(null)}
+                    className={`px-3 py-2 rounded border text-xs font-serif tracking-widest uppercase text-left transition-colors ${
+                      skinId === null
+                        ? "border-primary/70 bg-primary/10 text-primary"
+                        : "border-border/40 bg-background/30 text-muted-foreground hover:border-border/70"
+                    }`}
+                  >
+                    Default
+                  </button>
+                  {SKINS.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => chooseSkin(s.id)}
+                      className={`px-3 py-2 rounded border text-xs font-serif tracking-wide text-left truncate transition-colors ${
+                        skinId === s.id
+                          ? "border-primary/70 bg-primary/10 text-primary"
+                          : "border-border/40 bg-background/30 text-muted-foreground hover:border-border/70"
+                      }`}
+                    >
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-muted-foreground/70 tracking-widest uppercase">
+                  Re-enter the world to apply
+                </p>
               </CardContent>
             </Card>
           </div>

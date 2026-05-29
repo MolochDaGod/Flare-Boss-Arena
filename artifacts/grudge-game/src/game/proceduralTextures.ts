@@ -104,6 +104,75 @@ export function makeGroundMaterial(repeat: number, anisotropy: number): THREE.Me
  * InstancedMesh — hundreds of props in one draw call. Returns the mesh ready to
  * add to the scene; dispose its geometry/material on teardown.
  */
+/** Cheap deterministic value-noise (hash-based) + fractal sum for terrain. */
+function hash2(x: number, z: number): number {
+  const s = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+function valueNoise(x: number, z: number): number {
+  const xi = Math.floor(x), zi = Math.floor(z);
+  const xf = x - xi, zf = z - zi;
+  const u = xf * xf * (3 - 2 * xf);
+  const v = zf * zf * (3 - 2 * zf);
+  const a = hash2(xi, zi), b = hash2(xi + 1, zi);
+  const c = hash2(xi, zi + 1), d = hash2(xi + 1, zi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm(x: number, z: number): number {
+  let amp = 0.5, freq = 1, sum = 0;
+  for (let o = 0; o < 4; o++) {
+    sum += amp * valueNoise(x * freq, z * freq);
+    freq *= 2.07;
+    amp *= 0.5;
+  }
+  return sum;
+}
+
+/**
+ * A large noise-displaced terrain "skirt" that rings the flat playable arena.
+ * The center (within `arenaHalf`) is held flat at `baseY` so gameplay stays on
+ * y≈0; displacement ramps in beyond the arena edge into rolling foothills and a
+ * distant mountain ridge. Normals are recomputed for correct lighting. Returns
+ * a ground-plane mesh (already rotated into XZ) ready to add to the scene.
+ */
+export function makeTerrainSkirt(arenaHalf: number, size = 460, seg = 220, baseY = -0.08): THREE.Mesh {
+  const geo = new THREE.PlaneGeometry(size, size, seg, seg);
+  geo.rotateX(-Math.PI / 2); // into XZ, +y up
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const half = size / 2;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    // The playable area is a SQUARE clamp (±arenaHalf), not a circle — use the
+    // Chebyshev distance so every reachable corner stays flat (a circular mask
+    // would leave the ±arenaHalf corners displaced and clipping the player).
+    const dist = Math.max(Math.abs(x), Math.abs(z));
+    let y = baseY;
+    if (dist > arenaHalf) {
+      // 0 at arena edge → 1 at outer extent (eased so the seam is gentle).
+      const t = Math.min(1, (dist - arenaHalf) / (half - arenaHalf));
+      const ramp = t * t;
+      const hills = (fbm(x * 0.03, z * 0.03) - 0.5) * 10;
+      const ridge = ramp * ramp * 46; // distant mountains
+      y = baseY + ramp * (hills + 4) + ridge;
+    }
+    pos.setY(i, y);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x2a241d,
+    roughness: 1.0,
+    metalness: 0.0,
+    flatShading: false,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  mesh.position.y = 0;
+  return mesh;
+}
+
 export function makeRockField(count: number, inner: number, outer: number): THREE.InstancedMesh {
   const geo = new THREE.DodecahedronGeometry(1, 0);
   const mat = new THREE.MeshStandardMaterial({ color: 0x3a352e, roughness: 1.0, metalness: 0.0, flatShading: true });

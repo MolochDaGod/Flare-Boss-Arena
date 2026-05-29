@@ -2,7 +2,11 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { createEnemyModel, updateEnemyAnimation, makeAnimState, type EnemyModel, type AnimState } from "./EnemyFactory";
 import { isMonsterId, loadMonsterModel, disposeMonsterModel, MONSTER_TEMPLATES } from "./MonsterModels";
-import { makeGroundMaterial, makeRockField } from "./proceduralTextures";
+import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
+import { buildOrcCamp, type CampHandle } from "./CampBuilder";
+import { PlayerAnimator, buildAuthoredClips, pickSkinClips } from "./PlayerAnimator";
+import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "../data/characterMeshes";
+import { getSkin, skinUrl, type SkinDef } from "../data/skins";
 
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
 
@@ -12,6 +16,23 @@ const CLASS_MODEL: Record<string, string> = {
   ranger:  "Ranger",
   worge:   "Barbarian",
 };
+
+/** Bounding box over only the VISIBLE meshes. `Box3.setFromObject` ignores
+ *  visibility, which would inflate the box with the race GLB's hidden wardrobe
+ *  meshes (every weapon at once) and wreck height-based scaling. */
+function visibleBox(root: THREE.Object3D): THREE.Box3 {
+  const box = new THREE.Box3();
+  root.updateWorldMatrix(true, true);
+  root.traverse((c) => {
+    const m = c as THREE.Mesh;
+    if (m.isMesh && m.visible && m.geometry) {
+      if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+      const gb = m.geometry.boundingBox;
+      if (gb) box.union(gb.clone().applyMatrix4(m.matrixWorld));
+    }
+  });
+  return box;
+}
 
 export interface EnemyTemplate {
   id: string;
@@ -76,6 +97,12 @@ export interface PlayerInitStats {
   charName: string;
   charClass: string;
   charRace: string;
+  /** Selected champion skin id (One Piece model); null/undefined → race model. */
+  skinId?: string | null;
+  /** Equipped Mainhand item category (drives race wardrobe weapon mesh). */
+  equipMainCategory?: string;
+  equipHasOffhand?: boolean;
+  equipHasShoulder?: boolean;
 }
 
 export class GameEngine {
@@ -91,6 +118,9 @@ export class GameEngine {
 
   private playerGroup: THREE.Group | null = null;
   private playerMixer: THREE.AnimationMixer | null = null;
+  private playerAnimator: PlayerAnimator | null = null;
+  private initStats!: PlayerInitStats;
+  private _camLook = new THREE.Vector3(0, 0, 0);
   private playerPos = new THREE.Vector3(0, 0, 0);
   private playerTarget: THREE.Vector3 | null = null;
   private playerSpeed = 6;
@@ -128,6 +158,8 @@ export class GameEngine {
   private sun: THREE.DirectionalLight | null = null;
   private groundMesh: THREE.Mesh | null = null;
   private rockField: THREE.InstancedMesh | null = null;
+  private terrainMesh: THREE.Mesh | null = null;
+  private camp: CampHandle | null = null;
   private hoveredEnemy: EnemyInstance | null = null;
   private hoverEmissive = new Map<THREE.MeshStandardMaterial, { hex: number; intensity: number }>();
   private _moveHandler!: (e: MouseEvent) => void;
@@ -146,6 +178,8 @@ export class GameEngine {
     this.playerCritChance = stats.critChance;
     this.playerMaxAttackCooldown = stats.attackSpeed;
     this.enemyTemplates = enemyTemplates;
+    this.initStats = stats;
+    this._camLook.copy(this.playerPos);
 
     const w = container.clientWidth;
     const h = container.clientHeight;
@@ -180,8 +214,9 @@ export class GameEngine {
 
     this.buildDungeon();
     this.loadEnvironment();
+    this.camp = buildOrcCamp(this.loader, this.scene, `${import.meta.env.BASE_URL}models/buildings/orc_camp_set.glb`);
     this.setupLighting();
-    this.loadPlayerModel(stats.charClass);
+    this.loadPlayerModel();
     this.spawnInitialEnemies();
     this.setupInput(container);
 
@@ -203,6 +238,13 @@ export class GameEngine {
     ground.receiveShadow = true;
     this.scene.add(ground);
     this.groundMesh = ground;
+
+    // Noise-displaced terrain ringing the flat arena — rolling foothills rising
+    // into a distant mountain ridge. The inner `D` half stays flat so all
+    // gameplay (player + enemies clamp to ±(D-1)) keeps walking on y≈0.
+    const terrain = makeTerrainSkirt(D);
+    this.scene.add(terrain);
+    this.terrainMesh = terrain;
 
     // Hundreds of scattered rocks in a single InstancedMesh draw call (fills
     // the now-much-larger map without tanking performance).
@@ -330,50 +372,102 @@ export class GameEngine {
     }
   }
 
-  private loadPlayerModel(charClass: string) {
-    const modelName = CLASS_MODEL[charClass?.toLowerCase()] ?? "Knight";
-    const url = `${OBJECTSTORE_BASE}/models/characters/kaykit/${modelName}.glb`;
+  private loadPlayerModel() {
+    const skin = getSkin(this.initStats.skinId);
+    if (skin) this.loadSkinModel(skin);
+    else this.loadRaceModel();
+  }
 
+  /** One Piece champion skin — fully rigged GLB, plays its own labelled clips. */
+  private loadSkinModel(skin: SkinDef) {
     this.loader.load(
-      url,
+      skinUrl(skin),
       (gltf) => {
-        this.playerGroup = gltf.scene;
-        this.playerGroup.scale.setScalar(1.05);
-        this.playerGroup.position.copy(this.playerPos);
-
-        this.playerGroup.traverse((child) => {
-          if ((child as THREE.Mesh).isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-          }
+        const model = gltf.scene;
+        model.traverse((c) => {
+          const m = c as THREE.Mesh;
+          if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; }
         });
-        this.scene.add(this.playerGroup);
-
-        if (gltf.animations.length > 0) {
-          this.playerMixer = new THREE.AnimationMixer(this.playerGroup);
-          const clip = gltf.animations.find((a) => /idle/i.test(a.name)) ?? gltf.animations[0];
-          this.playerMixer.clipAction(clip).play();
-        }
-
-        const ring = new THREE.Mesh(
-          new THREE.RingGeometry(0.55, 0.7, 32),
-          new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide })
-        );
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.y = 0.08;
-        this.playerGroup.add(ring);
-
-        this.loaded = true;
-        this.notifyState();
+        const wrapper = this.buildPlayerWrapper(model, skin.height ?? 1.9);
+        const clips = pickSkinClips(gltf.animations, skin.scheme);
+        this.finalizePlayer(wrapper, new PlayerAnimator(model, clips));
       },
       undefined,
-      () => {
-        this.playerGroup = this.buildFallbackPlayer();
-        this.scene.add(this.playerGroup);
-        this.loaded = true;
-        this.notifyState();
-      }
+      () => this.loadRaceModel(), // graceful fallback to the race model
     );
+  }
+
+  /** Grudge race model — clean Biped skeleton, ZERO clips, so we synthesise
+   *  authored idle/walk/attack clips and allow-list the equipped wardrobe. */
+  private loadRaceModel() {
+    const race = (this.initStats.charRace?.toLowerCase() || "human") as RaceId;
+    this.loader.load(
+      PORTRAIT_URL(race),
+      (gltf) => {
+        const model = gltf.scene;
+        const names: string[] = [];
+        model.traverse((c) => { if ((c as THREE.Mesh).isMesh) names.push(c.name); });
+        const visible = resolveVisibleMeshes(names, race, {
+          mainCategory: this.initStats.equipMainCategory,
+          hasOffhand: this.initStats.equipHasOffhand,
+          hasShoulder: this.initStats.equipHasShoulder,
+        }, this.initStats.charName || race);
+        model.traverse((c) => {
+          const m = c as THREE.Mesh;
+          if (m.isMesh) {
+            m.visible = visible.has(m.name);
+            m.castShadow = true;
+            m.receiveShadow = true;
+            m.frustumCulled = false; // skinned meshes vanish if culled in bind pose
+          }
+        });
+        const wrapper = this.buildPlayerWrapper(model, 1.9);
+        model.updateWorldMatrix(true, true);
+        const clips = buildAuthoredClips(model);
+        this.finalizePlayer(wrapper, new PlayerAnimator(model, clips));
+      },
+      undefined,
+      () => this.finalizePlayer(this.buildFallbackPlayer(), null),
+    );
+  }
+
+  /** Wrap a model in a group whose origin is at the model's feet, uniformly
+   *  scaled to `targetHeight` and XZ-centred. The wrapper is what we move/turn. */
+  private buildPlayerWrapper(model: THREE.Object3D, targetHeight: number): THREE.Group {
+    const wrapper = new THREE.Group();
+    model.updateWorldMatrix(true, true);
+    const box = visibleBox(model);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    if (size.y > 0.001) model.scale.setScalar(targetHeight / size.y);
+    model.updateWorldMatrix(true, true);
+    const box2 = visibleBox(model);
+    const center = new THREE.Vector3();
+    box2.getCenter(center);
+    model.position.x -= center.x;
+    model.position.z -= center.z;
+    model.position.y -= box2.min.y;
+    wrapper.add(model);
+    wrapper.updateMatrixWorld(true);
+    return wrapper;
+  }
+
+  private finalizePlayer(group: THREE.Group, animator: PlayerAnimator | null) {
+    this.playerGroup = group;
+    this.playerGroup.position.copy(this.playerPos);
+    this.playerAnimator = animator;
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.55, 0.7, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.08;
+    this.playerGroup.add(ring);
+
+    this.scene.add(this.playerGroup);
+    this.loaded = true;
+    this.notifyState();
   }
 
   private buildFallbackPlayer(): THREE.Group {
@@ -623,6 +717,8 @@ export class GameEngine {
     const dz = enemy.position.z - this.playerPos.z;
     this.playerFacing = Math.atan2(dx, dz);
 
+    this.playerAnimator?.triggerAttack();
+
     const wp = enemy.model.group.position.clone();
     wp.y += enemy.model.height * 0.7;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
@@ -757,17 +853,28 @@ export class GameEngine {
 
     if (this.playerGroup) {
       const targetPos = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z);
-      this.playerGroup.position.lerp(targetPos, 0.3);
-      this.playerGroup.rotation.y += (this.playerFacing - this.playerGroup.rotation.y) * 0.2;
+      this.playerGroup.position.lerp(targetPos, 0.35);
+      // Shortest-arc turn toward facing — avoids the long way around at ±π.
+      let dy = this.playerFacing - this.playerGroup.rotation.y;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      this.playerGroup.rotation.y += dy * 0.25;
     }
-    void playerMoving;
 
-    if (this.playerMixer) this.playerMixer.update(delta);
+    // Drive locomotion + attack animation from movement state.
+    if (this.playerAnimator) {
+      this.playerAnimator.setMoving(playerMoving);
+      this.playerAnimator.update(delta);
+    } else if (this.playerMixer) {
+      this.playerMixer.update(delta);
+    }
 
+    // Smooth follow camera — eases both position and look-at toward the player.
     const camOffset = new THREE.Vector3(18, 18, 18);
     const camTarget = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z).add(camOffset);
-    this.camera.position.lerp(camTarget, 0.07);
-    this.camera.lookAt(this.playerPos.x, 0, this.playerPos.z);
+    this.camera.position.lerp(camTarget, 0.12);
+    this._camLook.lerp(new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z), 0.15);
+    this.camera.lookAt(this._camLook);
 
     // Sun + shadow rig tracks the player so shadows stay sharp across the big map.
     if (this.sun) {
@@ -930,6 +1037,7 @@ export class GameEngine {
       }
     }
     this.clearHover();
+    this.playerAnimator?.dispose();
     // Dispose the procedural ground + rock field.
     if (this.groundMesh) {
       this.groundMesh.geometry.dispose();
@@ -938,6 +1046,11 @@ export class GameEngine {
       gm.bumpMap?.dispose();
       gm.dispose();
     }
+    if (this.terrainMesh) {
+      this.terrainMesh.geometry.dispose();
+      (this.terrainMesh.material as THREE.Material).dispose();
+    }
+    this.camp?.dispose();
     if (this.rockField) {
       this.rockField.geometry.dispose();
       (this.rockField.material as THREE.Material).dispose();

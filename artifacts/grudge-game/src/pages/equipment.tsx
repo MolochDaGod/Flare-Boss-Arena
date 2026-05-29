@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useListCharacters, useGetWeapons, useGetArmor, useEquipItem } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, Sword, Shield as ShieldIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
+import { categoryToWeaponType } from "@/data/skillsResolver";
+import { fetchWeaponSkills, type WeaponSkillsData } from "@/game/weaponSkills";
 
 const OBJECTSTORE = "https://molochdagod.github.io/ObjectStore";
 
@@ -151,6 +153,17 @@ function flattenArmor(data: unknown): ArmorItem[] {
   return all;
 }
 
+/** Names of the skills a weapon category grants (primary slot first). */
+function weaponGrantedSkills(data: WeaponSkillsData | null, catKey: string): string[] {
+  if (!data) return [];
+  const key = categoryToWeaponType(catKey);
+  if (!key) return [];
+  const wt = data.weaponTypes?.[key];
+  if (!wt) return [];
+  const primary = wt.slots.find((s) => s.type === "primary") ?? wt.slots[0];
+  return (primary?.skills ?? []).map((s) => s.name).slice(0, 3);
+}
+
 function weaponIconUrl(item: WeaponItem): string {
   return `${OBJECTSTORE}/icons/weapons_full/${item.iconBase}_${item.iconNum}.png`;
 }
@@ -205,6 +218,13 @@ export default function Equipment() {
 
   const [activeSlot, setActiveSlot] = useState("mainHand");
   const [search, setSearch] = useState("");
+  const [weaponSkills, setWeaponSkills] = useState<WeaponSkillsData | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetchWeaponSkills().then((d) => { if (live) setWeaponSkills(d); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
 
   const allWeapons = useMemo(() => flattenWeapons(weaponsData), [weaponsData]);
   const allArmor   = useMemo(() => flattenArmor(armorData),    [armorData]);
@@ -344,6 +364,9 @@ export default function Equipment() {
                         ? weaponIconUrl(item as WeaponItem)
                         : armorIconUrl(item as ArmorItem);
                       const stats = topStats(item.stats);
+                      const grantedSkills = isWeaponSlot
+                        ? weaponGrantedSkills(weaponSkills, (item as WeaponItem).catKey)
+                        : [];
 
                       return (
                         <Card
@@ -389,6 +412,19 @@ export default function Equipment() {
                                     <span className="text-[9px] font-mono text-primary">{v}</span>
                                   </div>
                                 ))}
+                              </div>
+                            )}
+
+                            {grantedSkills.length > 0 && (
+                              <div className={`${stats.length > 0 ? "" : "mt-auto"} pt-1 border-t border-border/30`}>
+                                <p className="text-[8px] text-muted-foreground/70 uppercase tracking-widest mb-0.5">Grants</p>
+                                <div className="flex flex-wrap gap-0.5">
+                                  {grantedSkills.map((sk) => (
+                                    <span key={sk} className="text-[8px] font-serif text-secondary/90 px-1 py-0.5 rounded bg-secondary/10 border border-secondary/20 leading-none" title={sk}>
+                                      {sk}
+                                    </span>
+                                  ))}
+                                </div>
                               </div>
                             )}
 

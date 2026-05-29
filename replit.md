@@ -37,6 +37,11 @@ Browser-based isometric ARPG — forge a warlord, enter the dungeon, fight real 
   - `src/pages/equipment.tsx` — Armory (119 weapons, 150 armor from R2)
   - `src/pages/skills.tsx` — Grimoire (skill trees)
   - `src/pages/enemies.tsx` — Bestiary (38 enemies from R2)
+  - `src/game/PlayerAnimator.ts` — authored Biped clips (idle/walk/attack) for race models + native-clip player for One Piece skins
+  - `src/game/CampBuilder.ts` — extracts orc props from `orc_camp_set.glb` (atlas) and rings them around the forge
+  - `src/data/skins.ts` — One Piece skin registry + `getSelectedSkin`/`setSelectedSkin` (localStorage `grudge:skin:<charId>`)
+  - `src/data/classSkills.ts` — authored best-version class skills (warrior/mage/ranger/worge)
+  - `src/data/skillsResolver.ts` — `resolveSkills`/`useResolvedSkills(charClass, mainCategory)` → class + weapon skills (shared by Grimoire, Armory, MainPanel, Game HUD)
 - `lib/api-spec/` — OpenAPI spec (source of truth for API contract)
 - `lib/api-client-react/` — Generated React Query hooks
 - `lib/api-zod/` — Generated Zod schemas
@@ -205,6 +210,50 @@ Cooldowns are tracked in `localStorage` keyed by character id via
 (returns ms remaining; reads the per-item expiry written by `startCooldown`).
 Consumables/utilities are auto-displayed on hotbar slots 6/7/8 by filtering
 `inventory` for `type === "consumable" || type === "utility"`.
+
+## Champion skins (player model override)
+
+- Each warlord renders in-world as their **race GLB** (real skeleton) by default,
+  animated with authored Biped clips from `PlayerAnimator.ts`. Players can pick a
+  **One Piece skin** in the War Panel's "Champion Skin" card (`home.tsx`); the
+  choice persists to `localStorage` (`grudge:skin:<charId>`) via `setSelectedSkin`.
+- `game.tsx` reads `getSelectedSkin(char.id)` and passes `skinId` +
+  `equipMainCategory` into `GameEngine.init`. `loadPlayerModel` branches:
+  skin → `loadSkinModel` (native labelled clips); else → race model + authored clips.
+- Skins use their own native animation clips (bounty-rush scheme); `koby` is
+  cryptic-clip and falls back to idle-only. Switching skins requires re-entering
+  the world (the engine builds the model once on init).
+
+## Orc war-camp + terrain skirt
+
+- `orc_camp_set.glb` is an **atlas**: all 198 base props sit stacked at the origin
+  (only the leveled showcase buildings carry translations). `CampBuilder.ts` finds
+  each prop by its mesh-node name `<base>_proto_orc_rts_0`, **bakes the source
+  world matrix** into a clone (preserving the FBX→Y-up axis correction), wraps it
+  in a holder, scales the whole camp uniformly by a `unit` derived from the cabin
+  width (~7u target), places a curated ring + palisade around the forge, and drops
+  each prop's feet to y=0. Skinned/animated props (banners, cauldron, lanterns)
+  are avoided — cloning them without their mixer renders broken. Shared
+  geometry/materials are deduped in `Set`s; a late-arriving load after `dispose()`
+  releases its own resources (`group.userData.disposed` guard).
+- `proceduralTextures.makeTerrainSkirt(arenaHalf)` builds a large noise-displaced
+  plane ringing the flat arena: rolling foothills rising into a distant mountain
+  ridge, with recomputed normals. The flat center uses a **Chebyshev** mask
+  (`max(|x|,|z|) ≤ arenaHalf`) to match the SQUARE movement clamp (±(DUNGEON-1)),
+  so every reachable coordinate — including corners — stays on y≈0. `baseY=-0.08`
+  keeps the flat terrain just under the cobble ground to avoid z-fighting. Added
+  in `buildDungeon()`; disposed in `dispose()`.
+
+## Skills system (all tabs)
+
+- `classSkills.ts` + `skillsResolver.ts` are the single source of truth.
+  `useResolvedSkills(charClass, mainCategory)` returns `{ classSkills, weaponType,
+  weaponSlots, classWeaponTypes }`. `mainCategory` comes from the equipped
+  main-hand (or `CLASS_STARTER_WEAPON[class].category`) and is mapped to a weapon
+  type via `categoryToWeaponType`.
+- Surfaced on: Grimoire (`skills.tsx`), Armory weapon cards (`equipment.tsx`),
+  MainPanel SkillsTab, and the **Game HUD skill bar** (`game.tsx`, bottom-center
+  above the action buttons: class glyph cells + weapon-slot skill icons).
 
 ## Pointers
 
