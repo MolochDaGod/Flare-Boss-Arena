@@ -28,6 +28,7 @@ Browser-based isometric ARPG — forge a warlord, enter the dungeon, fight real 
 - `artifacts/api-server/src/` — Express routes: characters, bosses, gamedata
 - `artifacts/grudge-game/src/` — React frontend
   - `src/game/GameEngine.ts` — Full Three.js ARPG engine (isometric, GLB models, sprite enemies)
+  - `src/game/proceduralTextures.ts` — Runtime canvas-built ground material (cobblestone color+bump) + `makeRockField` InstancedMesh prop scatter
   - `src/game/MonsterModels.ts` — Registry + async loader for the 6 imported GLB monsters (skeletal + static)
   - `src/pages/game.tsx` — Full-screen game view at `/game`
   - `src/pages/home.tsx` — War Panel (character overview, Enter World button)
@@ -79,6 +80,35 @@ Browser-based isometric ARPG — forge a warlord, enter the dungeon, fight real 
 - KayKit ARPG models (Knight/Mage/Ranger/Barbarian) are used IN-GAME by `GameEngine.ts`, not in the portrait.
 - GLB monster assets live in `artifacts/grudge-game/public/models/monsters/` and are served via `${import.meta.env.BASE_URL}models/monsters/<file>.glb` — large files (cultist_armed ≈31 MB), loaded async/non-fatal.
 - big_scary_t2 / big_scary_t3 GLBs shipped WITHOUT a skeleton or clip — they get a procedural idle sway only. True skeletal animation needs a rigged re-export from the source.
+
+## Dungeon scale, textures & raycasting
+
+The `/game` dungeon (`GameEngine.ts`) runs on a large map with procedural terrain:
+
+- `DUNGEON = 50` → 100×100-unit playable square (~10× the old 16 area). All
+  movement/click clamping, enemy spawn bounds, and the click plane derive from
+  `this.DUNGEON`, so changing it rescales everything.
+- **Ground**: `makeGroundMaterial(repeat, anisotropy)` builds a tiling
+  cobblestone `MeshStandardMaterial` at runtime from `<canvas>` (color + bump,
+  `RepeatWrapping`, max anisotropy, SRGB) — no external texture fetch. Repeat is
+  `DUNGEON/2`. Added in `buildDungeon()` as a shadow-receiving plane.
+- **Props**: `makeRockField(220, DUNGEON*0.35, DUNGEON-4)` scatters 220 rocks as
+  a single `InstancedMesh` (one draw call) in an annulus around the central forge.
+- **Forge landmark**: `loadEnvironment()` scales `forge-scene.glb` to a FIXED
+  40-unit extent (not the full map) so it reads as a central hub, with the
+  textured ground + rocks filling the rest.
+- **Lighting best-practices**: ACES Filmic tone mapping + exposure on the
+  renderer; a `HemisphereLight` for sky/ground bounce; the directional sun +
+  `sun.target` rig FOLLOWS the player each frame in `update()` so a tight ±35
+  shadow frustum stays sharp across the big map; torches distributed on a grid
+  scaled to `DUNGEON`.
+- **Hover raycasting**: `handleHover()` (mousemove) raycasts live enemy groups
+  and applies an emissive glow + pointer cursor; `clearHover()` restores both
+  emissive color AND intensity. Hover state is cleared in `killEnemy()` and
+  `dispose()`. Enemy hit resolution uses `userData.enemyId` (set on every mesh,
+  including async GLB monsters via onReady retag), same as click-to-target.
+- **Disposal**: `dispose()` releases the ground geometry/material/map/bumpMap and
+  the rock field geometry/material, and removes the mousemove listener.
 
 ## GLB monsters
 

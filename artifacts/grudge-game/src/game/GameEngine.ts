@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { createEnemyModel, updateEnemyAnimation, makeAnimState, type EnemyModel, type AnimState } from "./EnemyFactory";
 import { isMonsterId, loadMonsterModel, disposeMonsterModel, MONSTER_TEMPLATES } from "./MonsterModels";
+import { makeGroundMaterial, makeRockField } from "./proceduralTextures";
 
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
 
@@ -121,7 +122,15 @@ export class GameEngine {
 
   private torchLights: THREE.PointLight[] = [];
   private loaded = false;
-  private DUNGEON = 16;
+  private DUNGEON = 50;
+
+  // Larger-map / best-practice additions.
+  private sun: THREE.DirectionalLight | null = null;
+  private groundMesh: THREE.Mesh | null = null;
+  private rockField: THREE.InstancedMesh | null = null;
+  private hoveredEnemy: EnemyInstance | null = null;
+  private hoverEmissive = new Map<THREE.MeshStandardMaterial, { hex: number; intensity: number }>();
+  private _moveHandler!: (e: MouseEvent) => void;
 
   init(
     container: HTMLDivElement,
@@ -161,6 +170,9 @@ export class GameEngine {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // Filmic tone mapping for richer contrast across the larger lit map.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
     container.appendChild(this.renderer.domElement);
 
     this.clock = new THREE.Clock();
@@ -180,9 +192,26 @@ export class GameEngine {
   private buildDungeon() {
     const D = this.DUNGEON;
 
+    // Large textured stone floor spanning the whole map. The cobble pattern is
+    // generated procedurally (no external fetch), repeat-tiled, and uses the
+    // renderer's max anisotropy so it stays crisp at grazing camera angles.
+    const aniso = this.renderer.capabilities.getMaxAnisotropy();
+    const groundMat = makeGroundMaterial(Math.round(D / 2), aniso);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(D * 2, D * 2), groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = 0;
+    ground.receiveShadow = true;
+    this.scene.add(ground);
+    this.groundMesh = ground;
+
+    // Hundreds of scattered rocks in a single InstancedMesh draw call (fills
+    // the now-much-larger map without tanking performance).
+    const rocks = makeRockField(220, D * 0.35, D - 4);
+    this.scene.add(rocks);
+    this.rockField = rocks;
+
     // Invisible click plane — covers the playable area for click-to-move
-    // raycasting. The visible dungeon geometry is loaded asynchronously in
-    // `loadEnvironment()` (forge-scene.glb) on top of this plane.
+    // raycasting. Sits just above the visible ground so floor picks are stable.
     const clickPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(D * 2, D * 2),
       new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide })
@@ -218,9 +247,10 @@ export class GameEngine {
         const size = new THREE.Vector3(); bbox.getSize(size);
         const center = new THREE.Vector3(); bbox.getCenter(center);
 
-        // Fit the longer XZ extent into the playable square (DUNGEON*2 * 0.95
-        // leaves a small margin against the walls of the click plane).
-        const targetExtent = this.DUNGEON * 2 * 0.95;
+        // Keep the forge a fixed-size central landmark (~40 units) instead of
+        // stretching it across the whole enlarged map — the textured ground +
+        // rock field fill the rest, giving a real sense of scale.
+        const targetExtent = 40;
         const longestXZ = Math.max(size.x, size.z) || 1;
         const scale = targetExtent / longestXZ;
 
@@ -251,25 +281,40 @@ export class GameEngine {
     const ambient = new THREE.AmbientLight(0x120a08, 2.5);
     this.scene.add(ambient);
 
+    // Hemisphere light gives subtle sky/ground bounce across the open map.
+    const hemi = new THREE.HemisphereLight(0x3a3050, 0x1a1410, 0.5);
+    this.scene.add(hemi);
+
+    // Key/sun light. Its shadow frustum is kept tight (±35) but the whole rig
+    // follows the player each frame (see update()) so shadows stay sharp across
+    // the much larger map without an enormous, blurry shadow map.
     const sun = new THREE.DirectionalLight(0xff9955, 2.2);
     sun.position.set(20, 30, 20);
     sun.castShadow = true;
     sun.shadow.mapSize.setScalar(2048);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 120;
-    sun.shadow.camera.left = sun.shadow.camera.bottom = -25;
-    sun.shadow.camera.right = sun.shadow.camera.top = 25;
+    sun.shadow.camera.left = sun.shadow.camera.bottom = -35;
+    sun.shadow.camera.right = sun.shadow.camera.top = 35;
     sun.shadow.bias = -0.001;
     this.scene.add(sun);
+    this.scene.add(sun.target);
+    this.sun = sun;
 
     const fill = new THREE.DirectionalLight(0x1a2050, 0.6);
     fill.position.set(-15, 8, -15);
     this.scene.add(fill);
 
-    const torchPositions = [
-      [-7, -7], [7, -7], [-7, 7], [7, 7],
-      [0, -10], [0, 10], [-10, 0], [10, 0],
-    ];
+    // Torches distributed across the enlarged map for ember pools of light.
+    const torchPositions: Array<[number, number]> = [];
+    const step = this.DUNGEON / 2;
+    for (let gx = -1; gx <= 1; gx++) {
+      for (let gz = -1; gz <= 1; gz++) {
+        if (gx === 0 && gz === 0) continue;
+        torchPositions.push([gx * step, gz * step]);
+      }
+    }
+    torchPositions.push([-10, -10], [10, -10], [-10, 10], [10, 10]);
     for (const [tx, tz] of torchPositions) {
       const light = new THREE.PointLight(0xff6600, 3, 9, 1.5);
       light.position.set(tx, 3, tz);
@@ -442,10 +487,58 @@ export class GameEngine {
     };
     this._keyUpHandler = (e: KeyboardEvent) => this.keys.delete(e.code);
     this._clickHandler = (e: MouseEvent) => this.handleClick(e, container);
+    this._moveHandler = (e: MouseEvent) => this.handleHover(e, container);
 
     window.addEventListener("keydown", this._keyDownHandler);
     window.addEventListener("keyup", this._keyUpHandler);
     container.addEventListener("click", this._clickHandler);
+    container.addEventListener("mousemove", this._moveHandler);
+  }
+
+  /**
+   * Hover raycast: highlight the enemy under the cursor (emissive glow) and
+   * switch to a pointer cursor so targets read as clickable on the big map.
+   */
+  private handleHover(e: MouseEvent, container: HTMLDivElement) {
+    const rect = container.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    this.raycaster.setFromCamera(mouse, this.camera);
+
+    const liveGroups = this.enemies
+      .filter((en) => en.state !== "dead" && en.state !== "death")
+      .map((en) => en.model.group);
+    const hits = this.raycaster.intersectObjects(liveGroups, true);
+
+    let hovered: EnemyInstance | null = null;
+    if (hits.length > 0) {
+      const eid = hits[0].object.userData.enemyId as string | undefined;
+      hovered = this.enemies.find((en) => en.id === eid) ?? null;
+    }
+
+    if (hovered !== this.hoveredEnemy) {
+      this.clearHover();
+      if (hovered) {
+        for (const m of hovered.model.bodyMats) {
+          this.hoverEmissive.set(m, { hex: m.emissive.getHex(), intensity: m.emissiveIntensity });
+          m.emissive.setHex(0x662200);
+          m.emissiveIntensity = 0.9;
+        }
+      }
+      this.hoveredEnemy = hovered;
+      container.style.cursor = hovered ? "pointer" : "default";
+    }
+  }
+
+  /** Restore emissive on the previously-hovered enemy. */
+  private clearHover() {
+    for (const [mat, prev] of this.hoverEmissive) {
+      mat.emissive.setHex(prev.hex);
+      mat.emissiveIntensity = prev.intensity;
+    }
+    this.hoverEmissive.clear();
   }
 
   private _keyDownHandler!: (e: KeyboardEvent) => void;
@@ -551,6 +644,10 @@ export class GameEngine {
     enemy.state = "death";
     enemy.anim.deathPhase = 0.01;  // trigger death animation
     if (this.targetEnemy === enemy) this.targetEnemy = null;
+    if (this.hoveredEnemy === enemy) {
+      this.clearHover();
+      this.hoveredEnemy = null;
+    }
 
     const xp = enemy.template.tier * 50 + 25;
     this.playerXp += xp;
@@ -671,6 +768,13 @@ export class GameEngine {
     const camTarget = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z).add(camOffset);
     this.camera.position.lerp(camTarget, 0.07);
     this.camera.lookAt(this.playerPos.x, 0, this.playerPos.z);
+
+    // Sun + shadow rig tracks the player so shadows stay sharp across the big map.
+    if (this.sun) {
+      this.sun.position.set(this.playerPos.x + 20, 30, this.playerPos.z + 20);
+      this.sun.target.position.set(this.playerPos.x, 0, this.playerPos.z);
+      this.sun.target.updateMatrixWorld();
+    }
 
     for (let i = 0; i < this.torchLights.length; i++) {
       const t = this.torchLights[i];
@@ -820,9 +924,23 @@ export class GameEngine {
     window.removeEventListener("keyup", this._keyUpHandler);
     if (this.container) {
       this.container.removeEventListener("click", this._clickHandler);
+      if (this._moveHandler) this.container.removeEventListener("mousemove", this._moveHandler);
       if (this.renderer.domElement.parentNode === this.container) {
         this.container.removeChild(this.renderer.domElement);
       }
+    }
+    this.clearHover();
+    // Dispose the procedural ground + rock field.
+    if (this.groundMesh) {
+      this.groundMesh.geometry.dispose();
+      const gm = this.groundMesh.material as THREE.MeshStandardMaterial;
+      gm.map?.dispose();
+      gm.bumpMap?.dispose();
+      gm.dispose();
+    }
+    if (this.rockField) {
+      this.rockField.geometry.dispose();
+      (this.rockField.material as THREE.Material).dispose();
     }
     this.renderer.dispose();
     for (const en of this.enemies) {
