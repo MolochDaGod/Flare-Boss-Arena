@@ -28,6 +28,7 @@ Browser-based isometric ARPG — forge a warlord, enter the dungeon, fight real 
 - `artifacts/api-server/src/` — Express routes: characters, bosses, gamedata
 - `artifacts/grudge-game/src/` — React frontend
   - `src/game/GameEngine.ts` — Full Three.js ARPG engine (isometric, GLB models, sprite enemies)
+  - `src/game/MonsterModels.ts` — Registry + async loader for the 6 imported GLB monsters (skeletal + static)
   - `src/pages/game.tsx` — Full-screen game view at `/game`
   - `src/pages/home.tsx` — War Panel (character overview, Enter World button)
   - `src/pages/character-new.tsx` — Soul Forge (character creation)
@@ -48,6 +49,7 @@ Browser-based isometric ARPG — forge a warlord, enter the dungeon, fight real 
 - Three.js game engine is a class (GameEngine.ts), not hooks — avoids React re-render thrash in the game loop
 - Enemy sprites are animated sprite sheets (horizontal strip, per-animation PNG) billboarded to face the isometric camera
 - Player character uses real KayKit GLB models: Knight (warrior), Mage, Ranger, Barbarian (worge)
+- Six imported GLB monsters spawn in the dungeon alongside the procedural roster (see "GLB monsters" below)
 - Boss AI uses GPT-5.1 for both generation and action narration
 
 ## Product
@@ -75,6 +77,45 @@ Browser-based isometric ARPG — forge a warlord, enter the dungeon, fight real 
 - Portrait GLB URL: `https://assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters/<race>.glb`
 - Available race GLBs (HTTP 200): human, elf, dwarf, orc, undead, barbarian
 - KayKit ARPG models (Knight/Mage/Ranger/Barbarian) are used IN-GAME by `GameEngine.ts`, not in the portrait.
+- GLB monster assets live in `artifacts/grudge-game/public/models/monsters/` and are served via `${import.meta.env.BASE_URL}models/monsters/<file>.glb` — large files (cultist_armed ≈31 MB), loaded async/non-fatal.
+- big_scary_t2 / big_scary_t3 GLBs shipped WITHOUT a skeleton or clip — they get a procedural idle sway only. True skeletal animation needs a rigged re-export from the source.
+
+## GLB monsters
+
+Six user-imported monsters are registered in `src/game/MonsterModels.ts`
+(`MONSTER_DEFS`) and spawned once each by `GameEngine.spawnInitialEnemies()`
+alongside the procedural roster. They flow through the same enemy pipeline:
+`createEnemy()` branches on `isMonsterId(template.id)` to call
+`loadMonsterModel()` instead of `createEnemyModel()`.
+
+| id (`mon_*`)      | name           | rig + clip          | tier | target height |
+| ----------------- | -------------- | ------------------- | ---- | ------------- |
+| pincher           | Chitin Pincher | ✅ `pincheranim`    | 2    | 1.7           |
+| cultist           | Armed Cultist  | ✅ `idle`           | 2    | 2.0           |
+| big_scary_t2      | Gloomhulk      | ❌ static (sway)    | 3    | 2.6           |
+| dante_beast       | Dante's Beast  | ✅ `dante2anim`     | 4    | 2.8           |
+| medusa            | Medusa         | ✅ `medusa2anim`    | 4    | 2.6           |
+| big_scary_t3      | Dread Colossus | ❌ static (sway)    | 5    | 4.2           |
+
+Loader best-practices (`loadMonsterModel`):
+- Returns an EMPTY group immediately (safe to add to scene); the GLB streams
+  in async and is injected on load. `updateEnemyAnimation` no-ops safely until
+  then (`isGLB` set, `mixer` null, empty `bodyMats`).
+- Uniform scale to `def.height` (`scale = height / size.y`), recenter XZ to
+  origin, drop feet to y=0.
+- `castShadow`/`receiveShadow` on every mesh; `frustumCulled = false` on
+  skinned meshes (else they vanish when culled in bind pose).
+- Rigged GLBs: single clip played looped via `THREE.AnimationMixer`.
+  `updateEnemyAnimation`'s `isGLB` branch calls `mixer.update(delta)` and skips
+  the procedural-primitive rig path; hurt-flash / death tip-over / attack lunge
+  are layered on the group. Static GLBs sway the inner child node so it never
+  fights the facing yaw GameEngine writes onto the group.
+- Mesh detection uses `.isMesh`/`.isSkinnedMesh` flags (NOT `instanceof`) — the
+  app logs "Multiple instances of Three.js", which would break `instanceof`.
+- Cleanup: `disposeMonsterModel()` stops + uncaches the mixer and disposes
+  geometry, materials, AND textures. A `group.userData.disposed` guard makes a
+  late-arriving load callback release its resources instead of attaching to a
+  dead group (kill/teardown race safety).
 
 ## Toon-RTS portrait meshes (allow-list visibility)
 

@@ -26,6 +26,15 @@ export interface EnemyModel {
   height: number;        // total height (for healthbar offset)
   bodyMats: THREE.MeshStandardMaterial[];
   originalColors: number[];
+  /**
+   * Set for GLB-backed enemies (real imported models). When present the
+   * procedural-primitive rig animation is skipped — skeletal motion is driven
+   * by `mixer` (if the GLB shipped a rig + clip) or a procedural idle sway
+   * applied to the whole group (for static GLBs with no skeleton).
+   */
+  isGLB?: boolean;
+  /** AnimationMixer for skeletal GLB clips. Null for static (rig-less) GLBs. */
+  mixer?: THREE.AnimationMixer | null;
 }
 
 /** Map enemy type → archetype */
@@ -702,7 +711,63 @@ export function makeAnimState(): AnimState {
   return { walkPhase: Math.random() * Math.PI * 2, attackPhase: 0, hurtPhase: 0, deathPhase: 0, isWalking: false, isAttacking: false };
 }
 
+/** Tint helper — restores base color then applies a hurt flash (0..1). */
+function applyHurtFlash(bodyMats: THREE.MeshStandardMaterial[], originalColors: number[], flash: number) {
+  for (let i = 0; i < bodyMats.length; i++) {
+    const orig = originalColors[i];
+    const r = ((orig >> 16) & 0xff) / 255;
+    const g = ((orig >> 8) & 0xff) / 255;
+    const b = (orig & 0xff) / 255;
+    bodyMats[i].color.setRGB(r + flash * (1 - r), g - flash * g * 0.7, b - flash * b * 0.7);
+  }
+}
+
 export function updateEnemyAnimation(model: EnemyModel, state: AnimState, delta: number, elapsed: number) {
+  // ─── GLB-backed enemies ─────────────────────────────────────────────────
+  // Real imported models drive their own skeleton (or get a procedural idle
+  // sway when rig-less). We still layer hurt-flash, death tip-over, and an
+  // attack lunge on the group so combat reads the same as primitive enemies.
+  if (model.isGLB) {
+    const { group, bodyMats, originalColors } = model;
+
+    // Skeletal clip playback (rigged GLBs) — always advances so the model
+    // breathes/idles even when standing still.
+    if (model.mixer) model.mixer.update(delta);
+
+    // Hurt flash fade-out.
+    if (state.hurtPhase > 0) {
+      state.hurtPhase = Math.max(0, state.hurtPhase - delta * 4);
+      applyHurtFlash(bodyMats, originalColors, state.hurtPhase);
+    }
+
+    // Death: tip over + sink, then freeze.
+    if (state.deathPhase > 0) {
+      state.deathPhase = Math.min(1, state.deathPhase + delta * 1.8);
+      group.rotation.z = state.deathPhase * Math.PI / 2.2;
+      group.position.y = (group.userData.baseY ?? 0) - state.deathPhase * 0.3;
+      return;
+    }
+
+    // Attack lunge (kick forward then settle).
+    if (state.isAttacking) {
+      state.attackPhase = Math.min(1, state.attackPhase + delta * 4);
+      if (state.attackPhase >= 1) { state.attackPhase = 0; state.isAttacking = false; }
+    }
+    const lunge = Math.sin(state.attackPhase * Math.PI);
+    group.position.y = (group.userData.baseY ?? 0) + lunge * 0.15;
+
+    // Procedural idle sway for STATIC GLBs (no skeleton/clip) so they aren't
+    // dead-still. Rigged models already animate via the mixer. The sway is
+    // applied to the inner loaded node (group.children[0]) so it doesn't fight
+    // the facing yaw that GameEngine writes onto the group itself.
+    if (!model.mixer) {
+      const inner = group.children[0];
+      if (inner) inner.rotation.y = Math.sin(elapsed * 1.1) * 0.08;
+      group.position.y = (group.userData.baseY ?? 0) + Math.sin(elapsed * 1.6) * 0.04 + lunge * 0.15;
+    }
+    return;
+  }
+
   const { rig, archetype, group, bodyMats, originalColors } = model;
 
   // Walking

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { createEnemyModel, updateEnemyAnimation, makeAnimState, type EnemyModel, type AnimState } from "./EnemyFactory";
+import { isMonsterId, loadMonsterModel, disposeMonsterModel, MONSTER_TEMPLATES } from "./MonsterModels";
 
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
 
@@ -369,6 +370,10 @@ export class GameEngine {
 
     const configs = picked.map((t) => ({ template: t, count: t.tier === 1 ? 2 : 1 }));
 
+    // Always spawn one of each imported GLB monster so they're guaranteed to
+    // appear in the dungeon alongside the procedural roster.
+    for (const m of MONSTER_TEMPLATES) configs.push({ template: m, count: 1 });
+
     for (const { template, count } of configs) {
       for (let i = 0; i < count; i++) {
         const D = this.DUNGEON - 3;
@@ -386,8 +391,15 @@ export class GameEngine {
 
   private createEnemy(template: EnemyTemplate, pos: THREE.Vector3): EnemyInstance {
     const id = `e${this.enemyIdCounter++}`;
-    const model = createEnemyModel(template.name, template.type, template.tier);
+    const model = isMonsterId(template.id)
+      ? loadMonsterModel(template.id, this.loader, (m) => {
+          // Re-tag children once the GLB has streamed in so raycast targeting
+          // works on the real meshes.
+          m.group.traverse((c) => { c.userData.enemyId = id; });
+        })
+      : createEnemyModel(template.name, template.type, template.tier);
     model.group.position.set(pos.x, model.baseY, pos.z);
+    model.group.userData.baseY = model.baseY;
     model.group.userData.enemyId = id;
     this.scene.add(model.group);
 
@@ -547,12 +559,18 @@ export class GameEngine {
     setTimeout(() => {
       enemy.state = "dead";
       this.scene.remove(enemy.model.group);
-      // Dispose meshes
-      enemy.model.group.traverse((c) => {
-        const mesh = c as THREE.Mesh;
-        if (mesh.geometry) mesh.geometry.dispose();
-      });
-      for (const mat of enemy.model.bodyMats) mat.dispose();
+      enemy.model.group.userData.disposed = true;
+      if (isMonsterId(enemy.template.id)) {
+        // Thorough GLB cleanup (mixer + geometry + materials + textures), and
+        // releases resources even if the GLB is still streaming in.
+        disposeMonsterModel(enemy.model);
+      } else {
+        enemy.model.group.traverse((c) => {
+          const mesh = c as THREE.Mesh;
+          if (mesh.geometry) mesh.geometry.dispose();
+        });
+        for (const mat of enemy.model.bodyMats) mat.dispose();
+      }
     }, 1400);
 
     setTimeout(() => {
@@ -808,11 +826,16 @@ export class GameEngine {
     }
     this.renderer.dispose();
     for (const en of this.enemies) {
-      en.model.group.traverse((c) => {
-        const mesh = c as THREE.Mesh;
-        if (mesh.geometry) mesh.geometry.dispose();
-      });
-      for (const mat of en.model.bodyMats) mat.dispose();
+      en.model.group.userData.disposed = true;
+      if (isMonsterId(en.template.id)) {
+        disposeMonsterModel(en.model);
+      } else {
+        en.model.group.traverse((c) => {
+          const mesh = c as THREE.Mesh;
+          if (mesh.geometry) mesh.geometry.dispose();
+        });
+        for (const mat of en.model.bodyMats) mat.dispose();
+      }
     }
   }
 }
