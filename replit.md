@@ -332,6 +332,43 @@ offers "boat assistance" and fights as "allies against bosses".
   MainPanel SkillsTab, and the **Game HUD skill bar** (`game.tsx`, bottom-center
   above the action buttons: class glyph cells + weapon-slot skill icons).
 
+## Camp / Training Ground (`/camp`)
+
+`CampScene.ts` + `camp.tsx` turn `/camp` into a combat testing ground: a real
+KayKit hero with a full animation set fighting passive training dummies, with a
+stone/gold combat HUD ported from the in-game HUD.
+
+- **Player model + animation**: loads the LOCAL hero GLB
+  (`public/models/kaykit/heroes/<Name>.glb`, ObjectStore→capsule fallback) and
+  drives it with a module-scope `HeroAnimator` — a candidate-based clip resolver
+  over the GLB's embedded clips PLUS the shared KayKit clip library
+  (`anim/{general,movement,combat}.glb` + `anim-ext/{movement_advanced,combat_ranged,special}.glb`).
+  All library GLBs are Rig_Medium (byte-identical to the KayKit pack's
+  Rig_Medium_* files), the SAME rig as the heroes, so library clips play directly
+  (node-name-bound, no retargeting). States: idle/walk/run/attack/cast/hit/jump/
+  dodge. One-shots use `LoopOnce` + `finished` → crossfade back to locomotion.
+  `trigger()` returns `false` when no clip resolves so callers fall back to
+  `proceduralLunge`. `loadCampAnimLibrary` caches parsed clips at module scope.
+- **Combat**: 3 passive dummies (HP bars, hit-flash, death tip-over + 3 s
+  respawn), click-raycast targeting, `attackNearest()` auto-approach + basic
+  attack loop, `useSkill(idx)` (mana cost / cooldown / AoE damage / VFX ring,
+  even slots melee / odd slots cast), `doJump()`/`doDodge()`, damage numbers,
+  combat log.
+- **HUD** (`camp.tsx`): `stonePanel`/`Rivets` theme, player HP/MP/atk-cd, skill
+  bar via `useResolvedSkills` (click + 1–5 keys → `sceneRef.useSkill`), action
+  buttons (Attack[F]/Panel[C]/Dungeon/Boss). Keybinds: F=attack, Space=jump,
+  Q/Shift=dodge, E=engage station, C=panel. Keeps stations engage + MainPanel.
+- **Lifecycle safety**: a scene-level `this.disposed` flag guards every async
+  callback (`loader.load` success/error, `loadCampAnimLibrary().then`, RAF helper
+  loops) so late results after teardown are ignored/disposed and `onStateUpdate`
+  is never called post-dispose. `dispose()` traverses the whole scene via
+  module-scope `disposeObject3D` (geometry + materials + textures incl. label
+  CanvasTextures) then `scene.clear()`. `emitState()` is throttled to ~30 Hz in
+  the render loop (accumulator) to avoid a full React rerender every frame;
+  direct one-off `emitState()` calls (init/skill/load) still fire immediately.
+- **FBX packs skipped**: Mixamo/grudge6 Action/Magic packs are FBX-only with no
+  in-repo converter → not used (only cleanly-converting KayKit GLB clips).
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
