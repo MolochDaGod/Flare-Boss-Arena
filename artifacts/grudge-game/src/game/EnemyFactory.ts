@@ -35,6 +35,30 @@ export interface EnemyModel {
   isGLB?: boolean;
   /** AnimationMixer for skeletal GLB clips. Null for static (rig-less) GLBs. */
   mixer?: THREE.AnimationMixer | null;
+  /**
+   * State-driven animator for KayKit characters (shared-library clips). When
+   * present, `updateEnemyAnimation` drives logical states (idle/walk/attack/
+   * hit/death) through it instead of the single-clip `mixer` path.
+   */
+  kit?: KitAnimator | null;
+}
+
+/**
+ * State-driven animation controller for KayKit characters. Implemented in
+ * `KayKitCharacter.ts`; declared here so `EnemyModel` can reference it without a
+ * circular import.
+ */
+export interface KitAnimator {
+  update(delta: number): void;
+  /** Crossfade between idle and walk locomotion. */
+  setMoving(moving: boolean): void;
+  /** Play the attack clip once, then return to locomotion. */
+  attack(): void;
+  /** Play the hit-reaction clip once, then return to locomotion. */
+  hit(): void;
+  /** Play the death clip once and clamp on the final frame. */
+  die(): void;
+  dispose(): void;
 }
 
 /** Map enemy type → archetype */
@@ -729,6 +753,35 @@ export function updateEnemyAnimation(model: EnemyModel, state: AnimState, delta:
   // attack lunge on the group so combat reads the same as primitive enemies.
   if (model.isGLB) {
     const { group, bodyMats, originalColors } = model;
+
+    // ─── KayKit state-driven animator ────────────────────────────────────
+    // Real shared-library clips per logical state (idle/walk/attack/hit/death).
+    // The death clip lays the body down, so we do NOT tip the group over here.
+    if (model.kit) {
+      const kit = model.kit;
+      kit.update(delta);
+
+      if (state.hurtPhase > 0) {
+        state.hurtPhase = Math.max(0, state.hurtPhase - delta * 4);
+        applyHurtFlash(bodyMats, originalColors, state.hurtPhase);
+      }
+
+      if (state.deathPhase > 0) {
+        state.deathPhase = Math.min(1, state.deathPhase + delta * 1.8);
+        kit.die();
+        return;
+      }
+
+      if (state.isAttacking) {
+        state.attackPhase = Math.min(1, state.attackPhase + delta * 4);
+        if (state.attackPhase >= 1) { state.attackPhase = 0; state.isAttacking = false; }
+        kit.attack();
+      }
+      if (state.hurtPhase > 0.9) kit.hit();
+      kit.setMoving(state.isWalking);
+      group.position.y = group.userData.baseY ?? 0;
+      return;
+    }
 
     // Skeletal clip playback (rigged GLBs) — always advances so the model
     // breathes/idles even when standing still.

@@ -147,6 +147,37 @@ const TIER_COLORS: Record<number, string> = {
   7: "#ef4444", 8: "#ec4899",
 };
 
+// ─── Stone/gold HUD theme (per UIlayer mockup) ──────────────────────────────────
+const GOLD = "#c5a059";
+// Forged-stone panel: dark gradient, gold rim, inset shadow + top highlight.
+const stonePanel: React.CSSProperties = {
+  background: "linear-gradient(to bottom, #2a2a2a, #111)",
+  border: `2px solid ${GOLD}`,
+  boxShadow:
+    "inset 0 0 10px #000, 0 0 12px rgba(0,0,0,0.8), inset 1px 1px 0 rgba(255,255,255,0.18)",
+  borderRadius: 8,
+};
+// Gold corner rivets — purely decorative, absolutely positioned inside a panel.
+function Rivets() {
+  const dot: React.CSSProperties = {
+    position: "absolute",
+    width: 6,
+    height: 6,
+    background: GOLD,
+    border: "1px solid #fff",
+    boxShadow: "0 0 3px " + GOLD,
+    borderRadius: 1,
+  };
+  return (
+    <>
+      <span style={{ ...dot, top: 3, left: 3 }} />
+      <span style={{ ...dot, top: 3, right: 3 }} />
+      <span style={{ ...dot, bottom: 3, left: 3 }} />
+      <span style={{ ...dot, bottom: 3, right: 3 }} />
+    </>
+  );
+}
+
 // ─── Main Game component ───────────────────────────────────────────────────────
 function Game() {
   const [, setLocation] = useLocation();
@@ -298,9 +329,10 @@ function Game() {
 
       {/* Player HUD — bottom left */}
       {gameState && (
-        <div className="absolute bottom-4 left-4 z-10 w-56 space-y-2">
+        <div className="absolute bottom-4 left-4 z-10 w-60 space-y-2 px-3.5 py-3" style={stonePanel}>
+          <Rivets />
           <div className="flex items-center justify-between mb-1">
-            <span className="font-serif text-sm tracking-widest text-primary uppercase">{char.name as string}</span>
+            <span className="font-serif text-sm tracking-widest uppercase" style={{ color: GOLD }}>{char.name as string}</span>
             <span className="font-serif text-xs text-muted-foreground tracking-widest">Lv {gameState.playerLevel}</span>
           </div>
 
@@ -428,17 +460,18 @@ function Game() {
         <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 flex items-end gap-4">
           {hudClassSkills && (
             <div className="flex flex-col items-center gap-1">
-              <span className="text-[9px] font-serif tracking-widest uppercase text-muted-foreground">Class · {hudClassSkills.name}</span>
+              <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>Class · {hudClassSkills.name}</span>
               <div className="flex gap-1.5">
                 {hudClassSkills.skills.slice(0, 5).map((s, i) => (
                   <div
                     key={s.id}
                     title={`${s.name}${s.cooldown ? ` · CD ${s.cooldown}` : ""}\n${s.description}`}
-                    className="relative w-10 h-10 rounded bg-black/70 border border-primary/40 flex items-center justify-center text-lg backdrop-blur-sm hover:border-primary/80 transition-colors"
+                    className="relative w-11 h-11 rounded flex items-center justify-center text-lg bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all"
+                    style={{ boxShadow: "inset 0 0 5px #000" }}
                   >
                     <span>{s.glyph}</span>
-                    <span className="absolute -top-1 -left-1 text-[8px] font-mono text-primary/80 bg-black/80 rounded px-0.5">{i + 1}</span>
-                    {s.isSignature && <span className="absolute -bottom-1 -right-1 text-[9px] leading-none">★</span>}
+                    <span className="absolute top-0.5 left-1 text-[9px] font-serif text-neutral-400">{i + 1}</span>
+                    {s.isSignature && <span className="absolute -bottom-1 -right-1 text-[9px] leading-none" style={{ color: GOLD }}>★</span>}
                   </div>
                 ))}
               </div>
@@ -446,7 +479,7 @@ function Game() {
           )}
           {hudWeaponSlots.length > 0 && (
             <div className="flex flex-col items-center gap-1">
-              <span className="text-[9px] font-serif tracking-widest uppercase text-muted-foreground">Weapon</span>
+              <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>Weapon</span>
               <div className="flex gap-1.5">
                 {hudWeaponSlots.map((slot) => {
                   const sk = slot.skills[0];
@@ -455,7 +488,8 @@ function Game() {
                     <div
                       key={slot.type}
                       title={`${slot.label}: ${sk.name}${sk.cooldown ? ` · CD ${sk.cooldown}` : ""}\n${sk.description}`}
-                      className="w-10 h-10 rounded bg-black/70 border border-amber-500/40 flex items-center justify-center overflow-hidden backdrop-blur-sm hover:border-amber-500/80 transition-colors"
+                      className="w-11 h-11 rounded flex items-center justify-center overflow-hidden bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all"
+                      style={{ boxShadow: "inset 0 0 5px #000" }}
                     >
                       {sk.icon ? (
                         <img src={`https://molochdagod.github.io/ObjectStore/icons/skill_nobg/${sk.icon}`} alt={sk.name} className="w-7 h-7 object-contain" />
@@ -472,30 +506,31 @@ function Game() {
       )}
 
       {/* Action buttons — bottom centre */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex gap-3">
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex gap-3 px-4 py-2.5" style={stonePanel}>
+        <Rivets />
         <button
-          className="flex flex-col items-center gap-1 px-4 py-2 bg-black/70 border border-primary/40 rounded font-serif text-xs tracking-widest uppercase text-primary hover:bg-primary/10 hover:border-primary/70 transition-all backdrop-blur-sm active:scale-95"
+          className="flex flex-col items-center gap-1 px-4 py-2 rounded font-serif text-xs tracking-widest uppercase bg-black/40 border border-[#c5a059]/60 text-[#c5a059] hover:bg-[#c5a059]/15 hover:border-[#c5a059] transition-all active:scale-95"
           onClick={() => engineRef.current?.attackNearest()}
         >
           <Swords className="w-4 h-4" />
           <span>Attack [F]</span>
         </button>
         <button
-          className="flex flex-col items-center gap-1 px-4 py-2 bg-black/70 border border-border/30 rounded font-serif text-xs tracking-widest uppercase text-muted-foreground hover:bg-muted/10 hover:border-border/60 transition-all backdrop-blur-sm active:scale-95"
+          className="flex flex-col items-center gap-1 px-4 py-2 rounded font-serif text-xs tracking-widest uppercase bg-black/40 border border-neutral-700 text-muted-foreground hover:border-[#c5a059]/70 hover:text-[#c5a059] transition-all active:scale-95"
           onClick={() => setPanelOpen(true)}
         >
           <LayoutGrid className="w-4 h-4" />
           <span>Panel [C]</span>
         </button>
         <button
-          className="flex flex-col items-center gap-1 px-4 py-2 bg-black/70 border border-border/30 rounded font-serif text-xs tracking-widest uppercase text-muted-foreground hover:bg-muted/10 hover:border-border/60 transition-all backdrop-blur-sm active:scale-95"
+          className="flex flex-col items-center gap-1 px-4 py-2 rounded font-serif text-xs tracking-widest uppercase bg-black/40 border border-neutral-700 text-muted-foreground hover:border-[#c5a059]/70 hover:text-[#c5a059] transition-all active:scale-95"
           onClick={() => setLocation("/equipment")}
         >
           <Shield className="w-4 h-4" />
           <span>Armory</span>
         </button>
         <button
-          className="flex flex-col items-center gap-1 px-4 py-2 bg-black/70 border border-blue-500/40 rounded font-serif text-xs tracking-widest uppercase text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/70 transition-all backdrop-blur-sm active:scale-95"
+          className="flex flex-col items-center gap-1 px-4 py-2 rounded font-serif text-xs tracking-widest uppercase bg-black/40 border border-blue-500/50 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500 transition-all active:scale-95"
           onClick={() => setLocation("/boss")}
         >
           <Zap className="w-4 h-4" />

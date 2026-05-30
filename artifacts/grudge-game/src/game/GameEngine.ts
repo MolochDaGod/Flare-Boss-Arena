@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { createEnemyModel, updateEnemyAnimation, makeAnimState, type EnemyModel, type AnimState } from "./EnemyFactory";
 import { isMonsterId, loadMonsterModel, disposeMonsterModel, MONSTER_TEMPLATES } from "./MonsterModels";
+import { isKitMonsterId, loadKitMonster, disposeKitModel, KIT_TEMPLATES } from "./KayKitCharacter";
 import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
 import { PlayerAnimator, buildAuthoredClips, pickSkinClips } from "./PlayerAnimator";
@@ -513,6 +514,9 @@ export class GameEngine {
     // appear in the dungeon alongside the procedural roster.
     for (const m of MONSTER_TEMPLATES) configs.push({ template: m, count: 1 });
 
+    // Spawn the KayKit skeleton minions (real shared-library skeletal animation).
+    for (const m of KIT_TEMPLATES) configs.push({ template: m, count: m.tier === 1 ? 3 : 2 });
+
     for (const { template, count } of configs) {
       for (let i = 0; i < count; i++) {
         const D = this.DUNGEON - 3;
@@ -530,13 +534,16 @@ export class GameEngine {
 
   private createEnemy(template: EnemyTemplate, pos: THREE.Vector3): EnemyInstance {
     const id = `e${this.enemyIdCounter++}`;
-    const model = isMonsterId(template.id)
-      ? loadMonsterModel(template.id, this.loader, (m) => {
-          // Re-tag children once the GLB has streamed in so raycast targeting
-          // works on the real meshes.
-          m.group.traverse((c) => { c.userData.enemyId = id; });
-        })
-      : createEnemyModel(template.name, template.type, template.tier);
+    const retag = (m: EnemyModel) => {
+      // Re-tag children once the GLB has streamed in so raycast targeting
+      // works on the real meshes.
+      m.group.traverse((c) => { c.userData.enemyId = id; });
+    };
+    const model = isKitMonsterId(template.id)
+      ? loadKitMonster(template.id, this.loader, retag)
+      : isMonsterId(template.id)
+        ? loadMonsterModel(template.id, this.loader, retag)
+        : createEnemyModel(template.name, template.type, template.tier);
     model.group.position.set(pos.x, model.baseY, pos.z);
     model.group.userData.baseY = model.baseY;
     model.group.userData.enemyId = id;
@@ -753,7 +760,9 @@ export class GameEngine {
       enemy.state = "dead";
       this.scene.remove(enemy.model.group);
       enemy.model.group.userData.disposed = true;
-      if (isMonsterId(enemy.template.id)) {
+      if (isKitMonsterId(enemy.template.id)) {
+        disposeKitModel(enemy.model);
+      } else if (isMonsterId(enemy.template.id)) {
         // Thorough GLB cleanup (mixer + geometry + materials + textures), and
         // releases resources even if the GLB is still streaming in.
         disposeMonsterModel(enemy.model);
@@ -1058,7 +1067,9 @@ export class GameEngine {
     this.renderer.dispose();
     for (const en of this.enemies) {
       en.model.group.userData.disposed = true;
-      if (isMonsterId(en.template.id)) {
+      if (isKitMonsterId(en.template.id)) {
+        disposeKitModel(en.model);
+      } else if (isMonsterId(en.template.id)) {
         disposeMonsterModel(en.model);
       } else {
         en.model.group.traverse((c) => {

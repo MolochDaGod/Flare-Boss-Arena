@@ -1,0 +1,1 @@
+- [JSDoc block-comment `*/` pitfall](jsdoc-block-comment-pitfall.md) — a stray `*/` in a comment (e.g. glob like `.*/`) ends it early, causing a misleading cascade of TS syntax errors below.

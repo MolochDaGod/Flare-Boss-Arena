@@ -30,6 +30,7 @@ Browser-based isometric ARPG — forge a warlord, enter the dungeon, fight real 
   - `src/game/GameEngine.ts` — Full Three.js ARPG engine (isometric, GLB models, sprite enemies)
   - `src/game/proceduralTextures.ts` — Runtime canvas-built ground material (cobblestone color+bump) + `makeRockField` InstancedMesh prop scatter
   - `src/game/MonsterModels.ts` — Registry + async loader for the 6 imported GLB monsters (skeletal + static)
+  - `src/game/KayKitCharacter.ts` — KayKit animated-character system: loads clip-less character GLBs + a shared KayKit animation-library GLB and plays the library clips on each character via one `AnimationMixer` (bone names match the rig exactly). `KitAnimator` (idle/walk/attack/hit/death state machine), `KIT_TEMPLATES`, `isKitMonsterId`, `loadKitMonster`, `disposeKitModel`
   - `src/pages/game.tsx` — Full-screen game view at `/game`
   - `src/pages/home.tsx` — War Panel (character overview, Enter World button)
   - `src/pages/character-new.tsx` — Soul Forge (character creation)
@@ -151,6 +152,45 @@ Loader best-practices (`loadMonsterModel`):
   geometry, materials, AND textures. A `group.userData.disposed` guard makes a
   late-arriving load callback release its resources instead of attaching to a
   dead group (kill/teardown race safety).
+
+## KayKit animated characters (shared animation library)
+
+`KayKitCharacter.ts` adds REAL skeletal animation for KayKit character GLBs
+(Skeletons = enemies, Adventurers = heroes/skins). Key facts:
+
+- KayKit character GLBs ship a rig but **0 embedded clips**. The KayKit Character
+  Animations pack provides clips as separate GLBs whose bone names match the
+  character rig EXACTLY (hips/spine/chest/head/upperarm/hand/foot ...). An
+  `AnimationClip` is just node-name-bound data, so library clips play directly on
+  any KayKit character through its own `AnimationMixer` — no retargeting.
+- Assets live in `public/models/kaykit/`: `anim/{general,movement,combat}.glb`,
+  `enemies/Skeleton_*.glb`, `heroes/*.glb` (served via `import.meta.env.BASE_URL`).
+- `loadAnimLibrary(loader)` fetches the library GLBs ONCE and caches the parsed
+  clips at module scope (persistent residency — intentional, never disposed),
+  reused across every KayKit enemy. One mixer per enemy.
+- Clip names: `Idle_A/B`, `Walking_A/B/C`, `Running_A/B`,
+  `Melee_1H_Attack_Chop`, `Melee_2H_Attack_Chop`, `Death_A`, `Hit_A`,
+  `Spawn_Ground`, etc.
+- `KitAnimator` (idle/walk crossfade; attack/hit one-shot via `LoopOnce` +
+  `finished` listener; `die` → `Death_A` clamped on last frame). `EnemyModel`
+  carries an optional `kit` field; `updateEnemyAnimation`'s `isGLB` branch checks
+  `model.kit` FIRST, drives state from AI flags, and returns early. The death
+  clip lays the body down, so the kit path does NOT apply the group tip-over used
+  for other GLBs.
+- Enemy pipeline: `KIT_TEMPLATES` spawn in `spawnInitialEnemies`; `createEnemy`
+  branches `isKitMonsterId` → `loadKitMonster` (empty group now, async inject,
+  `enemyId` re-tag onReady); both disposal sites (`killEnemy` + full `dispose`)
+  branch to `disposeKitModel` (animator + geometry + materials + textures, with
+  the `group.userData.disposed` load-after-teardown guard).
+
+## In-game HUD theme (stone/gold)
+
+`game.tsx` HUD uses a forged stone/gold theme (per the UIlayer mockup): a shared
+`stonePanel` style (dark gradient + 2px gold `#c5a059` rim + inset shadow) and a
+`<Rivets />` corner-rivet component, applied to the player HUD, the skill/hotbar
+slots, and the action-button bar. Cinzel (`font-serif`) headings, gold accents.
+`Rivets` are `position:absolute`; their wrappers are already `absolute`, which
+establishes the containing block so rivets anchor to panel corners.
 
 ## Toon-RTS portrait meshes (allow-list visibility)
 
