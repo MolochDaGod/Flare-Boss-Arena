@@ -2,3 +2,4 @@
 - [architect includeGitDiff + untracked files](architect-git-diff-untracked.md) — passing includeGitDiff:true to code_review architect errors (UNKNOWN_NOT_GIT) when the tree has untracked files; pass paths via relevantFiles instead.
 - [fishing_town.glb is an atlas](fishing-town-atlas.md) — /camp buildings are stacked at origin; clone each by name + bake world matrix, don't read their positions.
 - [CraftPix UI PSD packs](craftpix-ui-psd-packs.md) — UI packs are PSD-only; fant_UI_1/3 on-theme, pack 226770 is green/off-theme; extract via psd_tools composite-by-group.
+- [Deploy build path & vite OOM](deploy-build.md) — deploy builds per-artifact services.production.build (not root); grudge-game vite build needs raised --max-old-space-size or dies at "transforming..." (exit 137).
