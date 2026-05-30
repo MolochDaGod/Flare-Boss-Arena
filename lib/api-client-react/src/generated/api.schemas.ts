@@ -122,25 +122,6 @@ export interface BossGenerateInput {
   difficulty?: string;
 }
 
-export interface CombatStateInput {
-  bossHpPercent: number;
-  playerHpPercent: number;
-  phase: number;
-  roundNumber: number;
-  playerActions?: string[];
-  statusEffects?: string[];
-}
-
-export interface BossAction {
-  ability: BossAbility;
-  reasoning: string;
-  damage: number;
-  /** @nullable */
-  statusEffect: string | null;
-  phaseTransition?: boolean;
-  taunt?: string;
-}
-
 export interface DefeatInput {
   characterId: number;
   timeToDefeat?: number;

@@ -20,13 +20,11 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
-  BossAction,
   BossEncounter,
   BossGenerateInput,
   Character,
   CharacterInput,
   CharacterUpdate,
-  CombatStateInput,
   DefeatInput,
   EquipInput,
   GetArmor200,
@@ -1417,78 +1415,6 @@ export function useGetBoss<TData = Awaited<ReturnType<typeof getBoss>>, TError =
 
 
 
-
-export const getGetBossActionUrl = (id: number,) => {
-
-
-
-
-  return `/api/bosses/${id}/action`
-}
-
-/**
- * @summary Get AI-decided boss action for current combat state
- */
-export const getBossAction = async (id: number,
-    combatStateInput: CombatStateInput, options?: RequestInit): Promise<BossAction> => {
-
-  return customFetch<BossAction>(getGetBossActionUrl(id),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(
-      combatStateInput,)
-  }
-);}
-
-
-
-
-export const getGetBossActionMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getBossAction>>, TError,{id: number;data: BodyType<CombatStateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof getBossAction>>, TError,{id: number;data: BodyType<CombatStateInput>}, TContext> => {
-
-const mutationKey = ['getBossAction'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getBossAction>>, {id: number;data: BodyType<CombatStateInput>}> = (props) => {
-          const {id,data} = props ?? {};
-
-          return  getBossAction(id,data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type GetBossActionMutationResult = NonNullable<Awaited<ReturnType<typeof getBossAction>>>
-    export type GetBossActionMutationBody = BodyType<CombatStateInput>
-    export type GetBossActionMutationError = ErrorType<unknown>
-
-    /**
- * @summary Get AI-decided boss action for current combat state
- */
-export const useGetBossAction = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getBossAction>>, TError,{id: number;data: BodyType<CombatStateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof getBossAction>>,
-        TError,
-        {id: number;data: BodyType<CombatStateInput>},
-        TContext
-      > => {
-      return useMutation(getGetBossActionMutationOptions(options));
-    }
 
 export const getRecordBossDefeatUrl = (id: number,) => {
 

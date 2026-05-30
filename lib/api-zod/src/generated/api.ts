@@ -335,39 +335,6 @@ export const GetBossResponse = zod.object({
 
 
 /**
- * @summary Get AI-decided boss action for current combat state
- */
-export const GetBossActionParams = zod.object({
-  "id": zod.coerce.number()
-})
-
-export const GetBossActionBody = zod.object({
-  "bossHpPercent": zod.number(),
-  "playerHpPercent": zod.number(),
-  "phase": zod.number(),
-  "roundNumber": zod.number(),
-  "playerActions": zod.array(zod.string()).optional(),
-  "statusEffects": zod.array(zod.string()).optional()
-})
-
-export const GetBossActionResponse = zod.object({
-  "ability": zod.object({
-  "id": zod.string(),
-  "name": zod.string(),
-  "damage": zod.number(),
-  "description": zod.string(),
-  "cooldown": zod.number().optional(),
-  "type": zod.string().optional()
-}),
-  "reasoning": zod.string(),
-  "damage": zod.number(),
-  "statusEffect": zod.string().nullable(),
-  "phaseTransition": zod.boolean().optional(),
-  "taunt": zod.string().optional()
-})
-
-
-/**
  * @summary Record a boss defeat and get loot
  */
 export const RecordBossDefeatParams = zod.object({

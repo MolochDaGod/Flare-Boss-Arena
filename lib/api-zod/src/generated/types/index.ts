@@ -7,7 +7,6 @@
  */
 
 export * from './bossAbility';
-export * from './bossAction';
 export * from './bossEncounter';
 export * from './bossEncounterMechanics';
 export * from './bossGenerateInput';
@@ -17,7 +16,6 @@ export * from './characterInput';
 export * from './characterStats';
 export * from './characterUpdate';
 export * from './characterUpdateAttributes';
-export * from './combatStateInput';
 export * from './defeatInput';
 export * from './equipInput';
 export * from './equipment';

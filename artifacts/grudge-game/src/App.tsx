@@ -22,6 +22,7 @@ function Router() {
     <Switch>
       <Route path="/game" component={Game} />
       <Route path="/camp" component={Camp} />
+      <Route path="/boss" component={Boss} />
       <Route>
         <Shell>
           <Switch>
@@ -29,7 +30,6 @@ function Router() {
             <Route path="/character/new" component={CharacterNew} />
             <Route path="/equipment" component={Equipment} />
             <Route path="/skills" component={Skills} />
-            <Route path="/boss" component={Boss} />
             <Route path="/enemies" component={Enemies} />
             <Route component={NotFound} />
           </Switch>

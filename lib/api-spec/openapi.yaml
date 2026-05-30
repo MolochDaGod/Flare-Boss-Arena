@@ -311,31 +311,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/BossEncounter"
 
-  /bosses/{id}/action:
-    post:
-      operationId: getBossAction
-      tags: [bosses]
-      summary: Get AI-decided boss action for current combat state
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CombatStateInput"
-      responses:
-        "200":
-          description: Boss action decision
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/BossAction"
-
   /bosses/{id}/defeat:
     post:
       operationId: recordBossDefeat
@@ -556,44 +531,6 @@ components:
         playerLevel:
           type: integer
         difficulty:
-          type: string
-
-    CombatStateInput:
-      type: object
-      required: [bossHpPercent, playerHpPercent, phase, roundNumber]
-      properties:
-        bossHpPercent:
-          type: number
-        playerHpPercent:
-          type: number
-        phase:
-          type: integer
-        roundNumber:
-          type: integer
-        playerActions:
-          type: array
-          items:
-            type: string
-        statusEffects:
-          type: array
-          items:
-            type: string
-
-    BossAction:
-      type: object
-      required: [ability, reasoning, damage, statusEffect]
-      properties:
-        ability:
-          $ref: "#/components/schemas/BossAbility"
-        reasoning:
-          type: string
-        damage:
-          type: integer
-        statusEffect:
-          type: ["string", "null"]
-        phaseTransition:
-          type: boolean
-        taunt:
           type: string
 
     DefeatInput:
