@@ -116,6 +116,8 @@ export function BarGauge({
   frame = "bar",
   height = 16,
   glow = true,
+  insetX = "5.5%",
+  insetY = "32%",
   className,
   style,
   children,
@@ -125,6 +127,10 @@ export function BarGauge({
   frame?: BarFrameKind;
   height?: number;
   glow?: boolean;
+  /** Horizontal inset so the fill clears the frame's arrow caps. Tune per frame. */
+  insetX?: string;
+  /** Vertical inset so the fill seats in the recessed channel. Tune per frame. */
+  insetY?: string;
   className?: string;
   style?: React.CSSProperties;
   children?: React.ReactNode;
@@ -142,7 +148,7 @@ export function BarGauge({
         ...style,
       }}
     >
-      <div style={{ position: "absolute", left: "5.5%", right: "5.5%", top: "32%", bottom: "32%", overflow: "hidden", borderRadius: 2 }}>
+      <div style={{ position: "absolute", left: insetX, right: insetX, top: insetY, bottom: insetY, overflow: "hidden", borderRadius: 2 }}>
         <div
           style={{
             height: "100%",
@@ -166,17 +172,20 @@ export function OrbGauge({
   pct,
   color,
   size = 64,
+  inset = { left: "16%", right: "16%", top: "11%", bottom: "13%" },
   className,
 }: {
   pct: number;
   color: string;
   size?: number;
+  /** Liquid bounds inside the globe rim. Tune if the glass art changes. */
+  inset?: { left: string; right: string; top: string; bottom: string };
   className?: string;
 }) {
   const clamped = Math.max(0, Math.min(100, pct));
   return (
     <div className={className} style={{ position: "relative", width: size, height: size }}>
-      <div style={{ position: "absolute", left: "16%", right: "16%", top: "11%", bottom: "13%", borderRadius: "50%", overflow: "hidden", background: "#0a0a0a" }}>
+      <div style={{ position: "absolute", left: inset.left, right: inset.right, top: inset.top, bottom: inset.bottom, borderRadius: "50%", overflow: "hidden", background: "#0a0a0a" }}>
         <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: `${clamped}%`, background: color, transition: "height 150ms linear" }} />
       </div>
       <img

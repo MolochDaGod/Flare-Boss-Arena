@@ -467,8 +467,10 @@ function BossArena() {
             </div>
           </div>
 
-          {/* Skill bar — bottom center */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex gap-2 px-3 py-2" style={stonePanel}>
+          {/* Bottom control cluster — centered, wraps on narrow viewports */}
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-end justify-center gap-2 flex-wrap max-w-[calc(100%-2rem)]">
+          {/* Skill bar */}
+          <div className="relative flex gap-2 px-3 py-2" style={stonePanel}>
             <Rivets />
             {skillSlots.map((s, i) => {
               const cd = hud.skillCooldownPct[i] ?? 1;
@@ -502,8 +504,8 @@ function BossArena() {
             })}
           </div>
 
-          {/* Action buttons — right of skill bar */}
-          <div className="absolute bottom-4 z-10 flex gap-2" style={{ left: "calc(50% + 200px)" }}>
+          {/* Action buttons */}
+          <div className="flex gap-2">
             <button
               onClick={() => sceneRef.current?.attackNearest()}
               className="w-12 h-12 rounded flex flex-col items-center justify-center border"
@@ -522,6 +524,7 @@ function BossArena() {
               <Crosshair className="w-5 h-5" />
               <span className="text-[7px]">SPC</span>
             </button>
+          </div>
           </div>
 
           {/* Floating damage numbers */}
