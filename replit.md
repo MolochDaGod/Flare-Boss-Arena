@@ -30,11 +30,12 @@ Browser-based isometric ARPG — forge a warlord, enter the dungeon, fight real 
   - `src/game/GameEngine.ts` — Full Three.js ARPG engine (isometric, GLB models, sprite enemies)
   - `src/game/proceduralTextures.ts` — Runtime canvas-built ground material (cobblestone color+bump) + `makeRockField` InstancedMesh prop scatter
   - `src/game/MonsterModels.ts` — Registry + async loader for the 6 imported GLB monsters (skeletal + static)
+  - `src/game/PirateNPC.ts` — KayKit Pirate Kit NEUTRAL allies: self-contained `.gltf` loader + `PirateAnimator` that plays each character's OWN embedded clips (idle/walk/wave/attack/hit/death). `PIRATE_DEFS`, `loadPirate`, `disposePirate`, `disposeGltfObject`
   - `src/game/KayKitCharacter.ts` — KayKit animated-character system: loads clip-less character GLBs + a shared KayKit animation-library GLB and plays the library clips on each character via one `AnimationMixer` (bone names match the rig exactly). `KitAnimator` (idle/walk/attack/hit/death state machine), `KIT_TEMPLATES`, `isKitMonsterId`, `loadKitMonster`, `disposeKitModel`
   - `src/pages/game.tsx` — Full-screen game view at `/game`
   - `src/pages/home.tsx` — War Panel (character overview, Enter World button)
   - `src/pages/character-new.tsx` — Soul Forge (character creation)
-  - `src/pages/boss.tsx` — Boss Arena (GPT-5.1 AI boss fights)
+  - `src/pages/boss.tsx` — Boss Arena (GPT-5.1 AI boss fights) + "Call Allies" one-time pirate assault
   - `src/pages/equipment.tsx` — Armory (119 weapons, 150 armor from R2)
   - `src/pages/skills.tsx` — Grimoire (skill trees)
   - `src/pages/enemies.tsx` — Bestiary (38 enemies from R2)
@@ -66,7 +67,8 @@ Browser-based isometric ARPG — forge a warlord, enter the dungeon, fight real 
 - **Dungeon** (`/game`) — Full isometric 3D ARPG: WASD + click-to-move, real GLB player model, 12 animated sprite enemies, combat with crits, damage numbers, floating health bars, combat log, torch flicker
 - **Armory** (`/equipment`) — Browse + equip 119 weapons and 150 armor pieces
 - **Grimoire** (`/skills`) — Skill trees from R2
-- **Boss Arena** (`/boss`) — AI-generated boss encounters via GPT-5.1
+- **Boss Arena** (`/boss`) — AI-generated boss encounters via GPT-5.1; "Call Allies" summons the pirate crew for a one-time damage burst (once per encounter)
+- **Pirate Cove** (in `/game`) — neutral KayKit pirate NPCs + docked ship/dock/loot near the forge; the crew that aids you against bosses
 - **Bestiary** (`/enemies`) — 38 enemies across 8 tiers
 
 ## User preferences
@@ -283,6 +285,41 @@ Consumables/utilities are auto-displayed on hotbar slots 6/7/8 by filtering
   so every reachable coordinate — including corners — stays on y≈0. `baseY=-0.08`
   keeps the flat terrain just under the cobble ground to avoid z-fighting. Added
   in `buildDungeon()`; disposed in `dispose()`.
+
+## Pirate Cove + boss allies (KayKit Pirate Kit)
+
+Neutral pirate NPCs from the KayKit Pirate Kit, integrated as the crew that
+offers "boat assistance" and fights as "allies against bosses".
+
+- **Assets** live in `public/models/pirates/`: `chars/*.gltf` (characters) and
+  `world/*.gltf` (Ship_Small, Environment_Dock, Prop_Chest_Gold, Prop_Barrel,
+  Prop_Anchor), served via `import.meta.env.BASE_URL`. The Pirate Kit `.gltf`
+  files are SELF-CONTAINED (embedded buffer + embedded textures + their OWN
+  embedded animation clips) — unlike the KayKit *character* GLBs which are
+  clip-less and need the shared anim library. So pirates animate NATIVELY: one
+  `AnimationMixer` per character plays its embedded clips by name (Idle / Walk /
+  Run / Sword / Punch / HitReact / Death / Wave). Their rig uses Capitalised
+  bone names (Hips, UpperArm.L, Root, CharacterArmature), incompatible with the
+  lowercase KayKit anim-library rig — irrelevant since clips are embedded.
+- `PirateNPC.ts` mirrors the loader best-practices used elsewhere: empty group
+  returned now + async GLTF inject; `group.userData.disposed` teardown-race
+  guard (late load releases its scene); `.isMesh`/`.isSkinnedMesh` flags (not
+  `instanceof`); `frustumCulled=false` on skinned meshes; leak-safe
+  `disposePirate`/`disposeGltfObject` (geometry + materials + textures).
+  `PirateAnimator`: idle/walk crossfade, wave/attack/hit one-shots that return
+  to locomotion on `finished`, death is a terminal clamp (`dead` latch).
+- **GameEngine `buildPirateCove()`**: spawns a docked ship + dock + loot props
+  and 3 NEUTRAL pirates ringing `coveCenter` (30, 0, -6). Pirates are NOT added
+  to `this.enemies` and carry NO `enemyId`, so click/hover raycasts (which only
+  iterate `this.enemies`) can never target or attack them. The `update()` loop
+  advances each pirate mixer and, when the player is within ~11 units, turns the
+  pirate to face the player and triggers an occasional wave. `loadCoveProp()`
+  and the pirate loader both gate their async callbacks on the engine-level
+  `this.disposed` flag / `group.userData.disposed`; `dispose()` removes cove
+  objects from the scene and releases all pirate/prop/label resources.
+- **Boss Arena allies** (`boss.tsx`): a one-time "Call Allies" button (anchor
+  icon, gold) deals a pirate-crew damage burst to the boss with flavored combat
+  log lines; `alliesCalled` gates re-use and resets per generated encounter.
 
 ## Skills system (all tabs)
 

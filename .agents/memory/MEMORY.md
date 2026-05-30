@@ -1,1 +1,1 @@
-- [JSDoc block-comment `*/` pitfall](jsdoc-block-comment-pitfall.md) — a stray `*/` in a comment (e.g. glob like `.*/`) ends it early, causing a misleading cascade of TS syntax errors below.
+- [KayKit Pirate Kit asset traits](kaykit-pirate-kit-assets.md) — pirate .gltf are self-contained with OWN embedded clips (native-clip path); KayKit character GLBs are clip-less and need the shared anim library.

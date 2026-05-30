@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
-import { Skull, Swords, Sword, Loader2, Sparkles } from "lucide-react";
+import { Skull, Swords, Sword, Loader2, Sparkles, Anchor } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 
@@ -26,6 +26,7 @@ export default function Boss() {
   const [playerHp, setPlayerHp] = useState(100);
   const [round, setRound] = useState(1);
   const [isCombatActive, setIsCombatActive] = useState(false);
+  const [alliesCalled, setAlliesCalled] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const generateBoss = useGenerateBoss({
@@ -35,6 +36,7 @@ export default function Boss() {
         setBossHp(boss.maxHp);
         setPlayerHp(1000); // placeholder player HP
         setRound(1);
+        setAlliesCalled(false);
         setCombatLog([{
           id: Date.now().toString(),
           type: 'system',
@@ -134,6 +136,44 @@ export default function Boss() {
     });
 
     setRound(r => r + 1);
+  };
+
+  const handleCallAllies = () => {
+    if (!activeBoss || !isCombatActive || alliesCalled || getBossAction.isPending) return;
+    setAlliesCalled(true);
+
+    const allies = [
+      { name: "Anne Bonny", line: "Fire the broadside, beast!" },
+      { name: "Capt. Barbarossa", line: "No quarter for ye!" },
+      { name: "Henry Morgan", line: "Cutlasses out, lads!" },
+    ];
+
+    const logs: LogEntry[] = [{
+      id: Date.now() + '-allies',
+      type: 'system',
+      text: "\u2693 Your pirate crew storms the arena to your aid!"
+    }];
+
+    let total = 0;
+    allies.forEach((a, i) => {
+      const dmg = Math.floor(Math.random() * 55) + 45;
+      total += dmg;
+      logs.push({
+        id: Date.now() + '-ally-' + i,
+        type: 'player',
+        text: `${a.name}: "${a.line}"`,
+        amount: dmg,
+      });
+    });
+
+    setCombatLog(prev => [...prev, ...logs]);
+    const newBossHp = Math.max(0, bossHp - total);
+    setBossHp(newBossHp);
+
+    if (newBossHp <= 0) {
+      setIsCombatActive(false);
+      setCombatLog(prev => [...prev, { id: Date.now() + '-victory', type: 'system', text: `VICTORY. ${activeBoss.name} falls to the pirate assault.` }]);
+    }
   };
 
   if (!activeChar) {
@@ -258,6 +298,16 @@ export default function Boss() {
               disabled={!isCombatActive || getBossAction.isPending}
             >
               <Sparkles className="w-6 h-6 mr-2" /> Spell
+            </Button>
+             <Button 
+              size="lg" 
+              variant="outline"
+              className="flex-1 h-16 font-serif text-xl tracking-widest uppercase border-amber-500/60 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300 disabled:opacity-40"
+              disabled={!isCombatActive || getBossAction.isPending || alliesCalled}
+              onClick={handleCallAllies}
+              title={alliesCalled ? "Your pirate crew has already struck" : "Summon your pirate allies for a one-time assault"}
+            >
+              <Anchor className="w-6 h-6 mr-2" /> {alliesCalled ? "Crew Spent" : "Call Allies"}
             </Button>
           </div>
         </div>

@@ -5,6 +5,7 @@ import { isMonsterId, loadMonsterModel, disposeMonsterModel, MONSTER_TEMPLATES }
 import { isKitMonsterId, loadKitMonster, disposeKitModel, KIT_TEMPLATES } from "./KayKitCharacter";
 import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
+import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle } from "./PirateNPC";
 import { PlayerAnimator, buildAuthoredClips, pickSkinClips } from "./PlayerAnimator";
 import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "../data/characterMeshes";
 import { getSkin, skinUrl, type SkinDef } from "../data/skins";
@@ -161,6 +162,11 @@ export class GameEngine {
   private rockField: THREE.InstancedMesh | null = null;
   private terrainMesh: THREE.Mesh | null = null;
   private camp: CampHandle | null = null;
+  private pirates: PirateHandle[] = [];
+  private coveProps: THREE.Group[] = [];
+  private coveLabel: THREE.Sprite | null = null;
+  private coveCenter = new THREE.Vector3(30, 0, -6);
+  private disposed = false;
   private hoveredEnemy: EnemyInstance | null = null;
   private hoverEmissive = new Map<THREE.MeshStandardMaterial, { hex: number; intensity: number }>();
   private _moveHandler!: (e: MouseEvent) => void;
@@ -216,6 +222,7 @@ export class GameEngine {
     this.buildDungeon();
     this.loadEnvironment();
     this.camp = buildOrcCamp(this.loader, this.scene, `${import.meta.env.BASE_URL}models/buildings/orc_camp_set.glb`);
+    this.buildPirateCove();
     this.setupLighting();
     this.loadPlayerModel();
     this.spawnInitialEnemies();
@@ -318,6 +325,106 @@ export class GameEngine {
         console.warn("[GameEngine] forge-scene.glb failed to load:", err);
       },
     );
+  }
+
+  /**
+   * Pirate Cove — a neutral allied outpost: a docked ship (boat assistance) +
+   * dock + treasure props, ringed by NEUTRAL pirate NPCs. The pirates animate
+   * with their own embedded clips (idle + wave at a nearby player), are never
+   * added to `this.enemies`, and carry no `enemyId`, so they can't be targeted
+   * or attacked. They signal that the pirate crew will aid you in the Boss Arena.
+   */
+  private buildPirateCove() {
+    const c = this.coveCenter;
+    // Boat assistance: a docked ship as the cove landmark + a jetty + loot.
+    this.loadCoveProp("world/Ship_Small.gltf", new THREE.Vector3(c.x + 7, 0, c.z - 4), 16, Math.PI * 0.18);
+    this.loadCoveProp("world/Environment_Dock.gltf", new THREE.Vector3(c.x + 1, 0, c.z), 11, 0);
+    this.loadCoveProp("world/Prop_Chest_Gold.gltf", new THREE.Vector3(c.x - 2.5, 0, c.z + 2.5), 1.3, 0.6);
+    this.loadCoveProp("world/Prop_Barrel.gltf", new THREE.Vector3(c.x - 3.5, 0, c.z + 1), 1.1, 0);
+    this.loadCoveProp("world/Prop_Anchor.gltf", new THREE.Vector3(c.x - 1.5, 0, c.z + 3.5), 1.4, -0.4);
+
+    // Three neutral pirate allies standing around the cove.
+    const trio = PIRATE_DEFS.slice(0, 3);
+    trio.forEach((def, i) => {
+      const angle = (i / trio.length) * Math.PI * 0.8 - Math.PI * 0.4;
+      const px = c.x - 2 + Math.cos(angle) * 3.2;
+      const pz = c.z + 2 + Math.sin(angle) * 3.2;
+      const handle = loadPirate(def, this.loader);
+      handle.group.position.set(px, 0, pz);
+      handle.group.rotation.y = Math.atan2(-px, -pz); // face the map centre
+      handle.group.userData.waveTimer = 1.5 + Math.random() * 4;
+      this.scene.add(handle.group);
+      this.pirates.push(handle);
+    });
+
+    this.addCoveLabel(new THREE.Vector3(c.x + 1, 4.6, c.z));
+  }
+
+  /** Load a self-contained pirate-kit prop, scaled so its longest XZ ≈ extent. */
+  private loadCoveProp(rel: string, pos: THREE.Vector3, extent: number, rotY: number) {
+    const url = `${import.meta.env.BASE_URL}models/pirates/${rel}`;
+    this.loader.load(
+      url,
+      (gltf) => {
+        // Teardown-race guard: if the engine was disposed mid-load, release the
+        // streamed scene instead of attaching it to a dead engine.
+        if (this.disposed) {
+          disposeGltfObject(gltf.scene);
+          return;
+        }
+        const root = gltf.scene;
+        const bbox = new THREE.Box3().setFromObject(root);
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
+        root.scale.setScalar(extent / (Math.max(size.x, size.z) || 1));
+        const b2 = new THREE.Box3().setFromObject(root);
+        const ctr = new THREE.Vector3();
+        b2.getCenter(ctr);
+        root.position.set(-ctr.x, -b2.min.y, -ctr.z);
+        root.traverse((c) => {
+          const m = c as THREE.Mesh;
+          if (m.isMesh) {
+            m.castShadow = true;
+            m.receiveShadow = true;
+          }
+        });
+        const holder = new THREE.Group();
+        holder.position.copy(pos);
+        holder.rotation.y = rotY;
+        holder.add(root);
+        this.scene.add(holder);
+        this.coveProps.push(holder);
+      },
+      undefined,
+      (err) => {
+        // eslint-disable-next-line no-console
+        console.warn("[GameEngine] cove prop failed:", rel, err);
+      },
+    );
+  }
+
+  /** Floating gold sprite label marking the Pirate Cove. */
+  private addCoveLabel(pos: THREE.Vector3) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.font = "bold 46px Georgia, 'Times New Roman', serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(0,0,0,0.9)";
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = "#e9c46a";
+    ctx.fillText("\u2693 PIRATE COVE", 256, 64);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.copy(pos);
+    sprite.scale.set(9, 2.25, 1);
+    this.scene.add(sprite);
+    this.coveLabel = sprite;
   }
 
   private setupLighting() {
@@ -878,6 +985,27 @@ export class GameEngine {
       this.playerMixer.update(delta);
     }
 
+    // Neutral pirate allies at the cove: idle anim, plus turn-to-face and an
+    // occasional wave when the player wanders close.
+    for (const p of this.pirates) {
+      if (!p.ready || !p.animator) continue;
+      p.animator.update(delta);
+      const dx = this.playerPos.x - p.group.position.x;
+      const dz = this.playerPos.z - p.group.position.z;
+      if (Math.hypot(dx, dz) < 11) {
+        const want = Math.atan2(dx, dz);
+        let dy = want - p.group.rotation.y;
+        while (dy > Math.PI) dy -= Math.PI * 2;
+        while (dy < -Math.PI) dy += Math.PI * 2;
+        p.group.rotation.y += dy * 0.08;
+        p.group.userData.waveTimer -= delta;
+        if (p.group.userData.waveTimer <= 0) {
+          p.animator.wave();
+          p.group.userData.waveTimer = 5 + Math.random() * 5;
+        }
+      }
+    }
+
     // Smooth follow camera — eases both position and look-at toward the player.
     const camOffset = new THREE.Vector3(18, 18, 18);
     const camTarget = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z).add(camOffset);
@@ -1034,6 +1162,7 @@ export class GameEngine {
   };
 
   dispose() {
+    this.disposed = true;
     cancelAnimationFrame(this.animFrameId);
     window.removeEventListener("resize", this.onResize);
     window.removeEventListener("keydown", this._keyDownHandler);
@@ -1060,6 +1189,22 @@ export class GameEngine {
       (this.terrainMesh.material as THREE.Material).dispose();
     }
     this.camp?.dispose();
+    for (const p of this.pirates) {
+      this.scene.remove(p.group);
+      disposePirate(p);
+    }
+    this.pirates = [];
+    for (const g of this.coveProps) {
+      this.scene.remove(g);
+      disposeGltfObject(g);
+    }
+    this.coveProps = [];
+    if (this.coveLabel) {
+      this.scene.remove(this.coveLabel);
+      const lm = this.coveLabel.material as THREE.SpriteMaterial;
+      lm.map?.dispose();
+      lm.dispose();
+    }
     if (this.rockField) {
       this.rockField.geometry.dispose();
       (this.rockField.material as THREE.Material).dispose();
