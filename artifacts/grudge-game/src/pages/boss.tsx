@@ -23,6 +23,7 @@ import {
 } from "@/game/ArenaScene";
 import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { useResolvedSkills } from "@/data/skillsResolver";
+import { skillIconSrc } from "@/data/skillIcons";
 import {
   Loader2,
   Skull,
@@ -202,12 +203,18 @@ function BossArena() {
   const skillSlots = useMemo<{ name: string; glyph?: string; icon?: string }[]>(() => {
     const classPart = (hudClassSkills?.skills ?? []).slice(0, 2).map((s) => ({
       name: s.name,
-      glyph: s.glyph,
-      icon: undefined as string | undefined,
+      glyph: s.glyph as string | undefined,
+      icon: skillIconSrc(s.icon) ?? undefined,
     }));
     const weaponPart = hudWeaponSlots.slice(0, 3).map((slot) => {
       const sk = slot.skills[0];
-      return { name: sk?.name ?? slot.label, glyph: undefined as string | undefined, icon: sk?.icon };
+      return {
+        name: sk?.name ?? slot.label,
+        glyph: undefined as string | undefined,
+        icon: sk?.icon
+          ? `https://molochdagod.github.io/ObjectStore/icons/skill_nobg/${sk.icon}`
+          : undefined,
+      };
     });
     return [...classPart, ...weaponPart].slice(0, 5);
   }, [hudClassSkills, hudWeaponSlots]);
@@ -488,9 +495,9 @@ function BossArena() {
                 >
                   {s.icon ? (
                     <img
-                      src={`https://molochdagod.github.io/ObjectStore/icons/skill_nobg/${s.icon}`}
+                      src={s.icon}
                       alt={s.name}
-                      className="w-7 h-7 object-contain"
+                      className="w-full h-full object-cover rounded"
                     />
                   ) : (
                     <span>{s.glyph ?? "✦"}</span>

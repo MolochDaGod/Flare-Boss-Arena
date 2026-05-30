@@ -8,6 +8,7 @@ import {
 } from "@/data/characterMeshes";
 import { starterLoadout } from "@/data/starterGear";
 import { useResolvedSkills } from "@/data/skillsResolver";
+import { SkillIcon } from "@/components/SkillIcon";
 
 // ─── Spec-driven design tokens ─────────────────────────────────────────────────
 // Mirrors https://info.grudge-studio.com/main-panel.html theme (grudge-theme.css).
@@ -758,7 +759,9 @@ function SkillsTab({ character, mainCategory }: { character: CharSummary; mainCa
                 borderLeft: `3px solid ${sk.isSignature ? THEME.gold : THEME.goldDark}`,
               }}
             >
-              <div style={{ fontSize: 22, width: 32, textAlign: "center", flexShrink: 0 }}>{sk.glyph}</div>
+              <div style={{ width: 32, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <SkillIcon icon={sk.icon} glyph={sk.glyph} size={30} radius={5} />
+              </div>
               <div style={{ minWidth: 0 }}>
                 <div className="flex items-center justify-between" style={{ gap: 6 }}>
                   <span style={{ fontFamily: THEME.fontHeading, fontSize: 11, color: THEME.goldLight, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>{sk.name}</span>

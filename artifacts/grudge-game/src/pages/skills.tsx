@@ -5,6 +5,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Book, Flame, Shield, Loader2, Sparkles, Swords } from "lucide-react";
 import { useResolvedSkills } from "@/data/skillsResolver";
+import { SkillIcon } from "@/components/SkillIcon";
 import type { ClassSkill } from "@/data/classSkills";
 import type { WeaponSlot } from "@/game/weaponSkills";
 
@@ -24,8 +25,8 @@ function ClassSkillCard({ skill }: { skill: ClassSkill }) {
           : "border-border/50 hover:border-primary/30"
       }`}
     >
-      <div className="w-12 h-12 rounded bg-muted/50 border border-border/50 shrink-0 flex items-center justify-center text-2xl">
-        {skill.glyph}
+      <div className="w-12 h-12 rounded bg-muted/50 border border-border/50 shrink-0 flex items-center justify-center text-2xl overflow-hidden">
+        <SkillIcon icon={skill.icon} glyph={skill.glyph} size={46} radius={4} />
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex justify-between items-start mb-1 gap-2">

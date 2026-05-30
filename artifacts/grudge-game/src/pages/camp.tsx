@@ -7,6 +7,7 @@ import { CampScene, type CampStateUpdate, type CampStationId } from "@/game/Camp
 import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type PanelKey } from "@/components/MainPanel";
 import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { useResolvedSkills } from "@/data/skillsResolver";
+import { SkillIcon } from "@/components/SkillIcon";
 
 class CampErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
   state = { hasError: false, message: "" };
@@ -358,7 +359,7 @@ function Camp() {
                       className="relative w-11 h-11 rounded flex items-center justify-center text-lg bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all overflow-hidden"
                       style={{ boxShadow: "inset 0 0 5px #000" }}
                     >
-                      <span>{s.glyph}</span>
+                      <SkillIcon icon={s.icon} glyph={s.glyph} size={40} radius={4} />
                       <span className="absolute top-0.5 left-1 text-[9px] font-serif text-neutral-400">{i + 1}</span>
                       {s.isSignature && <span className="absolute -bottom-1 -right-1 text-[9px] leading-none" style={{ color: GOLD }}>★</span>}
                       {!ready && (

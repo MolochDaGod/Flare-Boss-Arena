@@ -25,8 +25,14 @@ export interface ClassSkill {
   id: string;
   name: string;
   description: string;
-  /** Emoji glyph used for rendering (virtual skill, no icon asset). */
+  /** Emoji glyph used for rendering (fallback when no icon asset resolves). */
   glyph: string;
+  /**
+   * Public-relative path to a real skill icon (under `public/`), e.g.
+   * `icons/skilltree/FireMage_Free/FireMage_28.png`. Resolve to a usable
+   * `src` via `skillIconSrc()` (prepends `import.meta.env.BASE_URL`).
+   */
+  icon?: string;
   type: ClassSkillType;
   /** Damage multiplier (relative to base attack), when applicable. */
   damage?: number;
@@ -381,6 +387,51 @@ export const CLASS_SKILLS: Record<string, ClassSkillSet> = {
   ranger: RANGER,
   worge: WORGE,
 };
+
+/**
+ * Real skill-icon assignments (CraftPix skill-tree pack, served from
+ * `public/icons/skilltree/`). Keyed by skill id; thematically matched to each
+ * ability. Baked onto the skill objects once at module load so every consumer
+ * (Grimoire, Armory, MainPanel, in-game/camp/boss HUDs) renders the same art.
+ */
+const ICON_BASE = "icons/skilltree";
+const SKILL_ICONS: Record<string, string> = {
+  // Warrior
+  slash: `${ICON_BASE}/FireMage_Free/FireMage_2.png`,
+  power_strike: `${ICON_BASE}/FireMage_Free/FireMage_26.png`,
+  war_cry: `${ICON_BASE}/EarthMage_Free/EarthMage_31.png`,
+  shield_bash: `${ICON_BASE}/EarthMage_Free/EarthMage_4.png`,
+  cleave: `${ICON_BASE}/FireMage_Free/FireMage_17.png`,
+  demon_blade: `${ICON_BASE}/Necromancer_Free/Necromancer_16.png`,
+  invincible: `${ICON_BASE}/EarthMage_Free/EarthMage_25.png`,
+  // Mage
+  arcane_bolt: `${ICON_BASE}/FrostMage_Free/FrostMage_14.png`,
+  fireball: `${ICON_BASE}/FireMage_Free/FireMage_28.png`,
+  heal: `${ICON_BASE}/FireMage_Free/FireMage_13.png`,
+  ice_storm: `${ICON_BASE}/FrostMage_Free/FrostMage_8.png`,
+  mana_shield: `${ICON_BASE}/FrostMage_Free/FrostMage_21.png`,
+  // Ranger
+  quick_shot: `${ICON_BASE}/Hunter_Free/Hunter_4.png`,
+  aimed_shot: `${ICON_BASE}/Hunter_Free/Hunter_24.png`,
+  poison_arrow: `${ICON_BASE}/Hunter_Free/Hunter_25.png`,
+  evasive_maneuver: `${ICON_BASE}/Hunter_Free/Hunter_6.png`,
+  volley: `${ICON_BASE}/Hunter_Free/Hunter_22.png`,
+  focus: `${ICON_BASE}/Hunter_Free/Hunter_1.png`,
+  // Worge
+  mace_strike: `${ICON_BASE}/EarthMage_Free/EarthMage_13.png`,
+  lightning_lash: `${ICON_BASE}/FireMage_Free/FireMage_25.png`,
+  natures_grasp: `${ICON_BASE}/EarthMage_Free/EarthMage_10.png`,
+  dagger_toss: `${ICON_BASE}/Hunter_Free/Hunter_14.png`,
+  summon_heal_totem: `${ICON_BASE}/FireMage_Free/FireMage_22.png`,
+  summon_fire_totem: `${ICON_BASE}/FireMage_Free/FireMage_35.png`,
+  bear_form: `${ICON_BASE}/EarthMage_Free/EarthMage_20.png`,
+};
+
+for (const set of Object.values(CLASS_SKILLS)) {
+  for (const skill of set.skills) {
+    if (SKILL_ICONS[skill.id]) skill.icon = SKILL_ICONS[skill.id];
+  }
+}
 
 /** Aliases so the legacy display name ("Mage Priest") and similar resolve. */
 const CLASS_ALIASES: Record<string, string> = {
