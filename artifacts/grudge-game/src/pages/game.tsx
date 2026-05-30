@@ -2,13 +2,14 @@ import { useEffect, useRef, useState, useCallback, Component, useMemo, type Reac
 import { useLocation } from "wouter";
 import { useListCharacters, useGetEnemies, useGetClasses, useGetWeapons } from "@workspace/api-client-react";
 import { GameEngine, type GameState, type EnemyTemplate, type PlayerInitStats } from "@/game/GameEngine";
-import { Loader2, ArrowLeft, Swords, Zap, AlertTriangle, Shield, Crosshair, LayoutGrid } from "lucide-react";
+import { Loader2, ArrowLeft, Swords, Zap, Shield, Crosshair, LayoutGrid } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type PanelKey } from "@/components/MainPanel";
 import { getSelectedSkin } from "@/data/skins";
 import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { useResolvedSkills } from "@/data/skillsResolver";
 import { SkillIcon } from "@/components/SkillIcon";
+import { BarGauge, OrbGauge, Separator, WarningBanner } from "@/components/CraftpixUI";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
 class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -20,10 +21,10 @@ class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: b
   render() {
     if (this.state.hasError) {
       return (
-        <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-6 z-50">
-          <AlertTriangle className="w-12 h-12 text-yellow-500" />
-          <p className="font-serif text-primary uppercase tracking-widest text-lg">Dungeon Unavailable</p>
-          <p className="text-sm text-muted-foreground max-w-xs text-center font-mono">{this.state.message || "WebGL is required to enter the dungeon."}</p>
+        <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-6 z-50 p-6">
+          <WarningBanner title="Dungeon Unavailable" className="max-w-md w-full">
+            {this.state.message || "WebGL is required to enter the dungeon."}
+          </WarningBanner>
           <button
             className="font-serif text-xs tracking-widest uppercase text-primary border border-primary/40 px-6 py-2 rounded hover:bg-primary/10 transition-colors"
             onClick={() => window.history.back()}
@@ -330,59 +331,45 @@ function Game() {
 
       {/* Player HUD — bottom left */}
       {gameState && (
-        <div className="absolute bottom-4 left-4 z-10 w-60 space-y-2 px-3.5 py-3" style={stonePanel}>
+        <div className="absolute bottom-4 left-4 z-10 w-60 px-3.5 py-3" style={stonePanel}>
           <Rivets />
-          <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center justify-between mb-1.5">
             <span className="font-serif text-sm tracking-widest uppercase" style={{ color: GOLD }}>{char.name as string}</span>
             <span className="font-serif text-xs text-muted-foreground tracking-widest">Lv {gameState.playerLevel}</span>
           </div>
+          <Separator className="mb-2.5 opacity-80" />
+          <div className="flex items-stretch gap-3">
+            <OrbGauge pct={hpPct} color={hpColor} size={58} className="self-center shrink-0" />
+            <div className="flex-1 min-w-0 space-y-1.5">
+              {/* HP */}
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-mono uppercase text-muted-foreground tracking-widest">HP</span>
+                <span className="text-[10px] font-mono" style={{ color: hpColor }}>
+                  {Math.round(gameState.playerHp)} / {gameState.playerMaxHp}
+                </span>
+              </div>
+              <BarGauge pct={hpPct} color={hpColor} height={15} />
 
-          {/* HP */}
-          <div className="space-y-0.5">
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] font-mono uppercase text-muted-foreground tracking-widest">HP</span>
-              <span className="text-[10px] font-mono" style={{ color: hpColor }}>
-                {Math.round(gameState.playerHp)} / {gameState.playerMaxHp}
-              </span>
-            </div>
-            <div className="h-3 bg-black/60 border border-white/10 rounded-sm overflow-hidden">
-              <div
-                className="h-full transition-all duration-100 rounded-sm"
-                style={{ width: `${hpPct}%`, background: hpColor, boxShadow: `0 0 6px ${hpColor}88` }}
-              />
-            </div>
-          </div>
+              {/* Mana */}
+              <div className="flex justify-between items-center">
+                <span className="text-[10px] font-mono uppercase text-muted-foreground tracking-widest">MP</span>
+                <span className="text-[10px] font-mono text-blue-400">
+                  {Math.round(gameState.playerMana)} / {gameState.playerMaxMana}
+                </span>
+              </div>
+              <BarGauge pct={manaPct} color="#3b82f6" height={12} />
 
-          {/* Mana */}
-          <div className="space-y-0.5">
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] font-mono uppercase text-muted-foreground tracking-widest">MP</span>
-              <span className="text-[10px] font-mono text-blue-400">
-                {Math.round(gameState.playerMana)} / {gameState.playerMaxMana}
-              </span>
-            </div>
-            <div className="h-2 bg-black/60 border border-white/10 rounded-sm overflow-hidden">
-              <div
-                className="h-full transition-all duration-100 rounded-sm"
-                style={{ width: `${manaPct}%`, background: "#3b82f6", boxShadow: "0 0 6px #3b82f688" }}
-              />
-            </div>
-          </div>
+              {/* Attack cooldown strip */}
+              <BarGauge pct={atkPct} color="#ffaa00" height={9} glow={false} />
 
-          {/* Attack cooldown strip */}
-          <div className="h-1.5 bg-black/60 border border-white/10 rounded-sm overflow-hidden">
-            <div
-              className="h-full rounded-sm transition-all duration-75"
-              style={{ width: `${atkPct}%`, background: "#ffaa00", boxShadow: "0 0 4px #ffaa0066" }}
-            />
-          </div>
-
-          {/* XP bar */}
-          <div className="h-1 bg-black/40 border border-white/5 rounded-sm overflow-hidden">
-            <div
-              className="h-full rounded-sm"
-              style={{ width: `${Math.min(100, (gameState.playerXp % 500) / 5)}%`, background: "#a855f7" }}
-            />
+              {/* XP bar */}
+              <div className="h-1 bg-black/40 border border-white/5 rounded-sm overflow-hidden">
+                <div
+                  className="h-full rounded-sm"
+                  style={{ width: `${Math.min(100, (gameState.playerXp % 500) / 5)}%`, background: "#a855f7" }}
+                />
+              </div>
+            </div>
           </div>
         </div>
       )}

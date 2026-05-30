@@ -21,3 +21,8 @@ Two UI asset packs were provided as **PSD-only** (no PNGs shipped):
   - **psd_tools composite-by-named-group → transparent, styled element PNGs.** Layers are well-grouped & named (e.g. `Menu`, `Unitframe`, `Action Bar`, `Loading Bar`, `Globe`, `--- Seperator`, `Cast Bar / Simple Unitframe`). This is the way to get individual sprites.
 - Gotcha: don't name a python script `inspect.py` — it shadows stdlib `inspect` and psd_tools fails to import (circular import error).
 - Tooling: `pip install psd-tools` (Pillow/numpy pulled in). ImageMagick `magick` present.
+- Gotcha: psd_tools `composite()` does NOT render non-destructive Layer FX (bevel/glow/stroke); groups that rely on FX export as FLAT GRAY. Such elements (panel-frame, slot-frame, action-bar, unitframe, menu-bar, avatar-frame) had to be dropped; only baked-fill elements survive (globe, bar-frame/fill, cast/scale frame, separator, warning banner+icon, parchment panel).
+
+## Runtime usage (CraftpixUI.tsx primitives)
+- A frame texture (bar-frame/cast-frame/scale-frame) has a recessed inner CHANNEL; the CSS fill must be **inset by %** so it seats INSIDE the frame, not over the bezel. Insets are per-frame and need eyeball tuning (used ~5.5% left/right, ~32% top/bottom for bars). The OrbGauge seats a colored fill behind the glossy globe PNG and blends with an overlay at ~0.45 opacity.
+- Always build asset URLs from a normalized `import.meta.env.BASE_URL` (vite.config enforces a non-root `base`); root-relative `/ui/...` breaks under the path prefix.

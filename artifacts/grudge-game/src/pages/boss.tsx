@@ -29,11 +29,11 @@ import {
   Skull,
   Swords,
   ArrowLeft,
-  AlertTriangle,
   Sword,
   Crosshair,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { BarGauge, OrbGauge, Separator, ParchmentPanel, WarningBanner } from "@/components/CraftpixUI";
 import { toast } from "sonner";
 
 // ─── Error boundary (WebGL may be unavailable in headless/screenshot) ───────────
@@ -46,12 +46,10 @@ class ArenaErrorBoundary extends Component<{ children: ReactNode }, { hasError: 
   render() {
     if (this.state.hasError) {
       return (
-        <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-6 z-50">
-          <AlertTriangle className="w-12 h-12 text-yellow-500" />
-          <p className="font-serif text-primary uppercase tracking-widest text-lg">Arena Unavailable</p>
-          <p className="text-sm text-muted-foreground max-w-xs text-center font-mono">
+        <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-6 z-50 p-6">
+          <WarningBanner title="Arena Unavailable" className="max-w-md w-full">
             {this.state.message || "WebGL is required to enter the arena."}
-          </p>
+          </WarningBanner>
           <button
             className="font-serif text-xs tracking-widest uppercase text-primary border border-primary/40 px-6 py-2 rounded hover:bg-primary/10 transition-colors"
             onClick={() => window.history.back()}
@@ -343,7 +341,7 @@ function BossArena() {
       {/* ── Pre-fight: summon screen ── */}
       {!boss && !generateBoss.isPending && (
         <div className="absolute inset-0 z-30 flex items-center justify-center p-6">
-          <div className="max-w-md w-full p-8 text-center space-y-6 relative" style={stonePanel}>
+          <ParchmentPanel className="max-w-md w-full p-8 text-center space-y-6">
             <Rivets />
             <div className="w-20 h-20 mx-auto rounded-full flex items-center justify-center border" style={{ borderColor: GOLD }}>
               <Skull className="w-10 h-10" style={{ color: GOLD }} />
@@ -381,7 +379,7 @@ function BossArena() {
             >
               Conjure Adversary
             </button>
-          </div>
+          </ParchmentPanel>
         </div>
       )}
 
@@ -409,15 +407,7 @@ function BossArena() {
                 Phase {hud.bossPhase}/{hud.bossMaxPhases}
               </span>
             </div>
-            <div className="h-3 w-full bg-black/60 rounded overflow-hidden border border-black/50">
-              <div
-                className="h-full transition-[width] duration-150"
-                style={{
-                  width: `${(hud.bossHp / hud.bossMaxHp) * 100}%`,
-                  background: "linear-gradient(to right, #7a0d0d, #e23b3b)",
-                }}
-              />
-            </div>
+            <BarGauge pct={(hud.bossHp / hud.bossMaxHp) * 100} color="#e23b3b" frame="cast" height={16} />
             {boss.title && (
               <div className="text-center text-[10px] tracking-widest uppercase text-muted-foreground mt-1">{boss.title}</div>
             )}
@@ -439,30 +429,28 @@ function BossArena() {
           </AnimatePresence>
 
           {/* Player vitals — bottom left */}
-          <div className="absolute bottom-4 left-4 z-10 w-60 space-y-2 px-3.5 py-3" style={stonePanel}>
+          <div className="absolute bottom-4 left-4 z-10 w-60 px-3.5 py-3" style={stonePanel}>
             <Rivets />
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center mb-1.5">
               <span className="font-serif text-sm tracking-widest uppercase" style={{ color: GOLD }}>
                 {charName}
               </span>
               <span className="text-[10px] text-muted-foreground">Lv {hud.playerLevel}</span>
             </div>
-            <div>
-              <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
-                <span>HP</span>
-                <span>{Math.round(hud.playerHp)}/{hud.playerMaxHp}</span>
-              </div>
-              <div className="h-3 w-full bg-black/60 rounded overflow-hidden border border-black/50">
-                <div className="h-full bg-gradient-to-r from-red-900 to-red-500" style={{ width: `${(hud.playerHp / hud.playerMaxHp) * 100}%` }} />
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
-                <span>MP</span>
-                <span>{Math.round(hud.playerMana)}/{hud.playerMaxMana}</span>
-              </div>
-              <div className="h-2.5 w-full bg-black/60 rounded overflow-hidden border border-black/50">
-                <div className="h-full bg-gradient-to-r from-blue-900 to-blue-500" style={{ width: `${(hud.playerMana / hud.playerMaxMana) * 100}%` }} />
+            <Separator className="mb-2.5 opacity-80" />
+            <div className="flex items-stretch gap-3">
+              <OrbGauge pct={(hud.playerHp / hud.playerMaxHp) * 100} color="#e23b3b" size={58} className="self-center shrink-0" />
+              <div className="flex-1 min-w-0 space-y-1.5">
+                <div className="flex justify-between text-[10px] text-muted-foreground">
+                  <span>HP</span>
+                  <span>{Math.round(hud.playerHp)}/{hud.playerMaxHp}</span>
+                </div>
+                <BarGauge pct={(hud.playerHp / hud.playerMaxHp) * 100} color="#e23b3b" height={15} />
+                <div className="flex justify-between text-[10px] text-muted-foreground">
+                  <span>MP</span>
+                  <span>{Math.round(hud.playerMana)}/{hud.playerMaxMana}</span>
+                </div>
+                <BarGauge pct={(hud.playerMana / hud.playerMaxMana) * 100} color="#3b82f6" height={12} />
               </div>
             </div>
           </div>

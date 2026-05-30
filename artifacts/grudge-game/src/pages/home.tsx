@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import { Sword, Skull, Swords, Flame, Shield, Zap, Tent, Sparkles } from "lucide-react";
 import { SKINS, getSelectedSkin, setSelectedSkin } from "@/data/skins";
+import { ParchmentPanel } from "@/components/CraftpixUI";
 
 const FACTION_COLORS: Record<string, string> = {
   Crusade: "#d4891a",
@@ -139,16 +140,14 @@ export default function Home() {
       </div>
 
       {!activeChar && !isLoading && (
-        <Card className="border-dashed border-muted-foreground/30 bg-card/50">
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <Sword className="w-12 h-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-serif mb-2">No Warlord Found</h3>
-            <p className="text-sm text-muted-foreground mb-6">Forge your identity before stepping into the arena.</p>
-            <Button asChild variant="outline">
-              <Link href="/character/new">Create Character</Link>
-            </Button>
-          </CardContent>
-        </Card>
+        <ParchmentPanel className="flex flex-col items-center justify-center py-12 px-6 text-center">
+          <Sword className="w-12 h-12 text-muted-foreground mb-4" />
+          <h3 className="text-lg font-serif mb-2">No Warlord Found</h3>
+          <p className="text-sm text-muted-foreground mb-6">Forge your identity before stepping into the arena.</p>
+          <Button asChild variant="outline">
+            <Link href="/character/new">Create Character</Link>
+          </Button>
+        </ParchmentPanel>
       )}
 
       {activeChar && (
@@ -190,19 +189,19 @@ export default function Home() {
           </div>
 
           <div className="space-y-6">
-            <Card className="border-border/50 bg-card/50">
-              <CardHeader className="pb-3 border-b border-border/50">
-                <CardTitle className="text-sm font-serif tracking-widest uppercase text-muted-foreground">Attributes</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-6 space-y-4">
+            <ParchmentPanel className="overflow-hidden">
+              <div className="px-6 pt-4 pb-3 border-b border-[#c5a059]/30">
+                <h2 className="text-sm font-serif tracking-widest uppercase" style={{ color: "#c5a059" }}>Attributes</h2>
+              </div>
+              <div className="px-6 pt-6 pb-6 space-y-4">
                 {Object.entries((activeChar.attributes as Record<string, unknown>) ?? {}).map(([attr, val]) => (
                   <div key={attr} className="flex justify-between items-center">
                     <span className="text-sm font-serif tracking-widest text-muted-foreground uppercase">{attr}</span>
                     <span className="font-mono text-primary">{String(val)}</span>
                   </div>
                 ))}
-              </CardContent>
-            </Card>
+              </div>
+            </ParchmentPanel>
 
             <Card className="border-border/50 bg-card/50">
               <CardHeader className="pb-3 border-b border-border/50 flex flex-row items-center justify-between">
