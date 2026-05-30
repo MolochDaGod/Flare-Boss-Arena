@@ -1,2 +1,3 @@
 - [KayKit Pirate Kit asset traits](kaykit-pirate-kit-assets.md) — pirate .gltf are self-contained with OWN embedded clips (native-clip path); KayKit character GLBs are clip-less and need the shared anim library.
 - [architect includeGitDiff + untracked files](architect-git-diff-untracked.md) — passing includeGitDiff:true to code_review architect errors (UNKNOWN_NOT_GIT) when the tree has untracked files; pass paths via relevantFiles instead.
+- [fishing_town.glb is an atlas](fishing-town-atlas.md) — /camp buildings are stacked at origin; clone each by name + bake world matrix, don't read their positions.

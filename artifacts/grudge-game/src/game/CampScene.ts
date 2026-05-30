@@ -151,7 +151,8 @@ export class CampScene {
   private stateAccum = 0;
   private readonly stateInterval = 1 / 30; // throttle HUD updates to ~30 Hz
 
-  private readonly RADIUS = 9;
+  private readonly STATION_RADIUS = 6.2; // engage marker (doorway) distance from centre
+  private readonly BUILDING_RADIUS = 9.2; // building distance from centre
   private readonly BOUNDS = 16;
 
   private options: CampSceneOptions;
@@ -194,6 +195,7 @@ export class CampScene {
 
     this.buildEnvironment();
     this.buildStations();
+    this.loadTown();
     this.buildCampfire();
     this.buildDummies();
     this.loadPlayer();
@@ -269,26 +271,6 @@ export class CampScene {
     rockInst.castShadow = true;
     rockInst.receiveShadow = true;
     this.scene.add(rockInst);
-
-    // Distant tents (silhouettes) for ambient camp feel
-    const tentMat = new THREE.MeshStandardMaterial({ color: 0x261612, roughness: 0.95 });
-    for (let i = 0; i < 4; i++) {
-      const a = i * (Math.PI / 2) + Math.PI / 4;
-      const r = this.BOUNDS - 3.5;
-      const tx = Math.cos(a) * r;
-      const tz = Math.sin(a) * r;
-      const tent = new THREE.Mesh(new THREE.ConeGeometry(1.3, 2.2, 6), tentMat);
-      tent.position.set(tx, 1.1, tz);
-      tent.castShadow = true;
-      tent.receiveShadow = true;
-      this.scene.add(tent);
-      const pole = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.04, 0.04, 2.7, 6),
-        new THREE.MeshStandardMaterial({ color: 0x0a0a0a }),
-      );
-      pole.position.set(tx, 1.35, tz);
-      this.scene.add(pole);
-    }
   }
 
   private buildCampfire() {
@@ -413,70 +395,59 @@ export class CampScene {
     };
   }
 
-  private addStation(
-    id: CampStationId,
-    label: string,
-    hint: string,
-    angleDeg: number,
-    color: number,
-    iconBuilder: (mat: THREE.MeshStandardMaterial) => THREE.Object3D,
-  ): CampStation {
+  private addStation(def: {
+    id: CampStationId;
+    label: string;
+    hint: string;
+    angleDeg: number;
+    color: number;
+  }): CampStation {
+    const { id, label, hint, angleDeg, color } = def;
     const a = (angleDeg * Math.PI) / 180;
-    const x = Math.cos(a) * this.RADIUS;
-    const z = Math.sin(a) * this.RADIUS;
+    // The engage marker sits at the building's doorway (toward camp centre).
+    const x = Math.cos(a) * this.STATION_RADIUS;
+    const z = Math.sin(a) * this.STATION_RADIUS;
 
     const group = new THREE.Group();
     group.position.set(x, 0, z);
 
-    // Pedestal
-    const pedGeom = new THREE.CylinderGeometry(0.85, 1.0, 0.5, 10);
-    const pedMat = new THREE.MeshStandardMaterial({ color: 0x1d1814, roughness: 0.9 });
-    const ped = new THREE.Mesh(pedGeom, pedMat);
-    ped.position.y = 0.25;
-    ped.castShadow = true;
-    ped.receiveShadow = true;
-    group.add(ped);
-
-    // Glow ring (emissive disc just above pedestal)
+    // Glowing ground pad (pulses) marking where to stand.
     const ringMat = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
       opacity: 0.5,
       side: THREE.DoubleSide,
     });
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.95, 1.2, 32), ringMat);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.85, 1.25, 32), ringMat);
     ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.52;
+    ring.position.y = 0.06;
     group.add(ring);
     (group.userData as { ring: THREE.Mesh }).ring = ring;
 
-    // Icon mesh
-    const iconMat = new THREE.MeshStandardMaterial({
+    // Floating interaction glyph hovering over the pad.
+    const glyphMat = new THREE.MeshStandardMaterial({
       color,
       emissive: color,
-      emissiveIntensity: 0.7,
-      roughness: 0.4,
+      emissiveIntensity: 0.9,
+      roughness: 0.35,
       metalness: 0.6,
     });
-    const icon = iconBuilder(iconMat);
-    icon.position.y = 1.05;
-    icon.castShadow = true;
-    group.add(icon);
+    const glyph = new THREE.Mesh(new THREE.OctahedronGeometry(0.32, 0), glyphMat);
+    glyph.position.y = 1.5;
+    glyph.castShadow = true;
+    group.add(glyph);
 
-    // Floating label sprite
+    // Floating label sprite above the doorway.
     const labelTex = this.makeLabelTexture(label.toUpperCase());
     const labelMat = new THREE.SpriteMaterial({ map: labelTex, transparent: true, depthTest: false });
     const labelSprite = new THREE.Sprite(labelMat);
-    labelSprite.position.y = 2.6;
+    labelSprite.position.y = 3.0;
     labelSprite.scale.set(2.8, 0.7, 1);
     group.add(labelSprite);
 
-    const glow = new THREE.PointLight(color, 1.4, 6, 2);
-    glow.position.y = 1.4;
+    const glow = new THREE.PointLight(color, 1.6, 9, 2);
+    glow.position.y = 1.8;
     group.add(glow);
-
-    // Face center
-    group.rotation.y = Math.atan2(-x, -z);
 
     this.scene.add(group);
 
@@ -493,90 +464,129 @@ export class CampScene {
     return station;
   }
 
+  /**
+   * Each camp interaction is hosted by a different building of the fishing town.
+   * `building` is the GLB node name extracted by {@link loadTown}; angles fan the
+   * houses around the camp centre.
+   */
+  private readonly STATION_DEFS: {
+    id: CampStationId;
+    label: string;
+    hint: string;
+    angleDeg: number;
+    color: number;
+    building: string;
+  }[] = [
+    { id: "stash", label: "Stash", hint: "Manage and equip your gear.", angleDeg: -90, color: 0x66ddaa, building: "bank_9" },
+    { id: "skills", label: "Skill Obelisk", hint: "Allocate skill points across your trees.", angleDeg: -38.6, color: 0x44aaff, building: "guild_51" },
+    { id: "stats", label: "Soul Altar", hint: "Distribute attribute points.", angleDeg: 12.9, color: 0xaa44ff, building: "guild.001_49" },
+    { id: "quests", label: "War Board", hint: "Review boss intel and active hunts.", angleDeg: 64.3, color: 0xffcc33, building: "bar_25" },
+    { id: "anvil", label: "Forge", hint: "Craft & repair weapons and armor.", angleDeg: 115.7, color: 0xff7733, building: "house_59" },
+    { id: "portal_dungeon", label: "Dungeon Gate", hint: "Enter the infinite dungeon.", angleDeg: 167.1, color: 0xff4422, building: "house.001_67" },
+    { id: "portal_boss", label: "Boss Sigil", hint: "Challenge a generated boss.", angleDeg: 218.6, color: 0xff22aa, building: "house.002_75" },
+  ];
+
   private buildStations() {
-    // 7 stations in arc — Dungeon and Boss portals get larger, distinctive shapes.
-    this.addStation("anvil", "Forge", "Craft & repair weapons and armor.", -20, 0xff7733, (mat) => {
-      const g = new THREE.Group();
-      const anvilTop = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.25, 0.6), mat);
-      const anvilBody = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.5), mat);
-      anvilBody.position.y = -0.3;
-      g.add(anvilTop);
-      g.add(anvilBody);
-      return g;
+    for (const def of this.STATION_DEFS) this.addStation(def);
+  }
+
+  /**
+   * Stream the fishing-town GLB and place each named building at its
+   * interaction's angle, facing the camp centre. The town is an ATLAS — every
+   * building is modelled stacked at the origin — so each is cloned out and
+   * normalised individually. Non-fatal: if the load fails, the glowing pads +
+   * labels still mark every interaction.
+   */
+  private loadTown() {
+    const loader = new GLTFLoader();
+    const url = `${import.meta.env.BASE_URL}models/buildings/fishing_town.glb`;
+    loader.load(
+      url,
+      (gltf) => {
+        if (this.disposed) {
+          disposeObject3D(gltf.scene);
+          return;
+        }
+        gltf.scene.updateWorldMatrix(true, true);
+        for (const def of this.STATION_DEFS) {
+          const src = this.findBuilding(gltf.scene, def.building);
+          if (!src) {
+            if (import.meta.env.DEV) {
+              console.warn(`[Camp] fishing_town building "${def.building}" not found for station "${def.id}"`);
+            }
+            continue;
+          }
+          const a = (def.angleDeg * Math.PI) / 180;
+          const x = Math.cos(a) * this.BUILDING_RADIUS;
+          const z = Math.sin(a) * this.BUILDING_RADIUS;
+          this.scene.add(this.placeBuilding(src, x, z));
+        }
+      },
+      undefined,
+      () => {
+        /* non-fatal — the camp still works with beacons + labels only */
+      },
+    );
+  }
+
+  private findBuilding(root: THREE.Object3D, name: string): THREE.Object3D | null {
+    let found: THREE.Object3D | null = null;
+    root.traverse((o) => {
+      if (!found && o.name === name) found = o;
+    });
+    if (found) return found;
+    // Fallback to a prefix match in case a re-export shifts the numeric suffix.
+    const base = name.replace(/_\d+$/, "");
+    root.traverse((o) => {
+      if (!found && (o.name === base || o.name.startsWith(base + "_") || o.name.startsWith(base + "."))) {
+        found = o;
+      }
+    });
+    return found;
+  }
+
+  /**
+   * Clone a building subtree out of the atlas, bake its world matrix (preserving
+   * the glTF Y-up axis correction), normalise it to a fixed footprint with feet
+   * at y=0, and wrap it in a holder placed at + facing the camp centre.
+   */
+  private placeBuilding(src: THREE.Object3D, x: number, z: number): THREE.Group {
+    const TARGET = 5.5; // world-unit footprint (max of width/depth)
+    src.updateWorldMatrix(true, false);
+
+    const clone = src.clone(true);
+    clone.position.set(0, 0, 0);
+    clone.quaternion.identity();
+    clone.scale.set(1, 1, 1);
+    clone.applyMatrix4(src.matrixWorld);
+
+    const pivot = new THREE.Group();
+    pivot.add(clone);
+
+    const box = new THREE.Box3().setFromObject(pivot);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const footprint = Math.max(size.x, size.z) || 1;
+
+    // Recentre footprint over the origin and drop feet to the ground.
+    clone.position.x -= center.x;
+    clone.position.z -= center.z;
+    clone.position.y -= box.min.y;
+    pivot.scale.setScalar(TARGET / footprint);
+
+    pivot.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if ((mesh as unknown as { isMesh?: boolean }).isMesh) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+      }
     });
 
-    this.addStation("skills", "Skill Obelisk", "Allocate skill points across your trees.", 20, 0x44aaff, (mat) => {
-      const obelisk = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.4, 4), mat);
-      return obelisk;
-    });
-
-    this.addStation("stats", "Soul Altar", "Distribute attribute points.", -60, 0xaa44ff, (mat) => {
-      const g = new THREE.Group();
-      const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.45, 0), mat);
-      crystal.position.y = 0.2;
-      g.add(crystal);
-      return g;
-    });
-
-    this.addStation("quests", "War Board", "Review boss intel and active hunts.", 60, 0xffcc33, (mat) => {
-      const g = new THREE.Group();
-      const board = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.9, 0.08), mat);
-      board.position.y = 0.1;
-      g.add(board);
-      const post = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.05, 0.05, 1.2, 6),
-        new THREE.MeshStandardMaterial({ color: 0x251a10 }),
-      );
-      post.position.y = -0.5;
-      g.add(post);
-      return g;
-    });
-
-    this.addStation("stash", "Stash", "Manage and equip your gear.", -100, 0x66ddaa, (mat) => {
-      const g = new THREE.Group();
-      const chest = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.6), mat);
-      const lid = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.3, 0.3, 0.9, 8, 1, false, 0, Math.PI),
-        mat,
-      );
-      lid.rotation.z = Math.PI / 2;
-      lid.position.y = 0.25;
-      g.add(chest);
-      g.add(lid);
-      return g;
-    });
-
-    this.addStation("portal_dungeon", "Dungeon Gate", "Enter the infinite dungeon.", -150, 0xff4422, (mat) => {
-      const g = new THREE.Group();
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.12, 12, 24), mat);
-      ring.rotation.x = Math.PI / 2;
-      ring.position.y = 0.4;
-      g.add(ring);
-      const portalDisc = new THREE.Mesh(
-        new THREE.CircleGeometry(0.7, 24),
-        new THREE.MeshBasicMaterial({ color: 0xff2200, transparent: true, opacity: 0.55 }),
-      );
-      portalDisc.rotation.x = Math.PI / 2;
-      portalDisc.position.y = 0.41;
-      g.add(portalDisc);
-      return g;
-    });
-
-    this.addStation("portal_boss", "Boss Sigil", "Challenge a generated boss.", 150, 0xff22aa, (mat) => {
-      const g = new THREE.Group();
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.12, 12, 24), mat);
-      ring.rotation.x = Math.PI / 2;
-      ring.position.y = 0.4;
-      g.add(ring);
-      const portalDisc = new THREE.Mesh(
-        new THREE.CircleGeometry(0.7, 24),
-        new THREE.MeshBasicMaterial({ color: 0xaa00aa, transparent: true, opacity: 0.55 }),
-      );
-      portalDisc.rotation.x = Math.PI / 2;
-      portalDisc.position.y = 0.41;
-      g.add(portalDisc);
-      return g;
-    });
+    const holder = new THREE.Group();
+    holder.position.set(x, 0, z);
+    holder.rotation.y = Math.atan2(-x, -z); // face camp centre
+    holder.add(pivot);
+    return holder;
   }
 
   private makeLabelTexture(text: string): THREE.CanvasTexture {
@@ -1084,7 +1094,7 @@ export class CampScene {
       const pulse = 0.45 + 0.2 * Math.sin(elapsed * 2.5 + st.position.x * 0.3);
       if (ring) (ring.material as THREE.MeshBasicMaterial).opacity = pulse;
       st.glow.intensity = 1.0 + 0.5 * Math.sin(elapsed * 3 + st.position.z * 0.2);
-      if (d < 2.6 && (!closest || d < closest.d)) closest = { st, d };
+      if (d < 3.4 && (!closest || d < closest.d)) closest = { st, d };
     }
 
     const newNearbyId = closest?.st.id ?? null;

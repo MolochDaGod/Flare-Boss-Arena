@@ -338,6 +338,18 @@ offers "boat assistance" and fights as "allies against bosses".
 KayKit hero with a full animation set fighting passive training dummies, with a
 stone/gold combat HUD ported from the in-game HUD.
 
+- **Fishing-town environment + per-house interactions**: the camp is dressed with
+  `public/models/buildings/fishing_town.glb`, an ATLAS (every named building is
+  modelled stacked at the origin — see `.agents/memory/fishing-town-atlas.md`). Each
+  of the 7 camp interactions is hosted by a distinct building: `STATION_DEFS` maps
+  `CampStationId` → building node + angle + color. `loadTown()` async-loads the GLB
+  (disposed-guarded, non-fatal), `findBuilding()` resolves nodes (exact + prefix
+  fallback), and `placeBuilding()` clones each subtree, bakes `src.matrixWorld`
+  (preserving the Y-up correction), normalizes to a 5.5u footprint with feet at y=0,
+  and places it at `BUILDING_RADIUS` facing center. `addStation()` puts a glowing
+  doorway pad + floating glyph + label + light at the inner `STATION_RADIUS`; engage
+  proximity is `d < 3.4`. Station IDs are unchanged so `camp.tsx` engage/panel
+  routing is untouched.
 - **Player model + animation**: loads the LOCAL hero GLB
   (`public/models/kaykit/heroes/<Name>.glb`, ObjectStore→capsule fallback) and
   drives it with a module-scope `HeroAnimator` — a candidate-based clip resolver
