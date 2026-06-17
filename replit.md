@@ -57,6 +57,7 @@ Browser-based isometric ARPG — forge a warlord, enter the dungeon, fight real 
 
 - Do NOT run `pnpm dev` at the workspace root — no root dev script. Use per-artifact filters / workflows.
 - Three.js WebGLRenderer fails in headless/screenshot browsers (no GPU) — the game pages' error boundaries handle this gracefully (now via `WarningBanner`).
+- Tailwind v4 (`src/index.css`) uses `@import "tailwindcss" source(none)` + explicit `@source` (src + index.html). Do NOT revert to bare `@import "tailwindcss"`: its auto content-scan crawls the whole Vite root and reads the ~335MB of binary GLBs in `public/` into memory (it doesn't treat `.glb`/`.gltf` as binary), causing a linear memory runaway that OOM-kills the dev server on first page load. New className-bearing dirs outside `src/**` need their own `@source`. See `.agents/memory/tailwind-v4-content-scan-oom.md`.
 - Sprite-sheet animation: each animation is its OWN PNG (horizontal strip), not rows in one sheet. R2 URL: `${R2_BASE}/${folder}/${animationFile}`.
 - Mesh detection across the codebase uses `.isMesh`/`.isSkinnedMesh` flags, NOT `instanceof` — the app loads multiple Three.js instances, which breaks `instanceof`.
 - All GLB loaders return an EMPTY group immediately + async-inject, gated by a `group.userData.disposed` (and engine-level `this.disposed`) flag so a late load after teardown releases its own resources instead of attaching to a dead group.

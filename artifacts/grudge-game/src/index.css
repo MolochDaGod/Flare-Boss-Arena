@@ -1,5 +1,15 @@
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Inter:wght@400;500;600;700&display=swap');
-@import "tailwindcss";
+/*
+ * Tailwind v4 auto-detects content by scanning the entire Vite root. This repo
+ * ships ~335MB of binary GLB models under `public/` (un-gitignored, .glb/.gltf
+ * are NOT recognized as binary by the oxide scanner), so the default scan reads
+ * every model file into memory looking for class names — a multi-GB runaway that
+ * OOM-kills the dev server the moment the CSS is processed. We disable
+ * auto-detection (`source(none)`) and scan only the actual source files.
+ */
+@import "tailwindcss" source(none);
+@source "../index.html";
+@source "./**/*.{ts,tsx}";
 @import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 

@@ -28,8 +28,37 @@ localPort = 8081
 externalPort = 80
 
 [[ports]]
+localPort = 8099
+externalPort = 8099
+
+[[ports]]
 localPort = 22711
 externalPort = 3000
+
+[[ports]]
+localPort = 22755
+externalPort = 3003
+
+[[ports]]
+localPort = 22756
+externalPort = 4200
+
+[[ports]]
+localPort = 22757
+externalPort = 5000
+
+[[ports]]
+localPort = 22759
+externalPort = 5173
+
+[[ports]]
+localPort = 22799
+externalPort = 3002
+
+[[ports]]
+localPort = 24999
+externalPort = 6000
+exposeLocalhost = true
 
 [nix]
 channel = "stable-25_05"
