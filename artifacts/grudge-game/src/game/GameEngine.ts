@@ -185,7 +185,7 @@ export class GameEngine {
 
   private torchLights: THREE.PointLight[] = [];
   private loaded = false;
-  private DUNGEON = 50;
+  private DUNGEON = 90;
 
   // Larger-map / best-practice additions.
   private sun: THREE.DirectionalLight | null = null;
@@ -197,7 +197,7 @@ export class GameEngine {
   private townsfolk: Townsperson[] = [];
   private coveProps: THREE.Group[] = [];
   private coveLabel: THREE.Sprite | null = null;
-  private coveCenter = new THREE.Vector3(30, 0, -6);
+  private coveCenter = new THREE.Vector3(70, 0, -14);
   private disposed = false;
   private hoveredEnemy: EnemyInstance | null = null;
   private hoverEmissive = new Map<THREE.MeshStandardMaterial, { hex: number; intensity: number }>();
@@ -227,10 +227,10 @@ export class GameEngine {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x060608);
-    this.scene.fog = new THREE.FogExp2(0x060608, 0.018);
+    this.scene.fog = new THREE.FogExp2(0x060608, 0.010);
 
     const aspect = w / h;
-    const d = 13;
+    const d = 18;
     this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 300);
     this.camera.position.set(18, 18, 18);
     this.camera.lookAt(0, 0, 0);
@@ -331,7 +331,7 @@ export class GameEngine {
     // pirate cove ring it. DungeonMap fires onReady on success OR failure so any
     // loading veil can clear, and gameplay falls back to the flat plane until
     // the BVH is built.
-    this.dungeonMap = new DungeonMap({ targetExtent: 56 });
+    this.dungeonMap = new DungeonMap({ targetExtent: 130 });
     this.dungeonMap.load(this.loader, this.scene, url, () => {
       this.mapReady = true;
       this.onMapReady?.();
@@ -505,9 +505,9 @@ export class GameEngine {
     sun.castShadow = true;
     sun.shadow.mapSize.setScalar(2048);
     sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 120;
-    sun.shadow.camera.left = sun.shadow.camera.bottom = -35;
-    sun.shadow.camera.right = sun.shadow.camera.top = 35;
+    sun.shadow.camera.far = 220;
+    sun.shadow.camera.left = sun.shadow.camera.bottom = -60;
+    sun.shadow.camera.right = sun.shadow.camera.top = 60;
     sun.shadow.bias = -0.001;
     this.scene.add(sun);
     this.scene.add(sun.target);
@@ -1460,7 +1460,7 @@ export class GameEngine {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
     const aspect = w / h;
-    const d = 13;
+    const d = 18;
     this.camera.left = -d * aspect;
     this.camera.right = d * aspect;
     this.camera.top = d;
