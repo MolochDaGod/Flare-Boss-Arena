@@ -255,6 +255,7 @@ function BossArena() {
       },
     });
     scene.init(mountRef.current);
+    scene.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
     sceneRef.current = scene;
     return () => {
       scene.dispose();
@@ -262,6 +263,11 @@ function BossArena() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boss, stats]);
+
+  // Keep the scene's archetype mapping in sync with resolved class skills.
+  useEffect(() => {
+    sceneRef.current?.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
+  }, [hudClassSkills]);
 
   const handleSummon = () => {
     if (!char) return;

@@ -242,6 +242,7 @@ function Game() {
     const engine = new GameEngine();
     engine.onStateUpdate = handleStateUpdate;
     engine.init(mountRef.current, { ...playerStats, skinId, equipMainCategory }, enemyTemplates);
+    engine.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
     engineRef.current = engine;
 
     return () => {
@@ -250,6 +251,11 @@ function Game() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
+
+  // Keep the engine's archetype mapping in sync with resolved class skills.
+  useEffect(() => {
+    engineRef.current?.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
+  }, [hudClassSkills]);
 
   useEffect(() => {
     const t = setTimeout(() => setShowControls(false), 6000);

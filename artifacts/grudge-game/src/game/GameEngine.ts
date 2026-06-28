@@ -6,6 +6,7 @@ import { isKitMonsterId, loadKitMonster, disposeKitModel, KIT_TEMPLATES } from "
 import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
 import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle } from "./PirateNPC";
+import { Townsperson } from "./Townsfolk";
 import { PlayerAnimator, buildAuthoredClips, pickSkinClips } from "./PlayerAnimator";
 import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "../data/characterMeshes";
 import { getSkin, skinUrl, type SkinDef } from "../data/skins";
@@ -13,6 +14,13 @@ import { RACALVIN_ID } from "../data/fighters";
 import { loadRacalvinForDungeon } from "./racalvinHero";
 import { skillAnimCandidates } from "./kaykitHero";
 import { SkillVfx } from "./skillVfx";
+import type { ClassSkill } from "../data/classSkills";
+import { archetypeForSkill } from "./combat/skillArchetypes";
+import { targetsInShape, type ShapeQuery } from "./combat/damageShapes";
+import type { CombatTarget } from "./combat/types";
+import { ParticleVfx } from "./combat/particles";
+import { TelegraphField } from "./combat/telegraphs";
+import { DeployableManager } from "./combat/deployables";
 
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
 
@@ -118,6 +126,13 @@ export class GameEngine {
   private clock!: THREE.Clock;
   private loader!: GLTFLoader;
   private skillVfx!: SkillVfx;
+  private particles!: ParticleVfx;
+  private telegraphs!: TelegraphField;
+  private deployables!: DeployableManager;
+  /** Resolved HUD skills for archetype mapping; idx fallback works if unset. */
+  private hudSkills: (ClassSkill | undefined)[] = [];
+  private pointerDown = false;
+  private pointerGround: THREE.Vector3 | null = null;
   private animFrameId = 0;
   private floorPlane!: THREE.Mesh;
   private raycaster = new THREE.Raycaster();
@@ -168,6 +183,7 @@ export class GameEngine {
   private terrainMesh: THREE.Mesh | null = null;
   private camp: CampHandle | null = null;
   private pirates: PirateHandle[] = [];
+  private townsfolk: Townsperson[] = [];
   private coveProps: THREE.Group[] = [];
   private coveLabel: THREE.Sprite | null = null;
   private coveCenter = new THREE.Vector3(30, 0, -6);
@@ -175,6 +191,8 @@ export class GameEngine {
   private hoveredEnemy: EnemyInstance | null = null;
   private hoverEmissive = new Map<THREE.MeshStandardMaterial, { hex: number; intensity: number }>();
   private _moveHandler!: (e: MouseEvent) => void;
+  private _downHandler!: (e: MouseEvent) => void;
+  private _upHandler!: () => void;
 
   init(
     container: HTMLDivElement,
@@ -224,6 +242,9 @@ export class GameEngine {
     this.clock = new THREE.Clock();
     this.loader = new GLTFLoader();
     this.skillVfx = new SkillVfx(this.scene, this.loader);
+    this.particles = new ParticleVfx(this.scene);
+    this.telegraphs = new TelegraphField(this.scene);
+    this.deployables = new DeployableManager(this.scene);
 
     this.buildDungeon();
     this.loadEnvironment();
@@ -364,6 +385,29 @@ export class GameEngine {
     });
 
     this.addCoveLabel(new THREE.Vector3(c.x + 1, 4.6, c.z));
+
+    this.buildTownsfolk();
+  }
+
+  /** Neutral KayKit townsfolk wandering near the cove — ambient population only,
+   *  never targetable (they carry no `enemyId`). */
+  private buildTownsfolk() {
+    const c = this.coveCenter;
+    const anchors: { x: number; z: number; model?: string }[] = [
+      { x: c.x - 6, z: c.z + 5, model: "Knight" },
+      { x: c.x - 8, z: c.z - 2, model: "Mage" },
+      { x: c.x - 4, z: c.z + 7, model: "Ranger" },
+    ];
+    for (const a of anchors) {
+      const t = new Townsperson(this.loader, {
+        home: new THREE.Vector3(a.x, 0, a.z),
+        model: a.model,
+        height: 1.85,
+        wanderRadius: 2.8,
+      });
+      this.scene.add(t.group);
+      this.townsfolk.push(t);
+    }
   }
 
   /** Load a self-contained pirate-kit prop, scaled so its longest XZ ≈ extent. */
@@ -721,11 +765,34 @@ export class GameEngine {
     this._keyUpHandler = (e: KeyboardEvent) => this.keys.delete(e.code);
     this._clickHandler = (e: MouseEvent) => this.handleClick(e, container);
     this._moveHandler = (e: MouseEvent) => this.handleHover(e, container);
+    // Hold the mouse to cursor-aim skills (auto-aim nearest enemy otherwise).
+    this._downHandler = (e: MouseEvent) => {
+      this.pointerDown = true;
+      this.updatePointerGround(e, container);
+    };
+    this._upHandler = () => { this.pointerDown = false; };
 
     window.addEventListener("keydown", this._keyDownHandler);
     window.addEventListener("keyup", this._keyUpHandler);
     container.addEventListener("click", this._clickHandler);
     container.addEventListener("mousemove", this._moveHandler);
+    container.addEventListener("mousedown", this._downHandler);
+    window.addEventListener("mouseup", this._upHandler);
+  }
+
+  /** Raycast the floor under the cursor and cache the ground point for aiming. */
+  private updatePointerGround(e: MouseEvent, container: HTMLDivElement) {
+    const rect = container.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(mouse, this.camera);
+    const fh = this.raycaster.intersectObject(this.floorPlane);
+    if (fh.length > 0) {
+      if (!this.pointerGround) this.pointerGround = new THREE.Vector3();
+      this.pointerGround.copy(fh[0].point);
+    }
   }
 
   /**
@@ -744,6 +811,13 @@ export class GameEngine {
       .filter((en) => en.state !== "dead" && en.state !== "death")
       .map((en) => en.model.group);
     const hits = this.raycaster.intersectObjects(liveGroups, true);
+
+    // Track the cursor's ground point for cursor-aim.
+    const fh = this.raycaster.intersectObject(this.floorPlane);
+    if (fh.length > 0) {
+      if (!this.pointerGround) this.pointerGround = new THREE.Vector3();
+      this.pointerGround.copy(fh[0].point);
+    }
 
     let hovered: EnemyInstance | null = null;
     if (hits.length > 0) {
@@ -832,13 +906,57 @@ export class GameEngine {
     if (nearest && nearestDist < 4.5) this.doAttack(nearest);
   }
 
-  /** Skill-bar action: play the fighter-specific skill animation and strike all
-   *  enemies in a forward arc. Slot index drives which clip / VFX plays. */
-  useSkill(idx: number) {
-    if (this.playerAttackCooldown > 0) return;
-    const isCast = idx % 2 === 1;
+  /** Provide resolved HUD skills so archetypes map to real skill flavor.
+   *  Optional — the slot-index fallback already gives a broad shape mix. */
+  setHudSkills(skills: (ClassSkill | undefined)[]) {
+    this.hudSkills = skills;
+  }
 
-    // Face the nearest living enemy so the skill reads as aimed.
+  /** Adapt an enemy into the scene-agnostic CombatTarget used by shape queries
+   *  and deployables, routing damage through the existing death pipeline. */
+  private asTarget(en: EnemyInstance): CombatTarget {
+    return {
+      position: en.position,
+      isAlive: () => en.state !== "dead" && en.state !== "death",
+      applyDamage: (amount, isCrit) => this.damageEnemy(en, amount, isCrit),
+    };
+  }
+
+  private enemyTargets(): CombatTarget[] {
+    const out: CombatTarget[] = [];
+    for (const en of this.enemies) {
+      if (en.state === "dead" || en.state === "death") continue;
+      out.push(this.asTarget(en));
+    }
+    return out;
+  }
+
+  /** Apply skill/deployable damage to one enemy (tier mitigation, damage number,
+   *  hurt/death). Marks state dirty so off-cast hits refresh the HUD once/frame. */
+  private damageEnemy(en: EnemyInstance, amount: number, isCrit: boolean) {
+    if (en.state === "dead" || en.state === "death") return;
+    const dmg = Math.max(1, Math.floor(amount) - Math.floor(en.template.tier * 2));
+    en.hp = Math.max(0, en.hp - dmg);
+    const wp = en.model.group.position.clone();
+    wp.y += en.model.height * 0.7;
+    this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
+    this.particles?.impact(wp, isCrit ? 0xffd54a : 0xff7a1e);
+    if (en.hp <= 0) {
+      this.killEnemy(en);
+    } else {
+      en.anim.hurtPhase = 1;
+      en.state = "hurt";
+      en.hurtTimer = 0.4;
+    }
+  }
+
+  /** Resolve aim direction: cursor-aim while the pointer is held, else auto-aim
+   *  the nearest living enemy, else keep the current facing. */
+  private resolveAimDir(): THREE.Vector3 {
+    if (this.pointerDown && this.pointerGround) {
+      const d = new THREE.Vector3(this.pointerGround.x - this.playerPos.x, 0, this.pointerGround.z - this.playerPos.z);
+      if (d.lengthSq() > 1e-4) return d.normalize();
+    }
     let nearest: EnemyInstance | null = null;
     let nearestDist = Infinity;
     for (const en of this.enemies) {
@@ -847,39 +965,67 @@ export class GameEngine {
       if (d < nearestDist) { nearestDist = d; nearest = en; }
     }
     if (nearest) {
-      this.playerFacing = Math.atan2(
-        nearest.position.x - this.playerPos.x,
-        nearest.position.z - this.playerPos.z,
-      );
+      const d = new THREE.Vector3(nearest.position.x - this.playerPos.x, 0, nearest.position.z - this.playerPos.z);
+      if (d.lengthSq() > 1e-4) return d.normalize();
     }
+    return new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+  }
 
+  /** Skill-bar action: resolve the skill's ARCHETYPE (shape or deployable), aim
+   *  it (auto/cursor), show a ground telegraph, fire particles + GLB flavor, and
+   *  strike every enemy inside the shape. */
+  useSkill(idx: number) {
+    if (this.playerAttackCooldown > 0) return;
+    const arch = archetypeForSkill(this.hudSkills[idx], idx);
+    const dir = this.resolveAimDir();
+    this.playerFacing = Math.atan2(dir.x, dir.z);
+
+    const isCast = arch.shape === "circle" || arch.shape === "nova" || arch.shape === "deployable";
     const played = this.playerAnimator?.triggerNamed(skillAnimCandidates(idx, isCast)) ?? false;
     if (!played) this.playerAnimator?.triggerAttack();
     this.playerAttackCooldown = this.playerMaxAttackCooldown;
 
-    const radius = isCast ? 5.5 : 3.6;
-    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    const center = this.playerPos.clone().add(forward.multiplyScalar(isCast ? 2.5 : 1.6));
-    this.spawnSkillVfx(center, idx, isCast);
+    const origin = this.playerPos.clone();
 
-    const mult = isCast ? 2.2 : 1.7;
-    for (const en of this.enemies) {
-      if (en.state === "dead" || en.state === "death") continue;
-      if (en.position.distanceTo(center) > radius) continue;
+    if (arch.shape === "deployable") {
+      const dep = arch.deployable ?? "fire_totem";
+      const place = origin.clone().add(dir.clone().multiplyScalar(arch.range));
+      const D = this.DUNGEON - 1;
+      place.x = Math.max(-D, Math.min(D, place.x));
+      place.z = Math.max(-D, Math.min(D, place.z));
+      this.deployables.deploy(dep, place, arch.color, this.playerBaseDamage * arch.damageMult, arch.radius ?? 4);
+      this.particles?.fireColumn(place.clone().setY(0.3), arch.color);
+      this.log(`You deploy a ${dep.replace("_", " ")}.`);
+      this.notifyState();
+      return;
+    }
+
+    const q: ShapeQuery = {
+      kind: arch.shape,
+      origin,
+      dir,
+      radius: arch.radius,
+      halfAngle: arch.halfAngle,
+      length: arch.length,
+      halfWidth: arch.halfWidth,
+    };
+    this.telegraphs?.show(q, arch.telegraph, arch.color);
+
+    // Keep the GLB tornado/cloud flavor + add a particle accent at the strike point.
+    const reach = arch.radius ?? arch.length ?? 4;
+    const center = origin.clone().add(dir.clone().multiplyScalar(reach * 0.5));
+    this.spawnSkillVfx(center, idx, isCast);
+    if (arch.shape === "nova" || arch.shape === "circle") {
+      this.particles?.nova(center.clone().setY(0.4), reach, arch.color);
+    } else {
+      this.particles?.impact(center.clone().setY(0.6), arch.color, 1.1);
+    }
+
+    const hits = targetsInShape(q, this.enemies, (en) => en.state !== "dead" && en.state !== "death");
+    for (const en of hits) {
       const isCrit = Math.random() < this.playerCritChance + 0.05;
-      const rawDmg = Math.max(1, Math.floor(this.playerBaseDamage * mult * (0.85 + Math.random() * 0.3) * (isCrit ? 1.75 : 1)));
-      const dmg = Math.max(1, rawDmg - Math.floor(en.template.tier * 2));
-      en.hp = Math.max(0, en.hp - dmg);
-      const wp = en.model.group.position.clone();
-      wp.y += en.model.height * 0.7;
-      this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
-      if (en.hp <= 0) {
-        this.killEnemy(en);
-      } else {
-        en.anim.hurtPhase = 1;
-        en.state = "hurt";
-        en.hurtTimer = 0.4;
-      }
+      const raw = this.playerBaseDamage * arch.damageMult * (0.85 + Math.random() * 0.3) * (isCrit ? 1.75 : 1);
+      this.damageEnemy(en, raw, isCrit);
     }
     this.notifyState();
   }
@@ -1073,9 +1219,18 @@ export class GameEngine {
     }
 
     this.skillVfx.update(delta);
+    this.particles?.update(delta);
+    this.telegraphs?.update(delta);
+    this.deployables?.update(delta, {
+      targets: this.enemyTargets(),
+      particles: this.particles,
+      telegraphs: this.telegraphs,
+      log: (m) => this.log(m),
+    });
 
     // Neutral pirate allies at the cove: idle anim, plus turn-to-face and an
     // occasional wave when the player wanders close.
+    for (const t of this.townsfolk) t.update(delta);
     for (const p of this.pirates) {
       if (!p.ready || !p.animator) continue;
       p.animator.update(delta);
@@ -1256,9 +1411,11 @@ export class GameEngine {
     window.removeEventListener("resize", this.onResize);
     window.removeEventListener("keydown", this._keyDownHandler);
     window.removeEventListener("keyup", this._keyUpHandler);
+    if (this._upHandler) window.removeEventListener("mouseup", this._upHandler);
     if (this.container) {
       this.container.removeEventListener("click", this._clickHandler);
       if (this._moveHandler) this.container.removeEventListener("mousemove", this._moveHandler);
+      if (this._downHandler) this.container.removeEventListener("mousedown", this._downHandler);
       if (this.renderer.domElement.parentNode === this.container) {
         this.container.removeChild(this.renderer.domElement);
       }
@@ -1266,6 +1423,9 @@ export class GameEngine {
     this.clearHover();
     this.playerAnimator?.dispose();
     this.skillVfx?.dispose();
+    this.particles?.dispose();
+    this.telegraphs?.dispose();
+    this.deployables?.dispose();
     // Dispose the procedural ground + rock field.
     if (this.groundMesh) {
       this.groundMesh.geometry.dispose();
@@ -1284,6 +1444,11 @@ export class GameEngine {
       disposePirate(p);
     }
     this.pirates = [];
+    for (const t of this.townsfolk) {
+      this.scene.remove(t.group);
+      t.dispose();
+    }
+    this.townsfolk = [];
     for (const g of this.coveProps) {
       this.scene.remove(g);
       disposeGltfObject(g);

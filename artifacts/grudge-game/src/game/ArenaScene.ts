@@ -1,16 +1,17 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
-  OBJECTSTORE,
-  resolveModelName,
   disposeObject3D,
-  loadKayKitAnimLibrary,
-  HeroAnimator,
   loadActiveFighterModel,
   skillAnimCandidates,
   type HeroLike,
 } from "./kaykitHero";
 import { SkillVfx } from "./skillVfx";
+import { archetypeForSkill } from "./combat/skillArchetypes";
+import { pointInShape, type ShapeQuery } from "./combat/damageShapes";
+import { TelegraphField } from "./combat/telegraphs";
+import { ParticleVfx } from "./combat/particles";
+import type { ClassSkill } from "../data/classSkills";
 import { loadMonsterModel, disposeMonsterModel, isMonsterId } from "./MonsterModels";
 import type { EnemyModel } from "./EnemyFactory";
 import { makeGroundMaterial, makeTerrainSkirt } from "./proceduralTextures";
@@ -164,6 +165,10 @@ export class ArenaScene {
   private renderer!: THREE.WebGLRenderer;
   private clock = new THREE.Clock();
   private skillVfx!: SkillVfx;
+  private skillTelegraphs!: TelegraphField;
+  private particles!: ParticleVfx;
+  /** Resolved HUD skills for archetype mapping; idx fallback works if unset. */
+  private hudSkills: (ClassSkill | undefined)[] = [];
   private animFrameId = 0;
 
   // Lighting rig (sun follows the player for crisp shadows on a big map).
@@ -257,6 +262,8 @@ export class ArenaScene {
     this.scene.background = new THREE.Color(0x070608);
     this.scene.fog = new THREE.FogExp2(0x0a0608, 0.02);
     this.skillVfx = new SkillVfx(this.scene, new GLTFLoader());
+    this.skillTelegraphs = new TelegraphField(this.scene);
+    this.particles = new ParticleVfx(this.scene);
 
     this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 400);
     this.camera.position.set(22, 24, 22);
@@ -420,63 +427,27 @@ export class ArenaScene {
         this.loaded = true;
         this.emitState();
       },
-      () => this.loadKayKitHero(loader),
+      () => this.loadFallbackPlayer(),
     );
   }
 
-  private loadKayKitHero(loader: GLTFLoader) {
-    const modelName = resolveModelName(this.options.className, this.options.raceKey);
-    const localUrl = `${import.meta.env.BASE_URL}models/kaykit/heroes/${modelName}.glb`;
-    const remoteUrl = `${OBJECTSTORE}/models/characters/kaykit/${modelName}.glb`;
-
-    const onLoaded = (gltf: { scene: THREE.Group; animations: THREE.AnimationClip[] }) => {
-      if (this.disposed) {
-        disposeObject3D(gltf.scene);
-        return;
-      }
-      const root = gltf.scene;
-      root.scale.setScalar(1.5);
-      root.position.copy(this.playerPos);
-      root.traverse((c) => {
-        const mesh = c as THREE.Mesh & { isSkinnedMesh?: boolean };
-        if (mesh.isMesh) {
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-          if (mesh.isSkinnedMesh) mesh.frustumCulled = false;
-        }
-      });
-      this.scene.add(root);
-      this.playerGroup = root;
-
-      this.heroAnim = new HeroAnimator(root, gltf.animations);
-      loadKayKitAnimLibrary(loader).then((clips) => {
-        if (this.disposed || !this.heroAnim) return;
-        this.heroAnim.addLibraryClips(clips);
-      });
-
-      this.loaded = true;
-      this.emitState();
-    };
-
-    loader.load(localUrl, onLoaded, undefined, () => {
-      if (this.disposed) return;
-      loader.load(remoteUrl, onLoaded, undefined, () => {
-        if (this.disposed) return;
-        const g = new THREE.Group();
-        const body = new THREE.Mesh(
-          new THREE.CapsuleGeometry(0.45, 1.1, 6, 12),
-          new THREE.MeshStandardMaterial({ color: 0x886644, roughness: 0.7 }),
-        );
-        body.position.y = 1.1;
-        body.castShadow = true;
-        g.add(body);
-        g.position.copy(this.playerPos);
-        this.scene.add(g);
-        this.playerGroup = g;
-        this.loaded = true;
-        this.emitState();
-      });
-    });
+  /** Honest fallback when the fighter skin GLB fails to load: a plain capsule.
+   *  KayKit heroes are reserved for townsfolk/NPCs and are never the player. */
+  private loadFallbackPlayer() {
+    if (this.disposed) return;
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.45, 1.1, 6, 12),
+      new THREE.MeshStandardMaterial({ color: 0x886644, roughness: 0.7 }),
+    );
+    body.position.y = 1.1;
+    body.castShadow = true;
+    g.add(body);
+    g.position.copy(this.playerPos);
+    this.scene.add(g);
+    this.playerGroup = g;
+    this.loaded = true;
+    this.emitState();
   }
 
   // ── Boss ──────────────────────────────────────────────────────────────────
@@ -575,7 +546,9 @@ export class ArenaScene {
     this.playerMana -= cost;
     this.skillCdUntil[idx] = now + (this.skillCdLen[idx] ?? 5) * 1000;
 
-    const isCast = idx % 2 === 1;
+    // Resolve the skill's archetype shape (idx fallback gives a broad mix).
+    const arch = archetypeForSkill(this.hudSkills[idx], idx);
+    const isCast = arch.shape === "circle" || arch.shape === "nova" || arch.shape === "deployable";
     if (this.heroAnim) {
       const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
       if (!played) this.proceduralLunge();
@@ -583,22 +556,52 @@ export class ArenaScene {
       this.proceduralLunge();
     }
 
-    // Skills strike the boss if within range of the cast point.
-    const radius = isCast ? 6.0 : 3.6;
-    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    const center = this.playerPos.clone().add(forward.multiplyScalar(isCast ? 3 : 1.8));
-    this.spawnVfx(center, isCast ? 0x66aaff : 0xffaa33, radius, 0.45);
+    // Auto-aim the boss so shaped skills read as aimed.
+    if (this.bossAlive) {
+      this.playerFacing = Math.atan2(this.bossPos.x - this.playerPos.x, this.bossPos.z - this.playerPos.z);
+    }
+    const dir = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    const origin = this.playerPos.clone();
+
+    // The Boss Arena keeps deployables as an instant AoE pulse (no spawns).
+    const kind = arch.shape === "deployable" ? "nova" : arch.shape;
+    const q: ShapeQuery = {
+      kind,
+      origin,
+      dir,
+      radius: arch.radius,
+      halfAngle: arch.halfAngle,
+      length: arch.length,
+      halfWidth: arch.halfWidth,
+    };
+    this.skillTelegraphs?.show(q, arch.telegraph || 0.3, arch.color);
+
+    const reach = arch.radius ?? arch.length ?? 4;
+    const center =
+      kind === "circle" || kind === "nova"
+        ? origin.clone()
+        : origin.clone().add(dir.clone().multiplyScalar(reach * 0.5));
+    this.spawnVfx(center, arch.color, reach, 0.45);
     this.skillVfx.spawn(isCast ? "cloud" : "tornado", center, isCast ? 4 : 3, isCast ? 1.1 : 1.3);
-    if (this.bossAlive && this.bossPos.distanceTo(center) <= radius + 1.5) {
-      const mult = isCast ? 2.6 : 1.9;
+    if (kind === "nova" || kind === "circle") this.particles?.nova(center.clone().setY(0.4), reach, arch.color);
+    else this.particles?.impact(center.clone().setY(0.6), arch.color, 1.1);
+
+    // Boss is a single large target — allow a small reach tolerance.
+    const tolerant: ShapeQuery = { ...q, radius: (arch.radius ?? 4) + 1.5, length: (arch.length ?? 8) + 1.5 };
+    if (this.bossAlive && pointInShape(tolerant, this.bossPos)) {
       const isCrit = Math.random() < this.critChance + 0.05;
-      const dmg = Math.round(this.baseDamage * mult * (isCrit ? 2 : 1) * (0.85 + Math.random() * 0.3));
+      const dmg = Math.round(this.baseDamage * arch.damageMult * (isCrit ? 2 : 1) * (0.85 + Math.random() * 0.3));
       this.damageBoss(dmg, isCrit);
       this.pushLog(`Skill ${idx + 1} blasts ${this.boss.name}!`);
     } else {
       this.pushLog(`Skill ${idx + 1} — boss out of range.`);
     }
     this.emitState();
+  }
+
+  /** Provide resolved HUD skills so archetypes map to real skill flavor. */
+  setHudSkills(skills: (ClassSkill | undefined)[]) {
+    this.hudSkills = skills;
   }
 
   private proceduralLunge() {
@@ -909,6 +912,8 @@ export class ArenaScene {
     }
 
     this.skillVfx.update(delta);
+    this.skillTelegraphs?.update(delta);
+    this.particles?.update(delta);
 
     // ── Boss AI + movement + animation ──
     if (this.bossModel?.mixer) this.bossModel.mixer.update(delta);
@@ -1131,6 +1136,8 @@ export class ArenaScene {
     }
     if (this.heroAnim) { this.heroAnim.dispose(); this.heroAnim = null; }
     this.skillVfx?.dispose();
+    this.skillTelegraphs?.dispose();
+    this.particles?.dispose();
     if (this.bossGroup) this.bossGroup.userData.disposed = true;
     if (this.bossModel) { disposeMonsterModel(this.bossModel); this.bossModel = null; }
     this.projectiles = [];

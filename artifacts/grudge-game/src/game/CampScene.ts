@@ -1,16 +1,18 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
-  OBJECTSTORE,
-  resolveModelName,
   disposeObject3D,
-  loadKayKitAnimLibrary,
-  HeroAnimator,
   loadActiveFighterModel,
   skillAnimCandidates,
   type HeroLike,
 } from "./kaykitHero";
+import { Townsperson } from "./Townsfolk";
 import { SkillVfx } from "./skillVfx";
+import { archetypeForSkill } from "./combat/skillArchetypes";
+import { pointInShape, type ShapeQuery } from "./combat/damageShapes";
+import { TelegraphField } from "./combat/telegraphs";
+import { ParticleVfx } from "./combat/particles";
+import type { ClassSkill } from "../data/classSkills";
 
 export type CampStationId =
   | "anvil"
@@ -115,6 +117,10 @@ export class CampScene {
   private clock = new THREE.Clock();
   private animFrameId = 0;
   private skillVfx!: SkillVfx;
+  private telegraphs!: TelegraphField;
+  private particles!: ParticleVfx;
+  /** Resolved HUD skills for archetype mapping; idx fallback works if unset. */
+  private hudSkills: (ClassSkill | undefined)[] = [];
 
   private playerGroup: THREE.Group | null = null;
   private heroAnim: HeroLike | null = null;
@@ -127,6 +133,9 @@ export class CampScene {
   private campfireLight!: THREE.PointLight;
   private campfireMesh!: THREE.Mesh;
   private embers: { mesh: THREE.Mesh; vel: THREE.Vector3; life: number; max: number }[] = [];
+
+  // ── Ambient townsfolk (KayKit heroes, non-targetable) ──
+  private townsfolk: Townsperson[] = [];
 
   // ── Combat / testing-ground ──
   private dummies: CampDummy[] = [];
@@ -185,6 +194,8 @@ export class CampScene {
     this.scene.background = new THREE.Color(0x05050a);
     this.scene.fog = new THREE.FogExp2(0x06060c, 0.025);
     this.skillVfx = new SkillVfx(this.scene, new GLTFLoader());
+    this.telegraphs = new TelegraphField(this.scene);
+    this.particles = new ParticleVfx(this.scene);
 
     this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 200);
     this.camera.position.set(18, 18, 18);
@@ -204,6 +215,7 @@ export class CampScene {
     this.loadTown();
     this.buildCampfire();
     this.buildDummies();
+    this.buildTownsfolk();
     this.loadPlayer();
     this.emitState();
 
@@ -329,6 +341,30 @@ export class CampScene {
       { x: 3.2, z: 3.4, name: "Practice Post" },
     ];
     spots.forEach((s, i) => this.dummies.push(this.makeDummy(`dummy_${i}`, s.name, s.x, s.z)));
+  }
+
+  // ── Ambient townsfolk ─────────────────────────────────────────────────────
+  /** Populate the training-ground town with neutral KayKit NPCs that idle and
+   *  wander. They carry no `enemyId`, so they can never be targeted or hit. */
+  private buildTownsfolk() {
+    const loader = new GLTFLoader();
+    const anchors: { x: number; z: number; model?: string }[] = [
+      { x: -7.5, z: -2.0, model: "Knight" },
+      { x: 6.8, z: -3.5, model: "Mage" },
+      { x: -5.0, z: 6.5, model: "Ranger" },
+      { x: 5.5, z: 6.0, model: "Rogue" },
+      { x: 8.0, z: 2.0, model: "Barbarian" },
+    ];
+    for (const a of anchors) {
+      const t = new Townsperson(loader, {
+        home: new THREE.Vector3(a.x, 0, a.z),
+        model: a.model,
+        height: 1.8,
+        wanderRadius: 2.6,
+      });
+      this.scene.add(t.group);
+      this.townsfolk.push(t);
+    }
   }
 
   private makeDummy(id: string, name: string, x: number, z: number): CampDummy {
@@ -631,66 +667,27 @@ export class CampScene {
         this.loaded = true;
         this.emitState();
       },
-      () => this.loadKayKitHero(loader),
+      () => this.loadFallbackPlayer(),
     );
   }
 
-  private loadKayKitHero(loader: GLTFLoader) {
-    const modelName = resolveModelName(this.options.className, this.options.raceKey);
-    const localUrl = `${import.meta.env.BASE_URL}models/kaykit/heroes/${modelName}.glb`;
-    const remoteUrl = `${OBJECTSTORE}/models/characters/kaykit/${modelName}.glb`;
-
-    const onLoaded = (gltf: { scene: THREE.Group; animations: THREE.AnimationClip[] }) => {
-      if (this.disposed) {
-        disposeObject3D(gltf.scene);
-        return;
-      }
-      const root = gltf.scene;
-      root.scale.setScalar(1.5);
-      root.position.copy(this.playerPos);
-      root.traverse((c) => {
-        const mesh = c as THREE.Mesh & { isSkinnedMesh?: boolean };
-        if (mesh.isMesh) {
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-          if (mesh.isSkinnedMesh) mesh.frustumCulled = false;
-        }
-      });
-      this.scene.add(root);
-      this.playerGroup = root;
-
-      // Drive with embedded clips + the shared KayKit animation library.
-      this.heroAnim = new HeroAnimator(root, gltf.animations);
-      loadKayKitAnimLibrary(loader).then((clips) => {
-        if (this.disposed || !this.heroAnim) return;
-        this.heroAnim.addLibraryClips(clips);
-      });
-
-      this.loaded = true;
-      this.emitState();
-    };
-
-    loader.load(localUrl, onLoaded, undefined, () => {
-      if (this.disposed) return;
-      // Fallback to remote ObjectStore model.
-      loader.load(remoteUrl, onLoaded, undefined, () => {
-        if (this.disposed) return;
-        // Final fallback: simple capsule.
-        const g = new THREE.Group();
-        const body = new THREE.Mesh(
-          new THREE.CapsuleGeometry(0.45, 1.1, 6, 12),
-          new THREE.MeshStandardMaterial({ color: 0x886644, roughness: 0.7 }),
-        );
-        body.position.y = 1.1;
-        body.castShadow = true;
-        g.add(body);
-        g.position.copy(this.playerPos);
-        this.scene.add(g);
-        this.playerGroup = g;
-        this.loaded = true;
-        this.emitState();
-      });
-    });
+  /** Honest fallback when the fighter skin GLB fails to load: a plain capsule.
+   *  KayKit heroes are reserved for townsfolk/NPCs and are never the player. */
+  private loadFallbackPlayer() {
+    if (this.disposed) return;
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.45, 1.1, 6, 12),
+      new THREE.MeshStandardMaterial({ color: 0x886644, roughness: 0.7 }),
+    );
+    body.position.y = 1.1;
+    body.castShadow = true;
+    g.add(body);
+    g.position.copy(this.playerPos);
+    this.scene.add(g);
+    this.playerGroup = g;
+    this.loaded = true;
+    this.emitState();
   }
 
   private _keyDown = (e: KeyboardEvent) => {
@@ -798,6 +795,11 @@ export class CampScene {
     this.heroAnim?.trigger("dodge");
   }
 
+  /** Provide resolved HUD skills so archetypes map to real skill flavor. */
+  setHudSkills(skills: (ClassSkill | undefined)[]) {
+    this.hudSkills = skills;
+  }
+
   /** Fire weapon/class skill in slot `idx` (0-based). */
   useSkill(idx: number) {
     if (idx < 0 || idx > 4) return;
@@ -811,8 +813,9 @@ export class CampScene {
     this.playerMana -= cost;
     this.skillCdUntil[idx] = now + (this.skillCdLen[idx] ?? 5) * 1000;
 
-    // Alternate animation flavour: even slots melee, odd slots cast.
-    const isCast = idx % 2 === 1;
+    // Resolve the skill's archetype shape (idx fallback gives a broad mix).
+    const arch = archetypeForSkill(this.hudSkills[idx], idx);
+    const isCast = arch.shape === "circle" || arch.shape === "nova" || arch.shape === "deployable";
     if (this.heroAnim) {
       const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
       if (!played) this.proceduralLunge();
@@ -820,23 +823,51 @@ export class CampScene {
       this.proceduralLunge();
     }
 
-    // Damage: skills hit dummies within a radius in front of / around the player.
-    const radius = isCast ? 5.5 : 3.2;
-    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    const center = this.playerPos.clone().add(forward.multiplyScalar(isCast ? 2.5 : 1.6));
-    const mult = isCast ? 2.4 : 1.8;
+    // Auto-aim the nearest living dummy so shaped skills read as aimed.
+    let nearest: CampDummy | null = null;
+    let nearestDist = Infinity;
+    for (const d of this.dummies) {
+      if (!d.alive) continue;
+      const dist = d.pos.distanceTo(this.playerPos);
+      if (dist < nearestDist) { nearestDist = dist; nearest = d; }
+    }
+    if (nearest) this.playerFacing = Math.atan2(nearest.pos.x - this.playerPos.x, nearest.pos.z - this.playerPos.z);
+    const dir = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    const origin = this.playerPos.clone();
+
+    // The Training Ground keeps deployables as an instant AoE pulse (no spawns).
+    const kind = arch.shape === "deployable" ? "nova" : arch.shape;
+    const q: ShapeQuery = {
+      kind,
+      origin,
+      dir,
+      radius: arch.radius,
+      halfAngle: arch.halfAngle,
+      length: arch.length,
+      halfWidth: arch.halfWidth,
+    };
+    this.telegraphs?.show(q, arch.telegraph || 0.3, arch.color);
+
+    const reach = arch.radius ?? arch.length ?? 4;
+    const center =
+      kind === "circle" || kind === "nova"
+        ? origin.clone()
+        : origin.clone().add(dir.clone().multiplyScalar(reach * 0.5));
+    this.spawnVfx(center, arch.color, reach);
+    this.skillVfx.spawn(isCast ? "cloud" : "tornado", center, isCast ? 4 : 3, isCast ? 1.1 : 1.3);
+    if (kind === "nova" || kind === "circle") this.particles?.nova(center.clone().setY(0.4), reach, arch.color);
+    else this.particles?.impact(center.clone().setY(0.6), arch.color, 1.1);
+
     let hitAny = false;
     for (const d of this.dummies) {
       if (!d.alive) continue;
-      if (d.pos.distanceTo(center) <= radius) {
+      if (pointInShape(q, d.pos)) {
         const isCrit = Math.random() < this.critChance + 0.05;
-        const dmg = Math.round(this.baseDamage * mult * (isCrit ? 2 : 1) * (0.85 + Math.random() * 0.3));
+        const dmg = Math.round(this.baseDamage * arch.damageMult * (isCrit ? 2 : 1) * (0.85 + Math.random() * 0.3));
         this.damageDummy(d, dmg, isCrit, true);
         hitAny = true;
       }
     }
-    this.spawnVfx(center, isCast ? 0x66aaff : 0xffaa33, radius);
-    this.skillVfx.spawn(isCast ? "cloud" : "tornado", center, isCast ? 4 : 3, isCast ? 1.1 : 1.3);
     this.pushLog(hitAny ? `Skill ${idx + 1} strikes the yard!` : `Skill ${idx + 1} — no target in range.`);
     this.emitState();
   }
@@ -1018,6 +1049,10 @@ export class CampScene {
     }
 
     this.skillVfx.update(delta);
+    this.telegraphs?.update(delta);
+    this.particles?.update(delta);
+
+    for (const t of this.townsfolk) t.update(delta);
 
     // Dummies: hit-flash decay, death tip-over + respawn.
     for (const d of this.dummies) {
@@ -1218,6 +1253,13 @@ export class CampScene {
       this.heroAnim = null;
     }
     this.skillVfx?.dispose();
+    this.telegraphs?.dispose();
+    this.particles?.dispose();
+    for (const t of this.townsfolk) {
+      this.scene.remove(t.group);
+      t.dispose();
+    }
+    this.townsfolk = [];
     this.embers = [];
     this.vfx = [];
     this.dummies = [];

@@ -138,12 +138,19 @@ function Camp() {
       onStationEngage: handleEngage,
     });
     scene.init(mountRef.current);
+    scene.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
     sceneRef.current = scene;
     return () => {
       scene.dispose();
       sceneRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [char, handleState, handleEngage]);
+
+  // Keep the scene's archetype mapping in sync with resolved class skills.
+  useEffect(() => {
+    sceneRef.current?.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
+  }, [hudClassSkills]);
 
   useEffect(() => {
     const t = setTimeout(() => setShowHint(false), 7500);

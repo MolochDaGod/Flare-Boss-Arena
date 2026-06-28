@@ -1,2 +1,4 @@
 - [Tailwind v4 content-scan OOM](tailwind-v4-content-scan-oom.md) — grudge dev server OOM was Tailwind v4 scanning 335MB of GLBs in public/; fix = `source(none)` + explicit `@source`. Linear post-`ready` memory runaway = file-tree scanner, not esbuild.
 - [SkillVfx shared-clone disposal](skill-vfx-shared-clone-disposal.md) — short-lived GLB VFX share geometry/materials across clones; only templates dispose (and must dispose textures + late-loads).
+- [KayKit characters are NPCs only](kaykit-characters-npc-only.md) — KayKit hero GLBs are townsfolk/NPCs (Townsfolk.ts), never the player; player skin-load failure falls back to a capsule, Dungeon to the race model.
+- [ARPG skill/combat framework](combat-skill-framework.md) — scene-agnostic combat layer (archetype shapes/telegraphs/deployables/particles) across all 3 scenes; three.quarks QVector gotcha; Arena field renamed skillTelegraphs.

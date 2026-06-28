@@ -6,3 +6,4 @@ attached_assets/Meshy_AI_Eternal_Colosseum_0628065023_texture_1782629455669.glb 
 attached_assets/Meshy_AI_King_of_Pirates_biped_(1)_1782627792852.zip filter=lfs diff=lfs merge=lfs -text
 attached_assets/Meshy_AI_King_of_Pirates_biped_(2)_1782627789560.zip filter=lfs diff=lfs merge=lfs -text
 attached_assets/Meshy_AI_biped_1782627796784.zip filter=lfs diff=lfs merge=lfs -text
+attached_assets/Meshy_AI_Eternal_Colosseum_0628065023_texture_1782630355323.glb filter=lfs diff=lfs merge=lfs -text
