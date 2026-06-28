@@ -4,7 +4,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { getSkin, skinUrl, SKIN_CLIP_SUFFIX } from "@/data/skins";
 import { disposeObject3D } from "@/game/kaykitHero";
 import { RACALVIN_ID } from "@/data/fighters";
-import { RACALVIN_BASE_URL } from "@/game/racalvinHero";
+import { RACALVIN_BASE_URL, attachSword, loadRacalvinClips } from "@/game/racalvinHero";
 
 /**
  * Rotating 3D portrait of a fighter's skin GLB for the Choose Fighter lobby.
@@ -81,7 +81,18 @@ export function FighterPreview({ skinId }: { skinId: string }) {
           scene.add(m);
           model = m;
 
-          if (gltf.animations.length) {
+          if (skinId === RACALVIN_ID) {
+            // Racalvin's base GLB ships no clips and no weapon: grip the
+            // Brothers' Keeper sword and play his idle from the separate
+            // skeleton-only anim library so he stands ready on select.
+            attachSword(m, loader, () => disposed);
+            mixer = new THREE.AnimationMixer(m);
+            loadRacalvinClips(loader).then((clips) => {
+              if (disposed || !mixer) return;
+              const idle = clips.find((c) => c.name === "idle") ?? clips[0];
+              if (idle) mixer.clipAction(idle).reset().play();
+            });
+          } else if (gltf.animations.length) {
             mixer = new THREE.AnimationMixer(m);
             const idle =
               gltf.animations.find((a) =>

@@ -161,10 +161,30 @@ function analyzeBlade(sword: THREE.Object3D): {
   return { axis, length, gripPoint };
 }
 
+/** Dispose a sword subtree's GPU resources (local helper so this module needs
+ *  no back-import of `kaykitHero.disposeObject3D`). */
+function disposeSword(obj: THREE.Object3D) {
+  obj.traverse((c) => {
+    const m = c as THREE.Mesh & { isMesh?: boolean };
+    if (!m.isMesh) return;
+    m.geometry?.dispose();
+    const mats = Array.isArray(m.material) ? m.material : [m.material];
+    for (const mat of mats) (mat as THREE.Material | undefined)?.dispose();
+  });
+}
+
 /** Parent the Brothers' Keeper sword to the right-hand bone, gripped by the
  *  handle, correctly sized, and with a lit steel material (the GLB ships no
- *  textures and a stray full-white emissive). */
-export function attachSword(root: THREE.Object3D, loader: GLTFLoader) {
+ *  textures and a stray full-white emissive).
+ *
+ *  `isDisposed` lets short-lived hosts (e.g. the lobby preview, which remounts
+ *  on every skin change) cancel a late load: if it returns true when the GLB
+ *  resolves, the sword is disposed instead of attached to a torn-down model. */
+export function attachSword(
+  root: THREE.Object3D,
+  loader: GLTFLoader,
+  isDisposed?: () => boolean,
+) {
   let hand: THREE.Object3D | null = null;
   root.traverse((o) => {
     if (!hand && o.name === "RightHand") hand = o;
@@ -172,6 +192,10 @@ export function attachSword(root: THREE.Object3D, loader: GLTFLoader) {
   if (!hand) return;
   const handBone = hand as THREE.Object3D;
   loader.load(swordUrl(), (gltf) => {
+    if (isDisposed?.()) {
+      disposeSword(gltf.scene);
+      return;
+    }
     const sword = gltf.scene;
     sword.traverse((c) => {
       const m = c as THREE.Mesh & { isMesh?: boolean };
