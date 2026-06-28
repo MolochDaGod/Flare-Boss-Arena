@@ -15,7 +15,7 @@ import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import type { ClassSkill } from "../data/classSkills";
 import { loadMonsterModel, disposeMonsterModel, isMonsterId } from "./MonsterModels";
 import type { EnemyModel } from "./EnemyFactory";
-import { makeGroundMaterial, makeTerrainSkirt } from "./proceduralTextures";
+import { makeGroundMaterial } from "./proceduralTextures";
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -357,66 +357,110 @@ export class ArenaScene {
   }
 
   private buildTerrain() {
-    // Flat cobble combat floor (procedural tiling material).
-    const repeat = this.BOUNDS / 2;
-    const groundMat = makeGroundMaterial(repeat, this.renderer.capabilities.getMaxAnisotropy());
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(this.BOUNDS * 2, this.BOUNDS * 2), groundMat);
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    this.scene.add(ground);
+    const R = this.BOUNDS;
+    const Rw = R - 1; // walkable radius — matches the circular movement clamp.
 
-    // Heightmap relief ringing the flat arena (rolling foothills → ridge). The
-    // flat center uses a Chebyshev mask matching the square movement clamp.
-    const skirt = makeTerrainSkirt(this.BOUNDS);
-    this.scene.add(skirt);
+    // Round sand-and-cobble combat floor (procedural tiling material).
+    const groundMat = makeGroundMaterial(R / 2, this.renderer.capabilities.getMaxAnisotropy());
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(Rw + 0.6, 72), groundMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    this.scene.add(floor);
 
-    // Arena boundary stones (instanced) marking the walkable square edge.
-    const stoneGeom = new THREE.DodecahedronGeometry(0.9, 0);
-    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x16110e, roughness: 1 });
-    const per = 13;
-    const total = per * 4;
-    const inst = new THREE.InstancedMesh(stoneGeom, stoneMat, total);
-    const m = new THREE.Matrix4();
-    const edge = this.BOUNDS - 0.5;
-    let idx = 0;
-    for (let side = 0; side < 4; side++) {
-      for (let i = 0; i < per; i++) {
-        const t = (i / (per - 1)) * 2 - 1; // -1..1
-        let x = 0;
-        let z = 0;
-        if (side === 0) { x = t * edge; z = -edge; }
-        else if (side === 1) { x = t * edge; z = edge; }
-        else if (side === 2) { x = -edge; z = t * edge; }
-        else { x = edge; z = t * edge; }
-        const scl = 0.8 + Math.random() * 1.4;
-        m.compose(
-          new THREE.Vector3(x + (Math.random() - 0.5), scl * 0.3, z + (Math.random() - 0.5)),
-          new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random() * 0.4, Math.random() * Math.PI, Math.random() * 0.4)),
-          new THREE.Vector3(scl, scl, scl),
-        );
-        inst.setMatrixAt(idx++, m);
-      }
+    // Dark apron ringing the pit so the arena reads as an enclosed bowl.
+    const apron = new THREE.Mesh(
+      new THREE.RingGeometry(Rw, Rw + 44, 64),
+      new THREE.MeshStandardMaterial({ color: 0x050405, roughness: 1 }),
+    );
+    apron.rotation.x = -Math.PI / 2;
+    apron.position.y = -0.05;
+    apron.receiveShadow = true;
+    this.scene.add(apron);
+
+    // ── Colosseum shell ───────────────────────────────────────────────────
+    // Inner pit wall — sits exactly at the walkable edge (radius BOUNDS - 1) so
+    // the barrier the fighters cannot cross lines up with the nav clamp.
+    const wallH = 2.1;
+    const wall = new THREE.Mesh(
+      new THREE.CylinderGeometry(Rw, Rw, wallH, 72, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0x1b1613, roughness: 1, side: THREE.DoubleSide }),
+    );
+    wall.position.y = wallH / 2;
+    wall.receiveShadow = true;
+    wall.castShadow = true;
+    this.scene.add(wall);
+
+    // Stone coping capping the pit wall.
+    const coping = new THREE.Mesh(
+      new THREE.TorusGeometry(Rw, 0.3, 8, 72),
+      new THREE.MeshStandardMaterial({ color: 0x3b332c, roughness: 0.9 }),
+    );
+    coping.rotation.x = Math.PI / 2;
+    coping.position.y = wallH;
+    coping.castShadow = true;
+    this.scene.add(coping);
+
+    // Stepped spectator stands rising outward (riser + tread per tier). Kept
+    // low (≤ ~6u) so the fixed iso camera always sees over the near arc.
+    const tiers = 5;
+    const tread = 2.1;
+    const rise = 0.75;
+    const matA = new THREE.MeshStandardMaterial({ color: 0x2a2320, roughness: 0.95 });
+    const matB = new THREE.MeshStandardMaterial({ color: 0x211b18, roughness: 1 });
+    for (let i = 0; i < tiers; i++) {
+      const r = Rw + 0.3 + i * tread;
+      const y = wallH + i * rise;
+      const riser = new THREE.Mesh(
+        new THREE.CylinderGeometry(r, r, rise, 72, 1, true),
+        i % 2 === 0 ? matA : matB,
+      );
+      riser.position.y = y + rise / 2;
+      riser.receiveShadow = true;
+      riser.castShadow = true;
+      this.scene.add(riser);
+
+      const step = new THREE.Mesh(
+        new THREE.RingGeometry(r, r + tread, 72),
+        i % 2 === 0 ? matB : matA,
+      );
+      step.rotation.x = -Math.PI / 2;
+      step.position.y = y + rise;
+      step.receiveShadow = true;
+      this.scene.add(step);
     }
-    inst.castShadow = true;
-    inst.receiveShadow = true;
-    this.scene.add(inst);
+
+    // Merlon pillars ringing the top of the stands for a toothed silhouette.
+    const merlons = 28;
+    const merlonGeom = new THREE.BoxGeometry(1.1, 1.8, 1.1);
+    const merlonMat = new THREE.MeshStandardMaterial({ color: 0x342c26, roughness: 0.9 });
+    const merlonInst = new THREE.InstancedMesh(merlonGeom, merlonMat, merlons);
+    const mm = new THREE.Matrix4();
+    const merlonR = Rw + 0.3 + tiers * tread;
+    const merlonY = wallH + tiers * rise + 0.9;
+    for (let i = 0; i < merlons; i++) {
+      const a = (i / merlons) * Math.PI * 2;
+      mm.makeTranslation(Math.cos(a) * merlonR, merlonY, Math.sin(a) * merlonR);
+      merlonInst.setMatrixAt(i, mm);
+    }
+    merlonInst.castShadow = true;
+    merlonInst.receiveShadow = true;
+    this.scene.add(merlonInst);
   }
 
   private buildBraziers() {
-    // Four corner braziers for dark-fantasy ambiance + flicker.
-    const r = this.BOUNDS - 3;
-    const spots = [
-      new THREE.Vector3(r, 0, r),
-      new THREE.Vector3(-r, 0, r),
-      new THREE.Vector3(r, 0, -r),
-      new THREE.Vector3(-r, 0, -r),
-    ];
-    for (const p of spots) {
+    // Eight braziers ringing the pit edge for dark-fantasy ambiance + flicker.
+    const count = 8;
+    const r = this.BOUNDS - 1.5;
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2 + Math.PI / count;
+      const px = Math.cos(a) * r;
+      const pz = Math.sin(a) * r;
+
       const post = new THREE.Mesh(
         new THREE.CylinderGeometry(0.16, 0.22, 2.0, 8),
         new THREE.MeshStandardMaterial({ color: 0x1a1410, roughness: 0.9 }),
       );
-      post.position.set(p.x, 1.0, p.z);
+      post.position.set(px, 1.0, pz);
       post.castShadow = true;
       this.scene.add(post);
 
@@ -424,19 +468,19 @@ export class ArenaScene {
         new THREE.CylinderGeometry(0.5, 0.3, 0.4, 10),
         new THREE.MeshStandardMaterial({ color: 0x2a2018, roughness: 0.85 }),
       );
-      bowl.position.set(p.x, 2.1, p.z);
+      bowl.position.set(px, 2.1, pz);
       this.scene.add(bowl);
 
       const flame = new THREE.Mesh(
         new THREE.SphereGeometry(0.32, 12, 10),
         new THREE.MeshBasicMaterial({ color: 0xffa83a, transparent: true, opacity: 0.9 }),
       );
-      flame.position.set(p.x, 2.45, p.z);
+      flame.position.set(px, 2.45, pz);
       flame.scale.set(1, 1.5, 1);
       this.scene.add(flame);
 
       const light = new THREE.PointLight(0xff9c44, 4, 16, 2);
-      light.position.set(p.x, 2.6, p.z);
+      light.position.set(px, 2.6, pz);
       this.scene.add(light);
       (flame.userData as { light?: THREE.PointLight }).light = light;
       this.braziers.push(flame);
@@ -550,9 +594,7 @@ export class ArenaScene {
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const hit = new THREE.Vector3();
     if (raycaster.ray.intersectPlane(plane, hit)) {
-      const B = this.BOUNDS - 1;
-      hit.x = Math.max(-B, Math.min(B, hit.x));
-      hit.z = Math.max(-B, Math.min(B, hit.z));
+      this.clampToArena(hit);
       this.playerTarget = hit;
       this.attackBoss = false;
     }
@@ -566,12 +608,23 @@ export class ArenaScene {
     }
   }
 
+  /** Constrain a position to the circular arena floor (radius BOUNDS - margin). */
+  private clampToArena(p: THREE.Vector3, margin = 1) {
+    const r = this.BOUNDS - margin;
+    const len = Math.hypot(p.x, p.z);
+    if (len > r) {
+      p.x = (p.x / len) * r;
+      p.z = (p.z / len) * r;
+    }
+    return p;
+  }
+
   doDodge() {
     if (this.outcome !== "fighting") return;
     const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    const B = this.BOUNDS - 1;
-    this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + forward.x * 3.0));
-    this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + forward.z * 3.0));
+    this.playerPos.x += forward.x * 3.0;
+    this.playerPos.z += forward.z * 3.0;
+    this.clampToArena(this.playerPos);
     this.playerTarget = null;
     this.heroAnim?.trigger("dodge");
   }
@@ -881,11 +934,11 @@ export class ArenaScene {
     if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) { raw.x += 1; raw.y -= 1; }
 
     let moving = false;
-    const B = this.BOUNDS - 1;
     if (raw.length() > 0 && this.outcome === "fighting") {
       raw.normalize();
-      this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + raw.x * speed * delta));
-      this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + raw.y * speed * delta));
+      this.playerPos.x += raw.x * speed * delta;
+      this.playerPos.z += raw.y * speed * delta;
+      this.clampToArena(this.playerPos);
       this.playerTarget = null;
       this.attackBoss = false;
       this.playerFacing = Math.atan2(raw.x, raw.y);
@@ -896,8 +949,9 @@ export class ArenaScene {
       this.playerFacing = Math.atan2(to.x, to.z);
       if (d > this.attackRange) {
         to.normalize();
-        this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + to.x * speed * delta));
-        this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + to.z * speed * delta));
+        this.playerPos.x += to.x * speed * delta;
+        this.playerPos.z += to.z * speed * delta;
+        this.clampToArena(this.playerPos);
         moving = true;
       }
     } else if (this.playerTarget) {
@@ -960,8 +1014,9 @@ export class ArenaScene {
         this.bossGroup.rotation.y += (faceYaw - this.bossGroup.rotation.y) * 0.08;
         if (dist > this.bossMeleeRange) {
           to.normalize();
-          this.bossPos.x = Math.max(-B, Math.min(B, this.bossPos.x + to.x * this.bossSpeed * delta));
-          this.bossPos.z = Math.max(-B, Math.min(B, this.bossPos.z + to.z * this.bossSpeed * delta));
+          this.bossPos.x += to.x * this.bossSpeed * delta;
+          this.bossPos.z += to.z * this.bossSpeed * delta;
+          this.clampToArena(this.bossPos, 2);
         }
         this.bossGroup.position.lerp(new THREE.Vector3(this.bossPos.x, 0, this.bossPos.z), 0.15);
 
@@ -1027,7 +1082,6 @@ export class ArenaScene {
   }
 
   private updateProjectiles(delta: number) {
-    const B = this.BOUNDS;
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i]!;
       p.life += delta;
@@ -1048,7 +1102,7 @@ export class ArenaScene {
       }
 
       const hitPlayer = p.pos.distanceTo(this.playerPos.clone().setY(p.pos.y)) <= p.radius;
-      const outOfBounds = Math.abs(p.pos.x) > B + 2 || Math.abs(p.pos.z) > B + 2 || p.pos.y < 0;
+      const outOfBounds = Math.hypot(p.pos.x, p.pos.z) > this.BOUNDS + 2 || p.pos.y < 0;
       if ((hitPlayer && this.outcome === "fighting") || p.life > p.max || outOfBounds) {
         if (hitPlayer && this.outcome === "fighting") {
           this.damagePlayer(p.damage, this.boss.name + "'s bolt");
