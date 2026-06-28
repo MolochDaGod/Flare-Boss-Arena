@@ -16,7 +16,7 @@ import { loadRacalvinForDungeon } from "./racalvinHero";
 import { skillAnimCandidates } from "./kaykitHero";
 import { SkillVfx } from "./skillVfx";
 import type { ClassSkill } from "../data/classSkills";
-import { archetypeForSkill } from "./combat/skillArchetypes";
+import { archetypeForSkill, type SkillShapeKind } from "./combat/skillArchetypes";
 import { targetsInShape, type ShapeQuery } from "./combat/damageShapes";
 import type { CombatTarget } from "./combat/types";
 import { ParticleVfx } from "./combat/particles";
@@ -1079,7 +1079,7 @@ export class GameEngine {
       const place = origin.clone().add(dir.clone().multiplyScalar(arch.range));
       this.clampToArena(place);
       this.deployables.deploy(dep, place, arch.color, this.playerBaseDamage * arch.damageMult, arch.radius ?? 4);
-      this.particles?.fireColumn(place.clone().setY(0.3), arch.color);
+      this.particles?.castSkillVfx({ element: arch.element, shape: "deployable", center: place.clone(), origin, dir, reach: arch.radius ?? 4 });
       this.log(`You deploy a ${dep.replace("_", " ")}.`);
       this.notifyState();
       return;
@@ -1096,15 +1096,20 @@ export class GameEngine {
     };
     this.telegraphs?.show(q, arch.telegraph, arch.color);
 
-    // Keep the GLB tornado/cloud flavor + add a particle accent at the strike point.
+    // Element- + shape-aware particle silhouette, centered on the actual damage
+    // area (origin for circle/nova; cone/line project forward inside castSkillVfx).
     const reach = arch.radius ?? arch.length ?? 4;
-    const center = origin.clone().add(dir.clone().multiplyScalar(reach * 0.5));
-    this.spawnSkillVfx(center, idx, isCast);
-    if (arch.shape === "nova" || arch.shape === "circle") {
-      this.particles?.nova(center.clone().setY(0.4), reach, arch.color);
-    } else {
-      this.particles?.impact(center.clone().setY(0.6), arch.color, 1.1);
-    }
+    const center = origin.clone();
+    this.spawnSkillVfx(center, arch.shape);
+    this.particles?.castSkillVfx({
+      element: arch.element,
+      shape: arch.shape,
+      center,
+      origin,
+      dir,
+      reach,
+      halfAngle: arch.halfAngle,
+    });
 
     const hits = targetsInShape(q, this.enemies, (en) => en.state !== "dead" && en.state !== "death");
     for (const en of hits) {
@@ -1115,13 +1120,11 @@ export class GameEngine {
     this.notifyState();
   }
 
-  /** Map a skill slot to a VFX and spawn it at the strike point. Cast slots
-   *  spawn a cloud ring (push/knockback); melee slots spawn a fire tornado. */
-  private spawnSkillVfx(pos: THREE.Vector3, idx: number, isCast: boolean) {
-    if (isCast) {
-      this.skillVfx.spawn("cloud", pos, 4, 1.1);
-    } else {
-      this.skillVfx.spawn("tornado", pos, idx === 4 ? 4.5 : 3, 1.3);
+  /** GLB flavor only for area shapes (a cloud ring on nova/circle). cone/line
+   *  rely on the element particle silhouette so the GLBs don't read as repetitive. */
+  private spawnSkillVfx(pos: THREE.Vector3, shape: SkillShapeKind) {
+    if (shape === "nova" || shape === "circle") {
+      this.skillVfx.spawn("cloud", pos, 4, 1.0);
     }
   }
 

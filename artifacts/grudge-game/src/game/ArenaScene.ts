@@ -620,10 +620,16 @@ export class ArenaScene {
       kind === "circle" || kind === "nova"
         ? origin.clone()
         : origin.clone().add(dir.clone().multiplyScalar(reach * 0.5));
-    this.spawnVfx(center, arch.color, reach, 0.45);
-    this.skillVfx.spawn(isCast ? "cloud" : "tornado", center, isCast ? 4 : 3, isCast ? 1.1 : 1.3);
-    if (kind === "nova" || kind === "circle") this.particles?.nova(center.clone().setY(0.4), reach, arch.color);
-    else this.particles?.impact(center.clone().setY(0.6), arch.color, 1.1);
+    if (kind === "nova" || kind === "circle") this.skillVfx.spawn("cloud", center, 4, 1.0);
+    this.particles?.castSkillVfx({
+      element: arch.element,
+      shape: kind,
+      center: kind === "nova" || kind === "circle" ? center.clone() : origin.clone(),
+      origin: origin.clone(),
+      dir,
+      reach,
+      halfAngle: arch.halfAngle,
+    });
 
     // Boss is a single large target — allow a small reach tolerance.
     const tolerant: ShapeQuery = { ...q, radius: (arch.radius ?? 4) + 1.5, length: (arch.length ?? 8) + 1.5 };
