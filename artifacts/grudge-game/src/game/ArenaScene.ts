@@ -11,6 +11,8 @@ import { archetypeForSkill } from "./combat/skillArchetypes";
 import { pointInShape, type ShapeQuery } from "./combat/damageShapes";
 import { TelegraphField } from "./combat/telegraphs";
 import { ParticleVfx } from "./combat/particles";
+import { FlameVfx } from "./combat/FlameVfx";
+import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import type { ClassSkill } from "../data/classSkills";
 import { loadMonsterModel, disposeMonsterModel, isMonsterId } from "./MonsterModels";
 import type { EnemyModel } from "./EnemyFactory";
@@ -205,6 +207,8 @@ export class ArenaScene {
   private scene!: THREE.Scene;
   private camera!: THREE.OrthographicCamera;
   private renderer!: THREE.WebGLRenderer;
+  private flameVfx!: FlameVfx;
+  private bloom: BloomComposer | null = null;
   private clock = new THREE.Clock();
   private skillVfx!: SkillVfx;
   private skillTelegraphs!: TelegraphField;
@@ -319,6 +323,8 @@ export class ArenaScene {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.98;
     container.appendChild(this.renderer.domElement);
+    this.flameVfx = new FlameVfx(this.scene);
+    this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h);
 
     this.buildLighting();
     this.buildTerrain();
@@ -628,6 +634,7 @@ export class ArenaScene {
         : origin.clone().add(dir.clone().multiplyScalar(reach * 0.5));
     this.spawnVfx(center, arch.color, reach, 0.45);
     this.skillVfx.spawn(isCast ? "cloud" : "tornado", center, isCast ? 4 : 3, isCast ? 1.1 : 1.3);
+    this.flameVfx?.burst(center.clone().setY(0.6), { kind: "fire", color: arch.color, big: true, scale: isCast ? 1.25 : 1.0 });
     if (kind === "nova" || kind === "circle") this.particles?.nova(center.clone().setY(0.4), reach, arch.color);
     else this.particles?.impact(center.clone().setY(0.6), arch.color, 1.1);
 
@@ -875,7 +882,8 @@ export class ArenaScene {
     this.animFrameId = requestAnimationFrame(this.animate);
     const delta = Math.min(this.clock.getDelta(), 0.05);
     this.update(delta);
-    this.renderer.render(this.scene, this.camera);
+    if (this.bloom) this.bloom.composer.render();
+    else this.renderer.render(this.scene, this.camera);
   };
 
   private update(delta: number) {
@@ -957,6 +965,7 @@ export class ArenaScene {
     }
 
     this.skillVfx.update(delta);
+    this.flameVfx?.update(delta);
     this.skillTelegraphs?.update(delta);
     this.particles?.update(delta);
 
@@ -1165,6 +1174,8 @@ export class ArenaScene {
     this.camera.bottom = -d;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    this.bloom?.composer.setSize(w, h);
+    this.bloom?.bloomPass.resolution.set(w, h);
   };
 
   dispose() {
@@ -1181,6 +1192,7 @@ export class ArenaScene {
     }
     if (this.heroAnim) { this.heroAnim.dispose(); this.heroAnim = null; }
     this.skillVfx?.dispose();
+    this.flameVfx?.dispose();
     this.skillTelegraphs?.dispose();
     this.particles?.dispose();
     if (this.bossGroup) this.bossGroup.userData.disposed = true;
@@ -1193,6 +1205,8 @@ export class ArenaScene {
     this.bossGroup = null;
     disposeObject3D(this.scene);
     this.scene.clear();
+    this.bloom?.composer.dispose();
+    this.bloom = null;
     this.renderer.dispose();
   }
 }

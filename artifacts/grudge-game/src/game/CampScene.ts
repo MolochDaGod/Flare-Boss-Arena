@@ -12,6 +12,8 @@ import { archetypeForSkill } from "./combat/skillArchetypes";
 import { pointInShape, type ShapeQuery } from "./combat/damageShapes";
 import { TelegraphField } from "./combat/telegraphs";
 import { ParticleVfx } from "./combat/particles";
+import { FlameVfx } from "./combat/FlameVfx";
+import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import type { ClassSkill } from "../data/classSkills";
 
 export type CampStationId =
@@ -114,6 +116,8 @@ export class CampScene {
   private renderer!: THREE.WebGLRenderer;
   private scene!: THREE.Scene;
   private camera!: THREE.OrthographicCamera;
+  private flameVfx!: FlameVfx;
+  private bloom: BloomComposer | null = null;
   private clock = new THREE.Clock();
   private animFrameId = 0;
   private skillVfx!: SkillVfx;
@@ -209,6 +213,8 @@ export class CampScene {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
     container.appendChild(this.renderer.domElement);
+    this.flameVfx = new FlameVfx(this.scene);
+    this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h);
 
     this.buildEnvironment();
     this.buildStations();
@@ -855,6 +861,7 @@ export class CampScene {
         : origin.clone().add(dir.clone().multiplyScalar(reach * 0.5));
     this.spawnVfx(center, arch.color, reach);
     this.skillVfx.spawn(isCast ? "cloud" : "tornado", center, isCast ? 4 : 3, isCast ? 1.1 : 1.3);
+    this.flameVfx?.burst(center.clone().setY(0.6), { kind: "fire", color: arch.color, big: true, scale: isCast ? 1.25 : 1.0 });
     if (kind === "nova" || kind === "circle") this.particles?.nova(center.clone().setY(0.4), reach, arch.color);
     else this.particles?.impact(center.clone().setY(0.6), arch.color, 1.1);
 
@@ -954,7 +961,8 @@ export class CampScene {
     this.animFrameId = requestAnimationFrame(this.animate);
     const delta = Math.min(this.clock.getDelta(), 0.08);
     this.update(delta);
-    this.renderer.render(this.scene, this.camera);
+    if (this.bloom) this.bloom.composer.render();
+    else this.renderer.render(this.scene, this.camera);
   };
 
   private update(delta: number) {
@@ -1049,10 +1057,9 @@ export class CampScene {
     }
 
     this.skillVfx.update(delta);
+    this.flameVfx?.update(delta);
     this.telegraphs?.update(delta);
     this.particles?.update(delta);
-
-    for (const t of this.townsfolk) t.update(delta);
 
     for (const t of this.townsfolk) t.update(delta);
 
@@ -1236,6 +1243,8 @@ export class CampScene {
     this.camera.bottom = -d;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    this.bloom?.composer.setSize(w, h);
+    this.bloom?.bloomPass.resolution.set(w, h);
   };
 
   dispose() {
@@ -1255,6 +1264,7 @@ export class CampScene {
       this.heroAnim = null;
     }
     this.skillVfx?.dispose();
+    this.flameVfx?.dispose();
     this.telegraphs?.dispose();
     this.particles?.dispose();
     for (const t of this.townsfolk) {
@@ -1270,6 +1280,8 @@ export class CampScene {
     // environment, labels/CanvasTextures, campfire, embers, vfx, dummies).
     disposeObject3D(this.scene);
     this.scene.clear();
+    this.bloom?.composer.dispose();
+    this.bloom = null;
     this.renderer.dispose();
   }
 }
