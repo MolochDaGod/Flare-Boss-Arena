@@ -3,25 +3,40 @@ import { useListCharacters, useGetCharacterSkills } from "@workspace/api-client-
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
-import { Sword, Skull, Swords, Flame, Shield, Zap, Tent, Sparkles } from "lucide-react";
-import { SKINS, getSelectedSkin, setSelectedSkin } from "@/data/skins";
-import { RACALVIN_ID } from "@/data/fighters";
+import {
+  Swords,
+  Skull,
+  Tent,
+  Users,
+  Flame,
+  Shield,
+  ScrollText,
+  PawPrint,
+  Hammer,
+  ChevronRight,
+} from "lucide-react";
+import {
+  getActiveFighter,
+  ATTR_ORDER,
+  type AttrKey,
+  type FighterDef,
+} from "@/data/fighters";
+import { FighterPreview } from "@/components/FighterPreview";
 import { ParchmentPanel } from "@/components/CraftpixUI";
-import { PortraitCanvas } from "@/components/PortraitCanvas";
-import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "@/data/characterMeshes";
 import { SkillIcon } from "@/components/SkillIcon";
 
-const FACTION_COLORS: Record<string, string> = {
-  Crusade: "#d4891a",
-  Fabled: "#22c55e",
-  Legion: "#ef4444",
-};
+const GOLD = "#c5a059";
 
-const RACE_IDS: readonly RaceId[] = ["human", "elf", "dwarf", "orc", "undead", "barbarian"];
-function toRaceId(race?: string): RaceId {
-  const r = (race ?? "human").toLowerCase();
-  return (RACE_IDS as readonly string[]).includes(r) ? (r as RaceId) : "human";
-}
+const ATTR_LABEL: Record<AttrKey, string> = {
+  strength: "Strength",
+  vitality: "Vitality",
+  dexterity: "Dexterity",
+  agility: "Agility",
+  endurance: "Endurance",
+  intellect: "Intellect",
+  tactics: "Tactics",
+  wisdom: "Wisdom",
+};
 
 /** Emoji slot glyphs — render reliably and match the Main Panel's slot set. */
 const EQUIP_SLOT_ICONS: Record<string, string> = {
@@ -29,38 +44,46 @@ const EQUIP_SLOT_ICONS: Record<string, string> = {
   boots: "🥾", gloves: "🧤", amulet: "📿", ring1: "💍", ring2: "💍",
 };
 
-function CharacterPortrait({
-  char,
-}: {
-  char: { name: string; race: string; class: string; level: number; faction?: string; equipment?: Record<string, string | undefined> };
-}) {
-  const faction = char.faction ?? "";
-  const factionColor = FACTION_COLORS[faction] ?? "#d4891a";
-  const race = toRaceId(char.race);
-  const equipment = char.equipment ?? {};
+const EQUIP_SLOTS = [
+  "mainHand", "offHand", "helm", "chest", "legs",
+  "boots", "gloves", "amulet", "ring1", "ring2",
+] as const;
 
-  // Show the real race GLB with a base avatar + a shield when an offhand is
-  // equipped. We don't have item categories here, so weapon meshes stay hidden;
-  // the point is rendering the actual warlord, not the placeholder silhouette.
-  const visibilityFor = React.useMemo(() => {
-    const equip = { hasOffhand: !!equipment.offHand, hasShoulder: false };
-    const seed = `${char.name}::${race}`;
-    return (names: string[]) => resolveVisibleMeshes(names, race, equip, seed);
-  }, [char.name, race, equipment.offHand]);
+function StatBar({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-24 shrink-0 font-serif text-[11px] uppercase tracking-widest text-muted-foreground">
+        {label}
+      </span>
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-black/50 ring-1 ring-[#c5a059]/20">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-[#7a5a23] to-[#c5a059]"
+          style={{ width: `${Math.min(100, value * 10)}%` }}
+        />
+      </div>
+      <span className="w-5 shrink-0 text-right font-mono text-xs text-[#c5a059]">{value}</span>
+    </div>
+  );
+}
 
+function FighterStage({ fighter }: { fighter: FighterDef }) {
   return (
     <div
-      className="w-full min-h-[460px] relative overflow-hidden"
+      className="relative min-h-[460px] w-full overflow-hidden"
       style={{ background: "radial-gradient(ellipse at center, #1a0a0030 0%, #060608 70%)" }}
     >
-      {/* Ambient glow */}
+      {/* Ambient ember glow */}
       <div
-        className="absolute inset-0 opacity-10 pointer-events-none"
-        style={{ background: `radial-gradient(ellipse at 50% 60%, ${factionColor} 0%, transparent 65%)` }}
+        className="pointer-events-none absolute inset-0 opacity-15"
+        style={{ background: `radial-gradient(ellipse at 50% 55%, ${GOLD} 0%, transparent 60%)` }}
       />
 
       {/* Isometric grid lines */}
-      <svg className="absolute inset-0 w-full h-full opacity-5 pointer-events-none" viewBox="0 0 400 360" preserveAspectRatio="none">
+      <svg
+        className="pointer-events-none absolute inset-0 h-full w-full opacity-[0.06]"
+        viewBox="0 0 400 360"
+        preserveAspectRatio="none"
+      >
         {Array.from({ length: 10 }).map((_, i) => (
           <React.Fragment key={i}>
             <line x1={i * 44} y1="0" x2={i * 44 + 200} y2="360" stroke="#ffaa00" strokeWidth="0.5" />
@@ -69,228 +92,251 @@ function CharacterPortrait({
         ))}
       </svg>
 
-      {/* Live 3D warlord */}
+      {fighter.featured && (
+        <span className="absolute left-4 top-4 z-20 rounded-full border border-[#c5a059]/50 bg-black/50 px-3 py-1 font-serif text-[10px] uppercase tracking-widest text-[#c5a059]">
+          Featured
+        </span>
+      )}
+
+      {/* Live 3D fighter */}
       <div className="absolute inset-0">
-        <PortraitCanvas src={PORTRAIT_URL(race)} visibilityFor={visibilityFor} accent={factionColor} />
+        <FighterPreview skinId={fighter.skinId} />
       </div>
 
       {/* Name plate */}
-      <div className="absolute bottom-0 left-0 right-0 z-20 flex flex-col items-center gap-2 px-6 pb-6 pt-12 pointer-events-none bg-gradient-to-t from-[#060608] via-[#060608]/80 to-transparent">
-        <p className="font-serif text-3xl tracking-widest uppercase text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">{char.name}</p>
-        <p className="font-serif text-sm tracking-widest" style={{ color: factionColor }}>
-          Level {char.level} · {char.race} {char.class}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-center gap-2 bg-gradient-to-t from-[#060608] via-[#060608]/80 to-transparent px-6 pb-6 pt-12 text-center">
+        <p className="font-serif text-3xl uppercase tracking-widest text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
+          {fighter.name}
         </p>
-        {faction && (
-          <p className="font-serif text-xs tracking-[0.3em] uppercase text-muted-foreground">{faction} Faction</p>
-        )}
-        <div className="flex items-center gap-3 w-48 mt-1">
-          <div className="h-px flex-1" style={{ background: `linear-gradient(to right, transparent, ${factionColor}80)` }} />
-          <Flame className="w-3 h-3" style={{ color: factionColor }} />
-          <div className="h-px flex-1" style={{ background: `linear-gradient(to left, transparent, ${factionColor}80)` }} />
+        <p className="font-serif text-sm uppercase tracking-[0.25em]" style={{ color: GOLD }}>
+          {fighter.title} · {fighter.role}
+        </p>
+        <p className="mt-1 max-w-md font-serif text-xs leading-relaxed text-muted-foreground">
+          {fighter.blurb}
+        </p>
+        <div className="mt-2 flex w-48 items-center gap-3">
+          <div className="h-px flex-1" style={{ background: `linear-gradient(to right, transparent, ${GOLD}80)` }} />
+          <Flame className="h-3 w-3" style={{ color: GOLD }} />
+          <div className="h-px flex-1" style={{ background: `linear-gradient(to left, transparent, ${GOLD}80)` }} />
         </div>
       </div>
     </div>
   );
 }
 
+const WAR_ROOM: { href: string; label: string; sub: string; icon: React.ElementType }[] = [
+  { href: "/equipment", label: "Armory", sub: "Weapons & armor", icon: Shield },
+  { href: "/skills", label: "Grimoire", sub: "Skill trees", icon: ScrollText },
+  { href: "/enemies", label: "Bestiary", sub: "Know your prey", icon: PawPrint },
+  { href: "/character/new", label: "Soul Forge", sub: "Forge a warlord", icon: Hammer },
+];
+
 export default function Home() {
   const [, setLocation] = useLocation();
-  const { data: characters, isLoading } = useListCharacters();
-  const activeChar = characters?.[0]; // Default to first char for now
-  
+  // Single-warlord account model: the chosen fighter (getActiveFighter, below)
+  // is the playable combat identity, while the one warlord record owns the
+  // persistent equipment loadout + derived skills. The whole app keys off this
+  // first record, so the panels here track it too.
+  const { data: characters } = useListCharacters();
+  const warlord = characters?.[0];
+  const activeChar = warlord;
+
   const { data: skills } = useGetCharacterSkills(activeChar?.id ?? 0, {
-    query: { enabled: !!activeChar?.id, queryKey: ["skills", activeChar?.id] }
+    query: { enabled: !!activeChar?.id, queryKey: ["skills", activeChar?.id] },
   });
 
-  const [skinId, setSkinId] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    if (activeChar?.id != null) setSkinId(getSelectedSkin(activeChar.id));
-  }, [activeChar?.id]);
-
-  const chooseSkin = (id: string | null) => {
-    if (activeChar?.id == null) return;
-    setSelectedSkin(activeChar.id, id);
-    setSkinId(id);
-  };
+  // The fighter you actually play (chosen on /select, persisted to localStorage).
+  const [fighter] = React.useState<FighterDef>(() => getActiveFighter());
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex flex-col gap-4 border-b border-[#c5a059]/20 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-4xl font-serif text-primary uppercase tracking-widest">War Panel</h1>
-          <p className="text-muted-foreground font-serif tracking-widest text-sm mt-2">Prepare for the cull</p>
+          <p className="font-serif text-xs uppercase tracking-[0.3em] text-muted-foreground">
+            Prepare for the cull
+          </p>
+          <h1 className="font-serif text-4xl uppercase tracking-widest text-primary">War Panel</h1>
         </div>
-        <div className="flex items-center gap-3">
-          {activeChar && (
-            <>
-              <Button
-                size="lg"
-                className="font-serif tracking-widest bg-primary text-primary-foreground hover:bg-primary/80 shadow-[0_0_20px_-4px_rgba(255,165,0,0.5)]"
-                onClick={() => setLocation("/camp")}
-              >
-                <Tent className="w-5 h-5 mr-2" />
-                Visit Camp
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                className="font-serif tracking-widest border-primary/40 text-primary hover:bg-primary/10"
-                onClick={() => setLocation("/game")}
-              >
-                <Swords className="w-5 h-5 mr-2" />
-                Enter World
-              </Button>
-            </>
-          )}
-          <Button asChild size="lg" className="font-serif tracking-widest bg-secondary text-secondary-foreground hover:bg-secondary/80">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            size="lg"
+            className="font-serif tracking-widest bg-primary text-primary-foreground shadow-[0_0_20px_-4px_rgba(255,165,0,0.5)] hover:bg-primary/80"
+            onClick={() => setLocation("/game")}
+          >
+            <Swords className="mr-2 h-5 w-5" />
+            Enter World
+          </Button>
+          <Button
+            asChild
+            size="lg"
+            className="font-serif tracking-widest bg-secondary text-secondary-foreground hover:bg-secondary/80"
+          >
             <Link href="/boss" className="flex items-center gap-2">
-              <Skull className="w-5 h-5" />
+              <Skull className="h-5 w-5" />
               Boss Arena
             </Link>
           </Button>
         </div>
       </div>
 
-      {!activeChar && !isLoading && (
-        <ParchmentPanel className="flex flex-col items-center justify-center py-12 px-6 text-center">
-          <Sword className="w-12 h-12 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-serif mb-2">No Warlord Found</h3>
-          <p className="text-sm text-muted-foreground mb-6">Forge your identity before stepping into the arena.</p>
-          <Button asChild variant="outline">
-            <Link href="/character/new">Create Character</Link>
-          </Button>
-        </ParchmentPanel>
-      )}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Main column — fighter showcase + skills */}
+        <div className="space-y-6 lg:col-span-2">
+          <Card className="relative overflow-hidden border-primary/20 bg-card/40 shadow-[0_0_30px_-10px_rgba(255,165,0,0.12)]">
+            <CardContent className="relative p-0">
+              <FighterStage fighter={fighter} />
+            </CardContent>
+          </Card>
 
-      {activeChar && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
-            <Card className="bg-card/40 border-primary/20 shadow-[0_0_30px_-10px_rgba(255,165,0,0.1)] relative overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent z-10 pointer-events-none" />
-              <CardContent className="p-0 relative">
-                <CharacterPortrait char={{ name: activeChar.name, race: activeChar.race, class: activeChar.class, level: activeChar.level ?? 1, faction: (activeChar as { faction?: string }).faction, equipment: (activeChar.equipment as Record<string, string | undefined>) ?? undefined }} />
-              </CardContent>
-            </Card>
-
-            {skills && skills.activeSkills.length > 0 && (
-              <Card className="border-border/50 bg-card/50">
-                <CardHeader className="pb-3 border-b border-border/50">
-                  <CardTitle className="text-sm font-serif tracking-widest uppercase text-muted-foreground">Derived Active Skills</CardTitle>
-                </CardHeader>
-                <CardContent className="pt-6">
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    {skills.activeSkills.map(skill => (
-                      <div key={skill.id} className="p-4 rounded-md border border-border/50 bg-background/50 flex flex-col items-center text-center gap-3 hover:border-primary/50 transition-colors">
-                        <div className="w-12 h-12 rounded bg-muted/50 border border-border/50 flex items-center justify-center overflow-hidden">
-                          <SkillIcon icon={skill.icon} glyph="⚔️" size={32} radius={4} />
-                        </div>
-                        <div>
-                          <p className="font-serif text-sm tracking-wide">{skill.name}</p>
-                          <p className="text-[10px] text-muted-foreground mt-1 uppercase">CD: {skill.cooldown || "0"}s</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+          {/* Battle actions */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Button
+              variant="outline"
+              className="h-auto flex-col gap-1 border-primary/40 py-4 font-serif tracking-widest text-primary hover:bg-primary/10"
+              onClick={() => setLocation("/select")}
+            >
+              <Users className="h-5 w-5" />
+              <span className="text-xs">Choose Fighter</span>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-auto flex-col gap-1 border-primary/40 py-4 font-serif tracking-widest text-primary hover:bg-primary/10"
+              onClick={() => setLocation("/game")}
+            >
+              <Swords className="h-5 w-5" />
+              <span className="text-xs">Enter World</span>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-auto flex-col gap-1 border-primary/40 py-4 font-serif tracking-widest text-primary hover:bg-primary/10"
+              onClick={() => setLocation("/camp")}
+            >
+              <Tent className="h-5 w-5" />
+              <span className="text-xs">Visit Camp</span>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-auto flex-col gap-1 border-primary/40 py-4 font-serif tracking-widest text-primary hover:bg-primary/10"
+              onClick={() => setLocation("/boss")}
+            >
+              <Skull className="h-5 w-5" />
+              <span className="text-xs">Boss Arena</span>
+            </Button>
           </div>
 
-          <div className="space-y-6">
-            <ParchmentPanel className="overflow-hidden">
-              <div className="px-6 pt-4 pb-3 border-b border-[#c5a059]/30">
-                <h2 className="text-sm font-serif tracking-widest uppercase" style={{ color: "#c5a059" }}>Attributes</h2>
-              </div>
-              <div className="px-6 pt-6 pb-6 space-y-4">
-                {Object.entries((activeChar.attributes as Record<string, unknown>) ?? {}).map(([attr, val]) => (
-                  <div key={attr} className="flex justify-between items-center">
-                    <span className="text-sm font-serif tracking-widest text-muted-foreground uppercase">{attr}</span>
-                    <span className="font-mono text-primary">{String(val)}</span>
-                  </div>
-                ))}
-              </div>
-            </ParchmentPanel>
-
+          {skills && skills.activeSkills.length > 0 && (
             <Card className="border-border/50 bg-card/50">
-              <CardHeader className="pb-3 border-b border-border/50 flex flex-row items-center justify-between">
-                <CardTitle className="text-sm font-serif tracking-widest uppercase text-muted-foreground">Equipment</CardTitle>
-                <Button variant="ghost" size="sm" asChild className="h-6 text-xs tracking-widest uppercase">
-                  <Link href="/equipment">Change</Link>
-                </Button>
+              <CardHeader className="border-b border-border/50 pb-3">
+                <CardTitle className="font-serif text-sm uppercase tracking-widest text-muted-foreground">
+                  Derived Active Skills
+                </CardTitle>
               </CardHeader>
-              <CardContent className="pt-6 space-y-3">
-                {["mainHand", "offHand", "helm", "chest", "legs", "boots", "gloves", "amulet", "ring1", "ring2"].map(slot => {
-                  const itemId = (activeChar.equipment as any)?.[slot];
+              <CardContent className="pt-6">
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  {skills.activeSkills.map((skill) => (
+                    <div
+                      key={skill.id}
+                      className="flex flex-col items-center gap-3 rounded-md border border-border/50 bg-background/50 p-4 text-center transition-colors hover:border-primary/50"
+                    >
+                      <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded border border-border/50 bg-muted/50">
+                        <SkillIcon icon={skill.icon} glyph="⚔️" size={32} radius={4} />
+                      </div>
+                      <div>
+                        <p className="font-serif text-sm tracking-wide">{skill.name}</p>
+                        <p className="mt-1 text-[10px] uppercase text-muted-foreground">
+                          CD: {skill.cooldown || "0"}s
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* Side column — combat profile, equipment, war room */}
+        <div className="space-y-6">
+          <ParchmentPanel className="overflow-hidden">
+            <div className="border-b border-[#c5a059]/30 px-6 pb-3 pt-4">
+              <h2 className="font-serif text-sm uppercase tracking-widest" style={{ color: GOLD }}>
+                Combat Profile
+              </h2>
+            </div>
+            <div className="space-y-4 px-6 pb-6 pt-6">
+              {ATTR_ORDER.map((key) => (
+                <StatBar key={key} label={ATTR_LABEL[key]} value={fighter.stats[key]} />
+              ))}
+            </div>
+          </ParchmentPanel>
+
+          <Card className="border-border/50 bg-card/50">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-border/50 pb-3">
+              <CardTitle className="font-serif text-sm uppercase tracking-widest text-muted-foreground">
+                Equipment
+              </CardTitle>
+              <Button variant="ghost" size="sm" asChild className="h-6 text-xs uppercase tracking-widest">
+                <Link href="/equipment">Change</Link>
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-6">
+              {!activeChar && (
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  Forge a warlord in the Soul Forge to track an equipment loadout.
+                </p>
+              )}
+              {activeChar &&
+                EQUIP_SLOTS.map((slot) => {
+                  const itemId = (activeChar.equipment as Record<string, string | undefined> | undefined)?.[slot];
                   return (
-                    <div key={slot} className="flex items-center gap-3 p-2 rounded border border-border/30 bg-background/30">
+                    <div
+                      key={slot}
+                      className="flex items-center gap-3 rounded border border-border/30 bg-background/30 p-2"
+                    >
                       <div
-                        className="w-8 h-8 rounded bg-muted/50 flex items-center justify-center text-base shrink-0 border border-border/50"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-border/50 bg-muted/50 text-base"
                         style={{ opacity: itemId ? 1 : 0.4 }}
                       >
                         {EQUIP_SLOT_ICONS[slot] ?? "▫️"}
                       </div>
                       <div className="flex-1 truncate">
-                        <p className="text-xs font-serif tracking-widest text-muted-foreground uppercase">{slot}</p>
-                        <p className="text-sm font-serif truncate text-foreground mt-0.5">{itemId || "Empty"}</p>
+                        <p className="font-serif text-xs uppercase tracking-widest text-muted-foreground">{slot}</p>
+                        <p className="mt-0.5 truncate font-serif text-sm text-foreground">{itemId || "Empty"}</p>
                       </div>
                     </div>
                   );
                 })}
-              </CardContent>
-            </Card>
+            </CardContent>
+          </Card>
 
-            <Card className="border-border/50 bg-card/50">
-              <CardHeader className="pb-3 border-b border-border/50 flex flex-row items-center gap-2">
-                <Sparkles className="w-4 h-4 text-primary" />
-                <CardTitle className="text-sm font-serif tracking-widest uppercase text-muted-foreground">Champion Skin</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-6 space-y-3">
-                <p className="text-[11px] text-muted-foreground tracking-wide leading-relaxed">
-                  Override your warlord's in-world model. Skins use their own animations. Default keeps your race model.
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => chooseSkin(null)}
-                    className={`px-3 py-2 rounded border text-xs font-serif tracking-widest uppercase text-left transition-colors ${
-                      skinId === null
-                        ? "border-primary/70 bg-primary/10 text-primary"
-                        : "border-border/40 bg-background/30 text-muted-foreground hover:border-border/70"
-                    }`}
-                  >
-                    Default
-                  </button>
-                  <button
-                    onClick={() => chooseSkin(RACALVIN_ID)}
-                    className={`col-span-2 px-3 py-2 rounded border text-xs font-serif tracking-widest uppercase text-left transition-colors ${
-                      skinId === RACALVIN_ID
-                        ? "border-primary/70 bg-primary/10 text-primary"
-                        : "border-primary/30 bg-primary/5 text-foreground/80 hover:border-primary/60"
-                    }`}
-                  >
-                    Racalvin — Corsair King
-                  </button>
-                  {SKINS.map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => chooseSkin(s.id)}
-                      className={`px-3 py-2 rounded border text-xs font-serif tracking-wide text-left truncate transition-colors ${
-                        skinId === s.id
-                          ? "border-primary/70 bg-primary/10 text-primary"
-                          : "border-border/40 bg-background/30 text-muted-foreground hover:border-border/70"
-                      }`}
-                    >
-                      {s.name}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[10px] text-muted-foreground/70 tracking-widest uppercase">
-                  Re-enter the world to apply
-                </p>
-              </CardContent>
-            </Card>
-          </div>
+          <Card className="border-border/50 bg-card/50">
+            <CardHeader className="border-b border-border/50 pb-3">
+              <CardTitle className="font-serif text-sm uppercase tracking-widest text-muted-foreground">
+                War Room
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 gap-2 pt-6">
+              {WAR_ROOM.map(({ href, label, sub, icon: Icon }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className="group flex items-center gap-3 rounded border border-border/30 bg-background/30 p-3 transition-colors hover:border-primary/50 hover:bg-primary/5"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-border/50 bg-muted/40 text-primary">
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-serif text-sm uppercase tracking-widest text-foreground">{label}</p>
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{sub}</p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
         </div>
-      )}
+      </div>
     </div>
   );
 }
