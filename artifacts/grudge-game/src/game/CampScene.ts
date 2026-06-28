@@ -6,7 +6,11 @@ import {
   disposeObject3D,
   loadKayKitAnimLibrary,
   HeroAnimator,
+  loadActiveFighterModel,
+  skillAnimCandidates,
+  type HeroLike,
 } from "./kaykitHero";
+import { SkillVfx } from "./skillVfx";
 
 export type CampStationId =
   | "anvil"
@@ -110,9 +114,10 @@ export class CampScene {
   private camera!: THREE.OrthographicCamera;
   private clock = new THREE.Clock();
   private animFrameId = 0;
+  private skillVfx!: SkillVfx;
 
   private playerGroup: THREE.Group | null = null;
-  private heroAnim: HeroAnimator | null = null;
+  private heroAnim: HeroLike | null = null;
   private playerPos = new THREE.Vector3(0, 0, 6);
   private playerTarget: THREE.Vector3 | null = null;
   private playerFacing = 0;
@@ -179,6 +184,7 @@ export class CampScene {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x05050a);
     this.scene.fog = new THREE.FogExp2(0x06060c, 0.025);
+    this.skillVfx = new SkillVfx(this.scene, new GLTFLoader());
 
     this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 200);
     this.camera.position.set(18, 18, 18);
@@ -608,8 +614,29 @@ export class CampScene {
   }
 
   private loadPlayer() {
-    const modelName = resolveModelName(this.options.className, this.options.raceKey);
     const loader = new GLTFLoader();
+    // Prefer the globally-selected fighter skin; fall back to the KayKit hero.
+    loadActiveFighterModel(
+      loader,
+      2.6,
+      (root, anim) => {
+        if (this.disposed) {
+          disposeObject3D(root);
+          return;
+        }
+        root.position.copy(this.playerPos);
+        this.scene.add(root);
+        this.playerGroup = root;
+        this.heroAnim = anim;
+        this.loaded = true;
+        this.emitState();
+      },
+      () => this.loadKayKitHero(loader),
+    );
+  }
+
+  private loadKayKitHero(loader: GLTFLoader) {
+    const modelName = resolveModelName(this.options.className, this.options.raceKey);
     const localUrl = `${import.meta.env.BASE_URL}models/kaykit/heroes/${modelName}.glb`;
     const remoteUrl = `${OBJECTSTORE}/models/characters/kaykit/${modelName}.glb`;
 
@@ -787,7 +814,7 @@ export class CampScene {
     // Alternate animation flavour: even slots melee, odd slots cast.
     const isCast = idx % 2 === 1;
     if (this.heroAnim) {
-      const played = this.heroAnim.trigger(isCast ? "cast" : "attack");
+      const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
       if (!played) this.proceduralLunge();
     } else {
       this.proceduralLunge();
@@ -809,6 +836,7 @@ export class CampScene {
       }
     }
     this.spawnVfx(center, isCast ? 0x66aaff : 0xffaa33, radius);
+    this.skillVfx.spawn(isCast ? "cloud" : "tornado", center, isCast ? 4 : 3, isCast ? 1.1 : 1.3);
     this.pushLog(hitAny ? `Skill ${idx + 1} strikes the yard!` : `Skill ${idx + 1} — no target in range.`);
     this.emitState();
   }
@@ -988,6 +1016,8 @@ export class CampScene {
       this.heroAnim.setMoving(moving);
       this.heroAnim.update(delta);
     }
+
+    this.skillVfx.update(delta);
 
     // Dummies: hit-flash decay, death tip-over + respawn.
     for (const d of this.dummies) {
@@ -1187,6 +1217,7 @@ export class CampScene {
       this.heroAnim.dispose();
       this.heroAnim = null;
     }
+    this.skillVfx?.dispose();
     this.embers = [];
     this.vfx = [];
     this.dummies = [];

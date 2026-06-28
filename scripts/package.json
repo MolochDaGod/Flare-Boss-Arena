@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "hello": "tsx ./src/hello.ts",
+    "build-racalvin-anims": "tsx ./src/build-racalvin-anims.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.4.0",
+    "@gltf-transform/functions": "^4.4.0",
     "@types/node": "catalog:",
     "tsx": "catalog:"
   }

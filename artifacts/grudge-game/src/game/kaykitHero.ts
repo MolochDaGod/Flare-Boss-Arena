@@ -1,5 +1,9 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { PlayerAnimator, pickSkinClips } from "./PlayerAnimator";
+import { getActiveFighter, RACALVIN_ID } from "../data/fighters";
+import { getSkin, skinUrl } from "../data/skins";
+import { loadRacalvinBase, loadRacalvinClips } from "./racalvinHero";
 
 /**
  * Shared KayKit hero utilities used by the real-time 3D scenes (`/camp`,
@@ -115,6 +119,41 @@ export function loadKayKitAnimLibrary(loader: GLTFLoader): Promise<THREE.Animati
  */
 export type HeroState = "idle" | "walk" | "run" | "attack" | "cast" | "hit" | "jump" | "dodge";
 
+/**
+ * Common animator surface used by the Camp/Boss scenes. Implemented by the
+ * KayKit `HeroAnimator` and by `SkinHeroAdapter` (One Piece fighter skins), so a
+ * scene can drive either interchangeably and stay model-agnostic.
+ */
+export interface HeroLike {
+  setMoving(moving: boolean): void;
+  trigger(state: HeroState): boolean;
+  /** Play the first matching clip (by substring) as a one-shot skill animation. */
+  triggerNamed(candidates: string[]): boolean;
+  update(delta: number): void;
+  addLibraryClips(clips: THREE.AnimationClip[]): void;
+  dispose(): void;
+}
+
+/**
+ * Per-skill-slot animation candidates (most-specific first). Spans every model
+ * vocabulary — One Piece skins (`combo_a`/`skill_a`…), Racalvin (`hammer`/
+ * `punch`…), and KayKit (`1h_melee_attack_chop`/`spellcast`…) — so each fighter
+ * plays the richest clip it actually owns and falls back to a basic attack/cast.
+ */
+export function skillAnimCandidates(idx: number, isCast: boolean): string[] {
+  const perSlot: string[][] = [
+    ["combo_a", "slash"],
+    ["skill_a", "hammer"],
+    ["combo_c", "punch", "kick"],
+    ["skill_b", "shout"],
+    ["combo_b", "spin", "boost"],
+  ];
+  const base = isCast
+    ? ["spellcast", "cast", "spell", "magic", "ranged", "throw", "skill_b", "skill_a"]
+    : ["combo", "attack", "slash", "chop", "stab", "1h_melee", "melee", "punch"];
+  return [...(perSlot[idx] ?? []), ...base];
+}
+
 const HERO_CANDIDATES: Record<HeroState, string[]> = {
   idle: ["idle_a", "idle", "idle_b"],
   walk: ["walking_c", "walking_b", "walking_a", "walk", "walking"],
@@ -138,7 +177,7 @@ const HERO_CANDIDATES: Record<HeroState, string[]> = {
   dodge: ["dodge", "roll", "evade"],
 };
 
-export class HeroAnimator {
+export class HeroAnimator implements HeroLike {
   private mixer: THREE.AnimationMixer;
   private root: THREE.Object3D;
   private byName = new Map<string, THREE.AnimationClip>();
@@ -240,6 +279,30 @@ export class HeroAnimator {
     return true;
   }
 
+  /** Play the first clip whose name includes one of `candidates` as a one-shot. */
+  triggerNamed(candidates: string[]): boolean {
+    if (this.oneShot) return true;
+    let clip: THREE.AnimationClip | undefined;
+    for (const cand of candidates) {
+      for (const [name, c] of this.byName) {
+        if (name.includes(cand)) {
+          clip = c;
+          break;
+        }
+      }
+      if (clip) break;
+    }
+    if (!clip) return this.trigger("attack");
+    const a = this.mixer.clipAction(clip);
+    this.oneShot = a;
+    a.reset();
+    a.setLoop(THREE.LoopOnce, 1);
+    a.clampWhenFinished = false;
+    a.fadeIn(0.06).play();
+    this.actions[this.current]?.fadeOut(0.06);
+    return true;
+  }
+
   update(delta: number) {
     this.mixer.update(delta);
   }
@@ -252,4 +315,121 @@ export class HeroAnimator {
     this.mixer.stopAllAction();
     this.mixer.uncacheRoot(this.root);
   }
+}
+
+/**
+ * Wraps a `PlayerAnimator` (idle/walk/attack on One Piece fighter skins) behind
+ * the `HeroLike` surface so the Camp/Boss scenes drive a fighter skin exactly as
+ * they drive a KayKit hero. Action states without a dedicated skin clip
+ * (jump/dodge/hit) return false so the caller falls back to its procedural lunge.
+ */
+export class SkinHeroAdapter implements HeroLike {
+  constructor(private readonly inner: PlayerAnimator) {}
+
+  setMoving(moving: boolean) {
+    this.inner.setMoving(moving);
+  }
+
+  trigger(state: HeroState): boolean {
+    if (state === "attack" || state === "cast") {
+      if (!this.inner.canAttack) return false;
+      this.inner.triggerAttack();
+      return true;
+    }
+    return false;
+  }
+
+  triggerNamed(candidates: string[]): boolean {
+    return this.inner.triggerNamed(candidates);
+  }
+
+  update(delta: number) {
+    this.inner.update(delta);
+  }
+
+  // Skins are self-contained (labelled clips ship in the GLB) — no shared library.
+  addLibraryClips(_clips: THREE.AnimationClip[]) {}
+
+  dispose() {
+    this.inner.dispose();
+  }
+}
+
+/**
+ * Load the globally-selected fighter's skin GLB, fit it to `targetHeight` (feet
+ * at the wrapper origin, XZ-centred), and hand back a `HeroLike` adapter. Calls
+ * `onMiss` when no skin resolves or the GLB fails to load so the caller can fall
+ * back to the KayKit hero path.
+ */
+export function loadActiveFighterModel(
+  loader: GLTFLoader,
+  targetHeight: number,
+  onReady: (root: THREE.Group, anim: HeroLike) => void,
+  onMiss: () => void,
+) {
+  if (getActiveFighter().id === RACALVIN_ID) {
+    loadRacalvinHero(loader, targetHeight, onReady, onMiss);
+    return;
+  }
+  const skin = getSkin(getActiveFighter().skinId);
+  if (!skin) {
+    onMiss();
+    return;
+  }
+  loader.load(
+    skinUrl(skin),
+    (gltf) => {
+      const model = gltf.scene;
+      model.traverse((c) => {
+        const m = c as THREE.Mesh & { isSkinnedMesh?: boolean };
+        if (m.isMesh) {
+          m.castShadow = true;
+          m.receiveShadow = true;
+          m.frustumCulled = false;
+        }
+      });
+      const wrapper = new THREE.Group();
+      model.updateWorldMatrix(true, true);
+      const box = new THREE.Box3().setFromObject(model);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      if (size.y > 0.001) model.scale.setScalar(targetHeight / size.y);
+      model.updateWorldMatrix(true, true);
+      const box2 = new THREE.Box3().setFromObject(model);
+      const center = new THREE.Vector3();
+      box2.getCenter(center);
+      model.position.x -= center.x;
+      model.position.z -= center.z;
+      model.position.y -= box2.min.y;
+      wrapper.add(model);
+      const clips = pickSkinClips(gltf.animations, skin.scheme);
+      onReady(wrapper, new SkinHeroAdapter(new PlayerAnimator(model, clips, gltf.animations)));
+    },
+    undefined,
+    () => onMiss(),
+  );
+}
+
+/**
+ * Load the bespoke Racalvin (Corsair King) hero for the Camp/Boss scenes: base
+ * skinned model + library clips driven through `HeroAnimator` (the clip names —
+ * idle/walk/run/attack/cast/dodge/hit/jump — match the `HERO_CANDIDATES`
+ * substrings directly), with the Brothers' Keeper sword on the hand bone.
+ */
+export function loadRacalvinHero(
+  loader: GLTFLoader,
+  targetHeight: number,
+  onReady: (root: THREE.Group, anim: HeroLike) => void,
+  onMiss: () => void,
+) {
+  loadRacalvinBase(
+    loader,
+    targetHeight,
+    (wrapper, root, baseClips) => {
+      const hero = new HeroAnimator(root, baseClips);
+      loadRacalvinClips(loader).then((clips) => hero.addLibraryClips(clips));
+      onReady(wrapper, hero);
+    },
+    onMiss,
+  );
 }

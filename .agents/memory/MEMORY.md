@@ -1,1 +1,2 @@
 - [Tailwind v4 content-scan OOM](tailwind-v4-content-scan-oom.md) — grudge dev server OOM was Tailwind v4 scanning 335MB of GLBs in public/; fix = `source(none)` + explicit `@source`. Linear post-`ready` memory runaway = file-tree scanner, not esbuild.
+- [SkillVfx shared-clone disposal](skill-vfx-shared-clone-disposal.md) — short-lived GLB VFX share geometry/materials across clones; only templates dispose (and must dispose textures + late-loads).

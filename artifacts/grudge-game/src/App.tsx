@@ -13,6 +13,7 @@ import Shell from "@/components/layout/Shell";
 // limit and gets the dev server OOM-killed. Code-splitting per route keeps each
 // transform pass bounded to the route the user is actually viewing.
 const Home = lazy(() => import("@/pages/home"));
+const Select = lazy(() => import("@/pages/select"));
 const CharacterNew = lazy(() => import("@/pages/character-new"));
 const Equipment = lazy(() => import("@/pages/equipment"));
 const Skills = lazy(() => import("@/pages/skills"));
@@ -43,6 +44,7 @@ function Router() {
         <Shell>
           <Switch>
             <Route path="/" component={Home} />
+            <Route path="/select" component={Select} />
             <Route path="/character/new" component={CharacterNew} />
             <Route path="/equipment" component={Equipment} />
             <Route path="/skills" component={Skills} />

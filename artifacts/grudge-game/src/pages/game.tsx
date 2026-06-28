@@ -6,6 +6,7 @@ import { Loader2, ArrowLeft, Swords, Zap, Shield, Crosshair, LayoutGrid } from "
 import { motion, AnimatePresence } from "framer-motion";
 import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type PanelKey } from "@/components/MainPanel";
 import { getSelectedSkin } from "@/data/skins";
+import { getActiveFighter } from "@/data/fighters";
 import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { useResolvedSkills } from "@/data/skillsResolver";
 import { SkillIcon } from "@/components/SkillIcon";
@@ -235,7 +236,8 @@ function Game() {
     const charId = c.id as string | number;
     const charClass = String(c.class ?? "warrior").toLowerCase();
     const equipMainCategory = CLASS_STARTER_WEAPON[charClass]?.category;
-    const skinId = charId != null ? getSelectedSkin(charId) : null;
+    const skinId =
+      getActiveFighter()?.skinId ?? (charId != null ? getSelectedSkin(charId) : null);
 
     const engine = new GameEngine();
     engine.onStateUpdate = handleStateUpdate;
@@ -453,8 +455,9 @@ function Game() {
                 {hudClassSkills.skills.slice(0, 5).map((s, i) => (
                   <div
                     key={s.id}
+                    onClick={() => engineRef.current?.useSkill(i)}
                     title={`${s.name}${s.cooldown ? ` · CD ${s.cooldown}` : ""}\n${s.description}`}
-                    className="relative w-11 h-11 rounded flex items-center justify-center text-lg bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all overflow-hidden"
+                    className="relative w-11 h-11 rounded flex items-center justify-center text-lg bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all overflow-hidden cursor-pointer active:scale-95"
                     style={{ boxShadow: "inset 0 0 5px #000" }}
                   >
                     <SkillIcon icon={s.icon} glyph={s.glyph} size={40} radius={4} />
@@ -469,14 +472,15 @@ function Game() {
             <div className="flex flex-col items-center gap-1">
               <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>Weapon</span>
               <div className="flex gap-1.5">
-                {hudWeaponSlots.map((slot) => {
+                {hudWeaponSlots.map((slot, wi) => {
                   const sk = slot.skills[0];
                   if (!sk) return null;
                   return (
                     <div
                       key={slot.type}
+                      onClick={() => engineRef.current?.useSkill(wi % 5)}
                       title={`${slot.label}: ${sk.name}${sk.cooldown ? ` · CD ${sk.cooldown}` : ""}\n${sk.description}`}
-                      className="w-11 h-11 rounded flex items-center justify-center overflow-hidden bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all"
+                      className="w-11 h-11 rounded flex items-center justify-center overflow-hidden bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all cursor-pointer active:scale-95"
                       style={{ boxShadow: "inset 0 0 5px #000" }}
                     >
                       {sk.icon ? (

@@ -9,6 +9,10 @@ import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateH
 import { PlayerAnimator, buildAuthoredClips, pickSkinClips } from "./PlayerAnimator";
 import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "../data/characterMeshes";
 import { getSkin, skinUrl, type SkinDef } from "../data/skins";
+import { RACALVIN_ID } from "../data/fighters";
+import { loadRacalvinForDungeon } from "./racalvinHero";
+import { skillAnimCandidates } from "./kaykitHero";
+import { SkillVfx } from "./skillVfx";
 
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
 
@@ -113,6 +117,7 @@ export class GameEngine {
   private renderer!: THREE.WebGLRenderer;
   private clock!: THREE.Clock;
   private loader!: GLTFLoader;
+  private skillVfx!: SkillVfx;
   private animFrameId = 0;
   private floorPlane!: THREE.Mesh;
   private raycaster = new THREE.Raycaster();
@@ -218,6 +223,7 @@ export class GameEngine {
 
     this.clock = new THREE.Clock();
     this.loader = new GLTFLoader();
+    this.skillVfx = new SkillVfx(this.scene, this.loader);
 
     this.buildDungeon();
     this.loadEnvironment();
@@ -481,9 +487,23 @@ export class GameEngine {
   }
 
   private loadPlayerModel() {
+    if (this.initStats.skinId === RACALVIN_ID) {
+      this.loadRacalvinModel();
+      return;
+    }
     const skin = getSkin(this.initStats.skinId);
     if (skin) this.loadSkinModel(skin);
     else this.loadRaceModel();
+  }
+
+  /** Racalvin (Corsair King) — bespoke base model + library clips + sword. */
+  private loadRacalvinModel() {
+    loadRacalvinForDungeon(
+      this.loader,
+      1.9,
+      (wrapper, animator) => this.finalizePlayer(wrapper, animator),
+      () => this.loadRaceModel(),
+    );
   }
 
   /** One Piece champion skin — fully rigged GLB, plays its own labelled clips. */
@@ -498,7 +518,7 @@ export class GameEngine {
         });
         const wrapper = this.buildPlayerWrapper(model, skin.height ?? 1.9);
         const clips = pickSkinClips(gltf.animations, skin.scheme);
-        this.finalizePlayer(wrapper, new PlayerAnimator(model, clips));
+        this.finalizePlayer(wrapper, new PlayerAnimator(model, clips, gltf.animations));
       },
       undefined,
       () => this.loadRaceModel(), // graceful fallback to the race model
@@ -692,6 +712,11 @@ export class GameEngine {
         e.preventDefault();
         this.attackNearest();
       }
+      const n = Number(e.key);
+      if (n >= 1 && n <= 5) {
+        e.preventDefault();
+        this.useSkill(n - 1);
+      }
     };
     this._keyUpHandler = (e: KeyboardEvent) => this.keys.delete(e.code);
     this._clickHandler = (e: MouseEvent) => this.handleClick(e, container);
@@ -805,6 +830,68 @@ export class GameEngine {
       if (d < nearestDist) { nearestDist = d; nearest = en; }
     }
     if (nearest && nearestDist < 4.5) this.doAttack(nearest);
+  }
+
+  /** Skill-bar action: play the fighter-specific skill animation and strike all
+   *  enemies in a forward arc. Slot index drives which clip / VFX plays. */
+  useSkill(idx: number) {
+    if (this.playerAttackCooldown > 0) return;
+    const isCast = idx % 2 === 1;
+
+    // Face the nearest living enemy so the skill reads as aimed.
+    let nearest: EnemyInstance | null = null;
+    let nearestDist = Infinity;
+    for (const en of this.enemies) {
+      if (en.state === "dead" || en.state === "death") continue;
+      const d = en.position.distanceTo(this.playerPos);
+      if (d < nearestDist) { nearestDist = d; nearest = en; }
+    }
+    if (nearest) {
+      this.playerFacing = Math.atan2(
+        nearest.position.x - this.playerPos.x,
+        nearest.position.z - this.playerPos.z,
+      );
+    }
+
+    const played = this.playerAnimator?.triggerNamed(skillAnimCandidates(idx, isCast)) ?? false;
+    if (!played) this.playerAnimator?.triggerAttack();
+    this.playerAttackCooldown = this.playerMaxAttackCooldown;
+
+    const radius = isCast ? 5.5 : 3.6;
+    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    const center = this.playerPos.clone().add(forward.multiplyScalar(isCast ? 2.5 : 1.6));
+    this.spawnSkillVfx(center, idx, isCast);
+
+    const mult = isCast ? 2.2 : 1.7;
+    for (const en of this.enemies) {
+      if (en.state === "dead" || en.state === "death") continue;
+      if (en.position.distanceTo(center) > radius) continue;
+      const isCrit = Math.random() < this.playerCritChance + 0.05;
+      const rawDmg = Math.max(1, Math.floor(this.playerBaseDamage * mult * (0.85 + Math.random() * 0.3) * (isCrit ? 1.75 : 1)));
+      const dmg = Math.max(1, rawDmg - Math.floor(en.template.tier * 2));
+      en.hp = Math.max(0, en.hp - dmg);
+      const wp = en.model.group.position.clone();
+      wp.y += en.model.height * 0.7;
+      this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
+      if (en.hp <= 0) {
+        this.killEnemy(en);
+      } else {
+        en.anim.hurtPhase = 1;
+        en.state = "hurt";
+        en.hurtTimer = 0.4;
+      }
+    }
+    this.notifyState();
+  }
+
+  /** Map a skill slot to a VFX and spawn it at the strike point. Cast slots
+   *  spawn a cloud ring (push/knockback); melee slots spawn a fire tornado. */
+  private spawnSkillVfx(pos: THREE.Vector3, idx: number, isCast: boolean) {
+    if (isCast) {
+      this.skillVfx.spawn("cloud", pos, 4, 1.1);
+    } else {
+      this.skillVfx.spawn("tornado", pos, idx === 4 ? 4.5 : 3, 1.3);
+    }
   }
 
   private doAttack(enemy: EnemyInstance) {
@@ -984,6 +1071,8 @@ export class GameEngine {
     } else if (this.playerMixer) {
       this.playerMixer.update(delta);
     }
+
+    this.skillVfx.update(delta);
 
     // Neutral pirate allies at the cove: idle anim, plus turn-to-face and an
     // occasional wave when the player wanders close.
@@ -1176,6 +1265,7 @@ export class GameEngine {
     }
     this.clearHover();
     this.playerAnimator?.dispose();
+    this.skillVfx?.dispose();
     // Dispose the procedural ground + rock field.
     if (this.groundMesh) {
       this.groundMesh.geometry.dispose();

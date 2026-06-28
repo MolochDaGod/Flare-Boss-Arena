@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<title>Untitled Layout — HYDRA</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#000;overflow:hidden;width:1280px;height:720px;font-family:'Inter',sans-serif;}
+:root{--ca:#d4960a;--ct:#e8d090;--cb:rgba(200,140,20,.12);--slot:rgba(5,3,1,.7);--sb:rgba(140,100,20,.4)}
+.gtitle{font-size:.57rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--ca);padding:4px 6px 3px;border-bottom:1px solid var(--sb);}
+.sgrid{display:grid;gap:3px;padding:5px;}.gslot{background:var(--slot);border:1px solid var(--sb);border-radius:3px;}
+.hbrow{display:flex;gap:3px;padding:5px;align-items:center;justify-content:center;height:100%;}.hbsl{background:var(--slot);border:1px solid var(--sb);border-radius:3px;display:flex;align-items:flex-end;justify-content:flex-end;padding:2px;flex-shrink:0;}.hbnum{font-size:.46rem;color:var(--ca);}
+.hb2wrap{display:flex;flex-direction:column;gap:3px;padding:4px;height:100%;justify-content:center;}
+.bwrap{padding:5px 7px;display:flex;flex-direction:column;gap:3px;height:100%;justify-content:center;}.brow{display:flex;justify-content:space-between;}.blbl{font-size:.57rem;font-weight:700;color:var(--ca);}.bval{font-size:.55rem;color:var(--ct);}.btrack{background:rgba(0,0,0,.5);border:1px solid var(--sb);border-radius:20px;overflow:hidden;height:8px;}.bfill{height:100%;border-radius:20px;}.xpfill{background:linear-gradient(90deg,#f59e0b,#fcd34d)!important;}
+.mmwrap{width:100%;height:100%;position:relative;overflow:hidden;}.mmbg{position:absolute;inset:0;background:radial-gradient(circle,rgba(30,60,40,.6),rgba(5,15,10,.9));}.mmgrid{position:absolute;inset:0;background-image:linear-gradient(rgba(74,222,128,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(74,222,128,.07) 1px,transparent 1px);background-size:18px 18px;}.mmdot{width:5px;height:5px;border-radius:50%;background:#4ade80;position:absolute;top:45%;left:50%;transform:translate(-50%,-50%);box-shadow:0 0 4px #4ade80;z-index:2;}.mmbd{position:absolute;inset:0;border-radius:inherit;border:1px solid var(--sb);}
+.pwrap{display:flex;flex-direction:column;align-items:center;padding:5px;gap:3px;height:100%;justify-content:center;}.pface{flex:1;width:100%;background:var(--slot);border:1px solid var(--sb);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;color:var(--ca);min-height:0;}.pname{font-size:.57rem;font-weight:700;color:var(--ct);}.plvl{font-size:.53rem;color:var(--ca);}
+.cwrap{display:flex;align-items:center;gap:5px;padding:3px 7px;height:100%;}.camt{font-size:.76rem;font-weight:700;color:var(--ca);}.clbl{font-size:.53rem;color:var(--ct);}
+.chatwrap{display:flex;flex-direction:column;height:100%;}.chatmsgs{flex:1;padding:3px 5px;display:flex;flex-direction:column;gap:2px;overflow:hidden;justify-content:flex-end;}.chatmsg{font-size:.51rem;line-height:1.4;}.chatu{color:var(--ca);font-weight:600;}.chatt{color:var(--ct);}.chatinp{display:flex;gap:3px;padding:3px 5px;border-top:1px solid var(--sb);}.chatfake{flex:1;height:15px;background:var(--slot);border:1px solid var(--sb);border-radius:3px;}
+.eqgrid{display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-rows:repeat(4,1fr);gap:3px;padding:5px;height:100%;}.eqsl{background:var(--slot);border:1px solid var(--sb);border-radius:3px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;}.eqsl i{font-size:.58rem;color:var(--ca);}.eqn{font-size:.38rem;color:rgba(255,255,255,.4);}
+.stwrap{position:relative;width:100%;height:100%;overflow:hidden;}.stnode{position:absolute;width:28px;height:28px;border-radius:50%;background:var(--slot);border:2px solid var(--sb);display:flex;align-items:center;justify-content:center;}.stnode.on{background:var(--cb);border-color:var(--ca);}.stnode i{font-size:.55rem;color:var(--ca);}.stedge{position:absolute;background:var(--sb);transform-origin:left center;}
+.shwrap{display:flex;flex-direction:column;height:100%;}.shitems{flex:1;padding:3px 5px;display:flex;flex-direction:column;gap:2px;overflow:hidden;}.shitem{display:flex;align-items:center;gap:4px;padding:3px 4px;border-radius:3px;background:var(--slot);border:1px solid var(--sb);}.shico{width:17px;height:17px;border-radius:3px;background:var(--cb);display:flex;align-items:center;justify-content:center;font-size:.56rem;}.shnm{flex:1;font-size:.54rem;color:var(--ct);}.shpr{font-size:.54rem;font-weight:700;color:var(--ca);}.shbuy{margin:3px 5px 4px;padding:3px;border-radius:4px;text-align:center;background:var(--cb);border:1px solid var(--sb);font-size:.54rem;font-weight:700;color:var(--ca);}
+.xhwrap{display:flex;align-items:center;justify-content:center;height:100%;color:var(--ca,rgba(255,255,255,.9));position:relative;}.xhwrap::before,.xhwrap::after{content:'';position:absolute;background:currentColor;border-radius:1px;}.xhwrap::before{width:11px;height:1.5px;}.xhwrap::after{width:1.5px;height:11px;}.xhdot{width:3px;height:3px;border-radius:50%;border:1px solid currentColor;position:absolute;}
+.txwrap{display:flex;align-items:center;height:100%;padding:0 5px;}.txin{color:var(--ct,#fff);font-weight:600;}
+.ufwrap{display:flex;align-items:center;gap:6px;padding:4px 6px;height:100%;}.ufface{width:40px;height:40px;border-radius:4px;background:var(--slot);border:2px solid var(--ca);display:flex;align-items:center;justify-content:center;font-size:1rem;color:var(--ca);flex-shrink:0;}.ufinfo{flex:1;display:flex;flex-direction:column;gap:2px;}.ufname{font-size:.6rem;font-weight:700;color:#e0e2f0;}.uflvl{font-size:.52rem;color:var(--ca);font-weight:400;}.ufbar{height:7px;background:rgba(0,0,0,.5);border-radius:4px;overflow:hidden;}.ufhp{height:100%;background:linear-gradient(90deg,#e11d48,#f87171);border-radius:4px;}.ufbarlbl{font-size:.46rem;color:#52546e;}.ufmpbar{margin-top:1px;}.ufmp{height:100%;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:4px;}
+.afwrap{display:flex;align-items:center;gap:4px;padding:3px 5px;height:100%;}.afface{width:26px;height:26px;border-radius:3px;background:rgba(255,255,255,.06);border:1px solid rgba(74,222,128,.3);display:flex;align-items:center;justify-content:center;font-size:.66rem;color:#4ade80;flex-shrink:0;}.afinfo{flex:1;display:flex;flex-direction:column;gap:2px;}.afname{font-size:.54rem;font-weight:600;}.afbar{height:5px;background:rgba(0,0,0,.5);border-radius:3px;overflow:hidden;}.afhp{height:100%;background:#22c55e;border-radius:3px;}
+.orbwrap{position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;}.orbval{position:absolute;font-size:.62rem;font-weight:700;}.orblbl{position:absolute;bottom:8%;font-size:.47rem;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.4);}
+.mdwrap{display:flex;align-items:center;gap:3px;padding:3px;height:100%;justify-content:center;}.mdbtn{display:flex;flex-direction:column;align-items:center;gap:2px;padding:3px 8px;border-radius:5px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);font-size:.46rem;color:rgba(255,255,255,.5);flex:1;}.mdbtn i{font-size:.72rem;color:var(--ca);}
+.clwrap{display:flex;flex-direction:column;height:100%;}.clmsgs{flex:1;padding:3px 5px;display:flex;flex-direction:column;gap:2px;overflow:hidden;justify-content:flex-end;}.clm{font-size:.52rem;line-height:1.4;}.clm.dmg{color:#f87171;}.clm.heal{color:#4ade80;}.clm.sys{color:#9496b0;font-style:italic;}.clt{font-weight:700;}.cldmg{font-weight:700;color:#fca5a5;}.clheal{font-weight:700;}
+.objwrap{height:100%;display:flex;flex-direction:column;}.objlist{padding:3px 6px;display:flex;flex-direction:column;gap:3px;flex:1;}.objitem{font-size:.6rem;color:#9496b0;display:flex;align-items:center;gap:5px;}.objitem.done{color:#52546e;text-decoration:line-through;}.objitem i{font-size:.5rem;color:var(--ca);flex-shrink:0;}.objprog{color:var(--ca);font-weight:600;}
+.dlgwrap{display:flex;flex-direction:column;height:100%;padding:8px 12px;gap:5px;}.dlgspk{font-size:.65rem;font-weight:700;color:var(--ca);letter-spacing:.05em;text-transform:uppercase;}.dlgtxt{flex:1;font-size:.68rem;line-height:1.6;}.dlgbtns{display:flex;gap:5px;}.dlgbtn{padding:4px 12px;border-radius:5px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);font-size:.6rem;font-weight:600;}
+.qtwrap{height:100%;display:flex;flex-direction:column;}.qtitle{padding:3px 6px;font-size:.65rem;font-weight:700;color:var(--ca);}.qtobj{padding:0 6px;font-size:.6rem;color:#9496b0;line-height:1.5;}
+.albwrap{display:flex;align-items:center;justify-content:center;gap:8px;height:100%;padding:0 14px;border:1px solid;border-radius:inherit;}.albtxt{font-size:.75rem;font-weight:700;letter-spacing:.08em;}
+.ipwrap{display:flex;align-items:center;gap:8px;height:100%;padding:0 12px;}.ipkey{width:28px;height:28px;border-radius:5px;border:2px solid rgba(255,255,255,.35);background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;color:#fff;flex-shrink:0;}.ipact{font-size:.7rem;font-weight:600;}
+.attrlist{padding:2px 4px;display:flex;flex-direction:column;gap:1px;height:100%;justify-content:space-around;overflow:hidden;}.attrow{display:flex;align-items:center;gap:5px;padding:2px 4px;border-radius:4px;background:rgba(255,255,255,.02);}.attic{font-size:.66rem;width:16px;text-align:center;}.attn{flex:1;font-size:.58rem;font-weight:600;color:#9496b0;letter-spacing:.06em;}.attv{font-size:.62rem;font-weight:700;color:var(--ca);}
+.wswrap{display:flex;align-items:center;gap:3px;padding:3px 5px;height:100%;}.wsbtn{padding:3px 8px;border-radius:5px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);font-size:.54rem;color:#9496b0;white-space:nowrap;}.wsbtn.on{background:rgba(74,222,128,.1);border-color:rgba(74,222,128,.3);color:var(--ca);}
+.cpixwrap{width:100%;height:100%;display:flex;align-items:center;justify-content:center;}.cpixwrap img{width:100%;height:100%;object-fit:contain;display:block;}
+</style>
+</head>
+<body>
+<div id="ui" style="position:relative;width:1280px;height:720px">
+<div style="position:absolute;left:20px;top:600px;width:80px;height:100px;transform:rotate(0deg);opacity:1;filter:"><div style="width:100%;height:100%;overflow:hidden;border-radius:0px;background:rgba(12,7,3,.9);border:1px solid #7a5c10"><div class="pwrap"><div class="pface"><i class="fa fa-user"></i></div><div class="pname">Grudge</div><div class="plvl">Lv 12</div></div></div></div>
+<div style="position:absolute;left:108px;top:606px;width:250px;height:28px;transform:rotate(0deg);opacity:1;filter:"><div style="width:100%;height:100%;overflow:hidden;border-radius:0px;background:rgba(12,7,3,.9);border:1px solid #7a5c10"><div class="bwrap"><div class="brow"><span class="blbl">HP</span><span class="bval">80/100</span></div>
+        <div class="btrack"><div class="bfill" style="width:80%;background:#e11d48"></div></div></div></div></div>
+<div style="position:absolute;left:108px;top:640px;width:210px;height:22px;transform:rotate(0deg);opacity:1;filter:"><div style="width:100%;height:100%;overflow:hidden;border-radius:0px;background:rgba(12,7,3,.9);border:1px solid #7a5c10"><div class="bwrap"><div class="brow"><span class="blbl">MP</span><span class="bval">55/100</span></div>
+        <div class="btrack"><div class="bfill" style="width:55.00000000000001%;background:#3b82f6"></div></div></div></div></div>
+<div style="position:absolute;left:108px;top:668px;width:250px;height:13px;transform:rotate(0deg);opacity:1;filter:"><div style="width:100%;height:100%;overflow:hidden;border-radius:0px;background:rgba(12,7,3,.9);border:1px solid #7a5c10"><div class="bwrap"><div class="brow"><span class="blbl">XP</span><span class="bval">65/100</span></div>
+        <div class="btrack"><div class="bfill xpfill" style="width:65%;background:#f59e0b"></div></div></div></div></div>
+<div style="position:absolute;left:400px;top:646px;width:480px;height:64px;transform:rotate(0deg);opacity:1;filter:"><div style="width:100%;height:100%;overflow:hidden;border-radius:0px;background:rgba(12,7,3,.9);border:1px solid #7a5c10"><div class="hbrow"><div class="hbsl" style="width:54px;height:54px"><span class="hbnum">1</span></div><div class="hbsl" style="width:54px;height:54px"><span class="hbnum">2</span></div><div class="hbsl" style="width:54px;height:54px"><span class="hbnum">3</span></div><div class="hbsl" style="width:54px;height:54px"><span class="hbnum">4</span></div><div class="hbsl" style="width:54px;height:54px"><span class="hbnum">5</span></div><div class="hbsl" style="width:54px;height:54px"><span class="hbnum">6</span></div><div class="hbsl" style="width:54px;height:54px"><span class="hbnum">7</span></div><div class="hbsl" style="width:54px;height:54px"><span class="hbnum">8</span></div></div></div></div>
+<div style="position:absolute;left:946px;top:450px;width:314px;height:250px;transform:rotate(0deg);opacity:1;filter:"><div style="width:100%;height:100%;overflow:hidden;border-radius:0px;background:rgba(12,7,3,.9);border:1px solid #7a5c10"><div class="gtitle">Inventory</div>
+        <div class="sgrid" style="grid-template-columns:repeat(5,52px);gap:3px"><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div><div class="gslot" style="width:52px;height:52px"></div></div></div></div>
+<div style="position:absolute;left:1108px;top:16px;width:156px;height:156px;transform:rotate(0deg);opacity:1;filter:"><div style="width:100%;height:100%;overflow:hidden;border-radius:0px;background:rgba(12,7,3,.9);border:1px solid #7a5c10"><div class="mmwrap" style="border-radius:50%"><div class="mmbg" style="border-radius:50%"></div><div class="mmgrid"></div><div class="mmdot"></div><div class="mmbd" style="border-radius:50%"></div></div></div></div>
+<div style="position:absolute;left:946px;top:416px;width:120px;height:30px;transform:rotate(0deg);opacity:1;filter:"><div style="width:100%;height:100%;overflow:hidden;border-radius:0px;background:rgba(12,7,3,.9);border:1px solid #7a5c10"><div class="cwrap"><span style="font-size:.82rem">💰</span><span class="camt">4,250</span><span class="clbl">Gold</span></div></div></div>
+<div style="position:absolute;left:32px;top:416px;width:270px;height:170px;transform:rotate(0deg);opacity:1;filter:"><div style="width:100%;height:100%;overflow:hidden;border-radius:0px;background:rgba(12,7,3,.9);border:1px solid #7a5c10"><div class="gtitle">Chat</div><div class="chatwrap"><div class="chatmsgs">
+        <div class="chatmsg"><span class="chatu">HYDRA: </span><span class="chatt">Welcome!</span></div>
+        <div class="chatmsg"><span class="chatu">Player: </span><span class="chatt">GG</span></div>
+      </div><div class="chatinp"><div class="chatfake"></div></div></div></div></div>
+<div style="position:absolute;left:144px;top:176px;width:220px;height:56px;transform:rotate(0deg);opacity:1;filter:"><div style="width:100%;height:100%;overflow:hidden;border-radius:0px;background:rgba(12,7,3,.9);border:1px solid #7a5c10"><div class="ufwrap"><div class="ufface"><i class="fa fa-user"></i></div><div class="ufinfo"><div class="ufname">Warrior <span class="uflvl">Lv24</span></div><div class="ufbar"><div class="ufhp" style="width:100%"></div></div><div class="ufbarlbl">19800/19800</div><div class="ufbar ufmpbar"><div class="ufmp" style="width:78%"></div></div></div></div></div></div>
+<div style="position:absolute;left:896px;top:176px;width:200px;height:48px;transform:rotate(0deg);opacity:1;filter:"><div style="width:100%;height:100%;overflow:hidden;border-radius:0px;background:rgba(12,7,3,.9);border:1px solid #7a5c10"><div class="ufwrap tfwrap"><div class="ufinfo" style="flex-direction:column-reverse"><div class="ufbar"><div class="ufhp" style="width:70.2127659574468%;background:#f43f5e"></div></div><div class="ufbarlbl">6600/9400</div><div class="ufname">Mage Priest <span class="uflvl" style="color:#f43f5e">Lv11</span></div></div><div class="ufface" style="order:-1;border-color:#f43f5e"><i class="fa fa-user" style="color:#f43f5e"></i></div></div></div></div>
+<div style="position:absolute;left:160px;top:240px;width:160px;height:36px;transform:rotate(0deg);opacity:1;filter:"><div style="width:100%;height:100%;overflow:hidden;border-radius:0px;background:rgba(12,7,3,.9);border:1px solid #7a5c10"><div class="afwrap"><div class="afface"><i class="fa fa-user"></i></div><div class="afinfo"><div class="afname">Ranger <span style="color:var(--ca,#4ade80);font-size:.46rem">Lv28</span></div><div class="afbar"><div class="afhp" style="width:80%"></div></div></div></div></div></div>
+</div>
+
+
+<!--
+  ╔══════════════════════════════════════════════════╗
+  ║  HYDRA AI HANDOFF — Machine-readable layout data ║
+  ╚══════════════════════════════════════════════════╝
+  To modify with AI: paste this block into Claude/GPT.
+  Re-import via HYDRA Studio → Deploy → Load Scene JSON.
+  {
+    "tool": "HYDRA Game UI Studio",
+    "version": "2.0",
+    "exported": "2026-06-28T06:54:23.024Z",
+    "scene": {
+      "name": "Untitled Layout",
+      "resolution": {
+        "w": 1280,
+        "h": 720
+      },
+      "theme": "f",
+      "themeName": "Fantasy",
+      "mode": "canvas",
+      "componentCount": 12
+    },
+    "components": [
+      {
+        "id": "cb3010p",
+        "type": "portrait",
+        "label": "Portrait",
+        "x": 20,
+        "y": 600,
+        "w": 80,
+        "h": 100,
+        "rot": 0,
+        "opacity": 1,
+        "borderRadius": 0,
+        "shadow": false,
+        "props": {
+          "name": "Grudge",
+          "level": 12
+        }
+      },
+      {
+        "id": "cbiya3c",
+        "type": "healthbar",
+        "label": "Health Bar",
+        "x": 108,
+        "y": 606,
+        "w": 250,
+        "h": 28,
+        "rot": 0,
+        "opacity": 1,
+        "borderRadius": 0,
+        "shadow": false,
+        "props": {
+          "value": 80,
+          "max": 100,
+          "label": "HP",
+          "color": "#e11d48"
+        }
+      },
+      {
+        "id": "cddcho5",
+        "type": "manabar",
+        "label": "Mana Bar",
+        "x": 108,
+        "y": 640,
+        "w": 210,
+        "h": 22,
+        "rot": 0,
+        "opacity": 1,
+        "borderRadius": 0,
+        "shadow": false,
+        "props": {
+          "value": 55,
+          "max": 100,
+          "label": "MP",
+          "color": "#3b82f6"
+        }
+      },
+      {
+        "id": "cbdq1y9",
+        "type": "xp-bar",
+        "label": "XP Bar",
+        "x": 108,
+        "y": 668,
+        "w": 250,
+        "h": 13,
+        "rot": 0,
+        "opacity": 1,
+        "borderRadius": 0,
+        "shadow": false,
+        "props": {
+          "value": 65,
+          "max": 100,
+          "label": "XP",
+          "color": "#f59e0b"
+        }
+      },
+      {
+        "id": "cz1p8u2",
+        "type": "hotbar",
+        "label": "Hotbar",
+        "x": 400,
+        "y": 646,
+        "w": 480,
+        "h": 64,
+        "rot": 0,
+        "opacity": 1,
+        "borderRadius": 0,
+        "shadow": false,
+        "props": {
+          "slots": 8,
+          "slotSize": 54,
+          "label": ""
+        }
+      },
+      {
+        "id": "c44s477",
+        "type": "inventory-grid",
+        "label": "Inventory Grid",
+        "x": 946,
+        "y": 450,
+        "w": 314,
+        "h": 250,
+        "rot": 0,
+        "opacity": 1,
+        "borderRadius": 0,
+        "shadow": false,
+        "props": {
+          "cols": 5,
+          "rows": 4,
+          "slotSize": 52,
+          "gap": 3,
+          "label": "Inventory"
+        }
+      },
+      {
+        "id": "c7oyz8r",
+        "type": "minimap",
+        "label": "Minimap",
+        "x": 1108,
+        "y": 16,
+        "w": 156,
+        "h": 156,
+        "rot": 0,
+        "opacity": 1,
+        "borderRadius": 0,
+        "shadow": false,
+        "props": {
+          "shape": "circle",
+          "label": ""
+        }
+      },
+      {
+        "id": "ceb7a8u",
+        "type": "currency-display",
+        "label": "Currency",
+        "x": 946,
+        "y": 416,
+        "w": 120,
+        "h": 30,
+        "rot": 0,
+        "opacity": 1,
+        "borderRadius": 0,
+        "shadow": false,
+        "props": {
+          "amount": 4250,
+          "label": "Gold"
+        }
+      },
+      {
+        "id": "ckeuqu0",
+        "type": "chat-window",
+        "label": "Chat",
+        "x": 32,
+        "y": 416,
+        "w": 270,
+        "h": 170,
+        "rot": 0,
+        "opacity": 1,
+        "borderRadius": 0,
+        "shadow": false,
+        "props": {
+          "label": "Chat"
+        }
+      },
+      {
+        "id": "cjm3iwb",
+        "type": "player-frame",
+        "label": "Player Frame",
+        "x": 144,
+        "y": 176,
+        "w": 220,
+        "h": 56,
+        "rot": 0,
+        "opacity": 1,
+        "borderRadius": 0,
+        "shadow": false,
+        "props": {
+          "name": "Warrior",
+          "level": 24,
+          "hp": 19800,
+          "hpMax": 19800,
+          "mp": 468,
+          "mpMax": 600
+        }
+      },
+      {
+        "id": "cwseeen",
+        "type": "target-frame",
+        "label": "Target Frame",
+        "x": 896,
+        "y": 176,
+        "w": 200,
+        "h": 48,
+        "rot": 0,
+        "opacity": 1,
+        "borderRadius": 0,
+        "shadow": false,
+        "props": {
+          "name": "Mage Priest",
+          "level": 11,
+          "hp": 6600,
+          "hpMax": 9400,
+          "hostile": true
+        }
+      },
+      {
+        "id": "cswr7sf",
+        "type": "ally-frame",
+        "label": "Ally Frame",
+        "x": 160,
+        "y": 240,
+        "w": 160,
+        "h": 36,
+        "rot": 0,
+        "opacity": 1,
+        "borderRadius": 0,
+        "shadow": false,
+        "props": {
+          "name": "Ranger",
+          "level": 28,
+          "hp": 80,
+          "hpMax": 100
+        }
+      }
+    ],
+    "ai_instructions": "This is a game UI layout exported from HYDRA Game UI Studio. To modify it with AI: import the scene_json below into the studio via Load, then use the AI tab to describe changes. Component types and positions are listed above. All coordinates use a top-left origin at 0,0.",
+    "schema_reference": {
+      "inventory-grid": "props{cols,rows,slotSize,gap,label}",
+      "equipment-slots": "props{label}",
+      "hotbar": "props{slots,slotSize,label}",
+      "hotbar-2row": "props{slots,slotSize}",
+      "healthbar/manabar/xp-bar": "props{value,max,label,color}",
+      "minimap": "props{shape:\"circle\"|\"square\"}",
+      "portrait": "props{name,level}",
+      "player-frame": "props{name,level,hp,hpMax,mp,mpMax}",
+      "target-frame": "props{name,level,hp,hpMax,hostile:bool}",
+      "ally-frame": "props{name,level,hp,hpMax}",
+      "health-orb/mana-orb/action-orb": "props{value,max,color,label}",
+      "menu-dock": "props{buttons:\"comma,separated,names\"}",
+      "combat-log": "props{label}",
+      "objectives": "props{label}",
+      "dialogue-box": "props{speaker,text}",
+      "quest-tracker": "props{title,objective,label}",
+      "alert-banner": "props{text,type:\"danger\"|\"warning\"|\"info\"|\"success\"}",
+      "interaction-prompt": "props{key,action}",
+      "attr-panel": "props{label}",
+      "weapon-selector": "props{label}",
+      "currency-display": "props{amount,label}",
+      "chat-window": "props{label}",
+      "skill-tree": "props{label}",
+      "shop-panel": "props{label}",
+      "crosshair": "props{}",
+      "text-label": "props{text,size,align:\"left\"|\"center\"|\"right\"}"
+    },
+    "scene_json": {
+      "name": "Untitled Layout",
+      "resolution": {
+        "w": 1280,
+        "h": 720
+      },
+      "theme": "f",
+      "comps": [
+        {
+          "id": "cb3010p",
+          "type": "portrait",
+          "x": 20,
+          "y": 600,
+          "w": 80,
+          "h": 100,
+          "rot": 0,
+          "op": 1,
+          "br": 0,
+          "shd": false,
+          "props": {
+            "name": "Grudge",
+            "level": 12
+          }
+        },
+        {
+          "id": "cbiya3c",
+          "type": "healthbar",
+          "x": 108,
+          "y": 606,
+          "w": 250,
+          "h": 28,
+          "rot": 0,
+          "op": 1,
+          "br": 0,
+          "shd": false,
+          "props": {
+            "value": 80,
+            "max": 100,
+            "label": "HP",
+            "color": "#e11d48"
+          }
+        },
+        {
+          "id": "cddcho5",
+          "type": "manabar",
+          "x": 108,
+          "y": 640,
+          "w": 210,
+          "h": 22,
+          "rot": 0,
+          "op": 1,
+          "br": 0,
+          "shd": false,
+          "props": {
+            "value": 55,
+            "max": 100,
+            "label": "MP",
+            "color": "#3b82f6"
+          }
+        },
+        {
+          "id": "cbdq1y9",
+          "type": "xp-bar",
+          "x": 108,
+          "y": 668,
+          "w": 250,
+          "h": 13,
+          "rot": 0,
+          "op": 1,
+          "br": 0,
+          "shd": false,
+          "props": {
+            "value": 65,
+            "max": 100,
+            "label": "XP",
+            "color": "#f59e0b"
+          }
+        },
+        {
+          "id": "cz1p8u2",
+          "type": "hotbar",
+          "x": 400,
+          "y": 646,
+          "w": 480,
+          "h": 64,
+          "rot": 0,
+          "op": 1,
+          "br": 0,
+          "shd": false,
+          "props": {
+            "slots": 8,
+            "slotSize": 54,
+            "label": ""
+          }
+        },
+        {
+          "id": "c44s477",
+          "type": "inventory-grid",
+          "x": 946,
+          "y": 450,
+          "w": 314,
+          "h": 250,
+          "rot": 0,
+          "op": 1,
+          "br": 0,
+          "shd": false,
+          "props": {
+            "cols": 5,
+            "rows": 4,
+            "slotSize": 52,
+            "gap": 3,
+            "label": "Inventory"
+          }
+        },
+        {
+          "id": "c7oyz8r",
+          "type": "minimap",
+          "x": 1108,
+          "y": 16,
+          "w": 156,
+          "h": 156,
+          "rot": 0,
+          "op": 1,
+          "br": 0,
+          "shd": false,
+          "props": {
+            "shape": "circle",
+            "label": ""
+          }
+        },
+        {
+          "id": "ceb7a8u",
+          "type": "currency-display",
+          "x": 946,
+          "y": 416,
+          "w": 120,
+          "h": 30,
+          "rot": 0,
+          "op": 1,
+          "br": 0,
+          "shd": false,
+          "props": {
+            "amount": 4250,
+            "label": "Gold"
+          }
+        },
+        {
+          "id": "ckeuqu0",
+          "type": "chat-window",
+          "x": 32,
+          "y": 416,
+          "w": 270,
+          "h": 170,
+          "rot": 0,
+          "op": 1,
+          "br": 0,
+          "shd": false,
+          "props": {
+            "label": "Chat"
+          }
+        },
+        {
+          "id": "cjm3iwb",
+          "type": "player-frame",
+          "x": 144,
+          "y": 176,
+          "w": 220,
+          "h": 56,
+          "rot": 0,
+          "op": 1,
+          "br": 0,
+          "shd": false,
+          "props": {
+            "name": "Warrior",
+            "level": 24,
+            "hp": 19800,
+            "hpMax": 19800,
+            "mp": 468,
+            "mpMax": 600
+          }
+        },
+        {
+          "id": "cwseeen",
+          "type": "target-frame",
+          "x": 896,
+          "y": 176,
+          "w": 200,
+          "h": 48,
+          "rot": 0,
+          "op": 1,
+          "br": 0,
+          "shd": false,
+          "props": {
+            "name": "Mage Priest",
+            "level": 11,
+            "hp": 6600,
+            "hpMax": 9400,
+            "hostile": true
+          }
+        },
+        {
+          "id": "cswr7sf",
+          "type": "ally-frame",
+          "x": 160,
+          "y": 240,
+          "w": 160,
+          "h": 36,
+          "rot": 0,
+          "op": 1,
+          "br": 0,
+          "shd": false,
+          "props": {
+            "name": "Ranger",
+            "level": 28,
+            "hp": 80,
+            "hpMax": 100
+          }
+        }
+      ]
+    }
+  }
+-->
+</body>
+</html>

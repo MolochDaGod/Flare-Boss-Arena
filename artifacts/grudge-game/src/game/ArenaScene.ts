@@ -6,7 +6,11 @@ import {
   disposeObject3D,
   loadKayKitAnimLibrary,
   HeroAnimator,
+  loadActiveFighterModel,
+  skillAnimCandidates,
+  type HeroLike,
 } from "./kaykitHero";
+import { SkillVfx } from "./skillVfx";
 import { loadMonsterModel, disposeMonsterModel, isMonsterId } from "./MonsterModels";
 import type { EnemyModel } from "./EnemyFactory";
 import { makeGroundMaterial, makeTerrainSkirt } from "./proceduralTextures";
@@ -159,6 +163,7 @@ export class ArenaScene {
   private camera!: THREE.OrthographicCamera;
   private renderer!: THREE.WebGLRenderer;
   private clock = new THREE.Clock();
+  private skillVfx!: SkillVfx;
   private animFrameId = 0;
 
   // Lighting rig (sun follows the player for crisp shadows on a big map).
@@ -166,7 +171,7 @@ export class ArenaScene {
 
   // Player
   private playerGroup: THREE.Object3D | null = null;
-  private heroAnim: HeroAnimator | null = null;
+  private heroAnim: HeroLike | null = null;
   private playerPos = new THREE.Vector3(0, 0, 9);
   private playerFacing = Math.PI;
   private playerTarget: THREE.Vector3 | null = null;
@@ -251,6 +256,7 @@ export class ArenaScene {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x070608);
     this.scene.fog = new THREE.FogExp2(0x0a0608, 0.02);
+    this.skillVfx = new SkillVfx(this.scene, new GLTFLoader());
 
     this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 400);
     this.camera.position.set(22, 24, 22);
@@ -397,8 +403,29 @@ export class ArenaScene {
 
   // ── Player ────────────────────────────────────────────────────────────────
   private loadPlayer() {
-    const modelName = resolveModelName(this.options.className, this.options.raceKey);
     const loader = new GLTFLoader();
+    // Prefer the globally-selected fighter skin; fall back to the KayKit hero.
+    loadActiveFighterModel(
+      loader,
+      2.6,
+      (root, anim) => {
+        if (this.disposed) {
+          disposeObject3D(root);
+          return;
+        }
+        root.position.copy(this.playerPos);
+        this.scene.add(root);
+        this.playerGroup = root;
+        this.heroAnim = anim;
+        this.loaded = true;
+        this.emitState();
+      },
+      () => this.loadKayKitHero(loader),
+    );
+  }
+
+  private loadKayKitHero(loader: GLTFLoader) {
+    const modelName = resolveModelName(this.options.className, this.options.raceKey);
     const localUrl = `${import.meta.env.BASE_URL}models/kaykit/heroes/${modelName}.glb`;
     const remoteUrl = `${OBJECTSTORE}/models/characters/kaykit/${modelName}.glb`;
 
@@ -550,7 +577,7 @@ export class ArenaScene {
 
     const isCast = idx % 2 === 1;
     if (this.heroAnim) {
-      const played = this.heroAnim.trigger(isCast ? "cast" : "attack");
+      const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
       if (!played) this.proceduralLunge();
     } else {
       this.proceduralLunge();
@@ -561,6 +588,7 @@ export class ArenaScene {
     const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
     const center = this.playerPos.clone().add(forward.multiplyScalar(isCast ? 3 : 1.8));
     this.spawnVfx(center, isCast ? 0x66aaff : 0xffaa33, radius, 0.45);
+    this.skillVfx.spawn(isCast ? "cloud" : "tornado", center, isCast ? 4 : 3, isCast ? 1.1 : 1.3);
     if (this.bossAlive && this.bossPos.distanceTo(center) <= radius + 1.5) {
       const mult = isCast ? 2.6 : 1.9;
       const isCrit = Math.random() < this.critChance + 0.05;
@@ -880,6 +908,8 @@ export class ArenaScene {
       this.heroAnim.update(delta);
     }
 
+    this.skillVfx.update(delta);
+
     // ── Boss AI + movement + animation ──
     if (this.bossModel?.mixer) this.bossModel.mixer.update(delta);
     if (this.bossGroup) {
@@ -1100,6 +1130,7 @@ export class ArenaScene {
       }
     }
     if (this.heroAnim) { this.heroAnim.dispose(); this.heroAnim = null; }
+    this.skillVfx?.dispose();
     if (this.bossGroup) this.bossGroup.userData.disposed = true;
     if (this.bossModel) { disposeMonsterModel(this.bossModel); this.bossModel = null; }
     this.projectiles = [];

@@ -27,13 +27,25 @@ export class PlayerAnimator {
   private actions: Partial<Record<PAction, THREE.AnimationAction>> = {};
   private current: PAction = "idle";
   private attacking = false;
+  /** All clips available for skill playback, keyed by lowercased name. */
+  private pool = new Map<string, THREE.AnimationClip>();
+  /** The one-shot action currently playing (attack or a named skill clip). */
+  private oneShot: THREE.AnimationAction | null = null;
 
-  constructor(root: THREE.Object3D, clips: Partial<Record<PAction, THREE.AnimationClip>>) {
+  constructor(
+    root: THREE.Object3D,
+    clips: Partial<Record<PAction, THREE.AnimationClip>>,
+    pool?: THREE.AnimationClip[],
+  ) {
     this.mixer = new THREE.AnimationMixer(root);
     (Object.keys(clips) as PAction[]).forEach((key) => {
       const clip = clips[key];
       if (clip) this.actions[key] = this.mixer.clipAction(clip);
     });
+    for (const c of pool ?? []) {
+      const key = c.name.toLowerCase();
+      if (!this.pool.has(key)) this.pool.set(key, c);
+    }
 
     const idle = this.actions.idle ?? this.actions.walk;
     if (idle) idle.reset().play();
@@ -41,7 +53,8 @@ export class PlayerAnimator {
 
     this.mixer.addEventListener("finished", () => {
       this.attacking = false;
-      this.actions.attack?.fadeOut(0.15);
+      this.oneShot?.fadeOut(0.15);
+      this.oneShot = null;
       const cur = this.actions[this.current];
       cur?.reset().fadeIn(0.15).play();
     });
@@ -57,15 +70,53 @@ export class PlayerAnimator {
     this.actions[next]?.reset().fadeIn(0.18).play();
   }
 
+  /** True when a dedicated attack clip resolved (skin shipped a labelled attack). */
+  get canAttack(): boolean {
+    return !!this.actions.attack;
+  }
+
   triggerAttack() {
     const a = this.actions.attack;
     if (!a || this.attacking) return;
     this.attacking = true;
+    this.oneShot = a;
     a.reset();
     a.setLoop(THREE.LoopOnce, 1);
     a.clampWhenFinished = true;
     a.fadeIn(0.06).play();
     this.actions[this.current]?.fadeOut(0.06);
+  }
+
+  /** Play the first pool clip whose name includes one of `candidates` as a
+   *  one-shot. Falls back to the attack clip. Returns false if nothing plays. */
+  triggerNamed(candidates: string[]): boolean {
+    if (this.attacking) return true;
+    let clip: THREE.AnimationClip | undefined;
+    for (const cand of candidates) {
+      for (const [name, c] of this.pool) {
+        if (name.includes(cand)) {
+          clip = c;
+          break;
+        }
+      }
+      if (clip) break;
+    }
+    if (!clip) {
+      if (this.actions.attack) {
+        this.triggerAttack();
+        return true;
+      }
+      return false;
+    }
+    const action = this.mixer.clipAction(clip);
+    this.attacking = true;
+    this.oneShot = action;
+    action.reset();
+    action.setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = true;
+    action.fadeIn(0.06).play();
+    this.actions[this.current]?.fadeOut(0.06);
+    return true;
   }
 
   update(delta: number) {
