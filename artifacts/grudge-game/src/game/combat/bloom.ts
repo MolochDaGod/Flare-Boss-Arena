@@ -11,7 +11,7 @@ export interface BloomComposer {
 
 /**
  * Build a selective-bloom post pipeline (RenderPass → UnrealBloomPass →
- * OutputPass) so the additive flame VFX glow while the dark scene stays moody.
+ * OutputPass) so the additive particle VFX glow while the dark scene stays moody.
  * A high threshold means only the brightest hot cores/embers bloom — it does
  * NOT wash out the dark-fantasy mood. OutputPass applies the renderer's tone
  * mapping + color space at the end of the chain (RenderPass renders linear HDR).

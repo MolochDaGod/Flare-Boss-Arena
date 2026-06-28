@@ -22,7 +22,6 @@ import type { CombatTarget } from "./combat/types";
 import { ParticleVfx } from "./combat/particles";
 import { TelegraphField } from "./combat/telegraphs";
 import { DeployableManager } from "./combat/deployables";
-import { FlameVfx } from "./combat/FlameVfx";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
@@ -134,7 +133,6 @@ export class GameEngine {
   private particles!: ParticleVfx;
   private telegraphs!: TelegraphField;
   private deployables!: DeployableManager;
-  private flameVfx!: FlameVfx;
   private bloom: BloomComposer | null = null;
   /** Resolved HUD skills for archetype mapping; idx fallback works if unset. */
   private hudSkills: (ClassSkill | undefined)[] = [];
@@ -262,8 +260,7 @@ export class GameEngine {
     this.particles = new ParticleVfx(this.scene);
     this.telegraphs = new TelegraphField(this.scene);
     this.deployables = new DeployableManager(this.scene);
-    this.flameVfx = new FlameVfx(this.scene);
-    // Selective bloom so the additive flame VFX glow without washing out the
+    // Selective bloom so the additive particle VFX glow without washing out the
     // dark scene. Null (graceful fallback to direct render) if setup fails headless.
     this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h);
 
@@ -1038,12 +1035,6 @@ export class GameEngine {
     wp.y += en.model.height * 0.7;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
     this.particles?.impact(wp, isCrit ? 0xffd54a : 0xff7a1e);
-    this.flameVfx?.burst(wp, {
-      kind: "fire",
-      color: isCrit ? 0xffd54a : 0xff7a1e,
-      big: isCrit,
-      scale: isCrit ? 0.85 : 0.6,
-    });
     if (en.hp <= 0) {
       this.killEnemy(en);
     } else {
@@ -1116,12 +1107,6 @@ export class GameEngine {
     const reach = arch.radius ?? arch.length ?? 4;
     const center = origin.clone().add(dir.clone().multiplyScalar(reach * 0.5));
     this.spawnSkillVfx(center, idx, isCast);
-    this.flameVfx?.burst(center.clone().setY(0.6), {
-      kind: "fire",
-      color: arch.color,
-      big: true,
-      scale: isCast ? 1.25 : 1.0,
-    });
     if (arch.shape === "nova" || arch.shape === "circle") {
       this.particles?.nova(center.clone().setY(0.4), reach, arch.color);
     } else {
@@ -1347,7 +1332,6 @@ export class GameEngine {
     }
 
     this.skillVfx.update(delta);
-    this.flameVfx?.update(delta);
     this.particles?.update(delta);
     this.telegraphs?.update(delta);
     this.deployables?.update(delta, {
@@ -1561,7 +1545,6 @@ export class GameEngine {
     this.clearHover();
     this.playerAnimator?.dispose();
     this.skillVfx?.dispose();
-    this.flameVfx?.dispose();
     this.particles?.dispose();
     this.telegraphs?.dispose();
     this.deployables?.dispose();

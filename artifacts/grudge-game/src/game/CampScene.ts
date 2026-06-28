@@ -12,7 +12,6 @@ import { archetypeForSkill } from "./combat/skillArchetypes";
 import { pointInShape, type ShapeQuery } from "./combat/damageShapes";
 import { TelegraphField } from "./combat/telegraphs";
 import { ParticleVfx } from "./combat/particles";
-import { FlameVfx } from "./combat/FlameVfx";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import type { ClassSkill } from "../data/classSkills";
 
@@ -116,7 +115,6 @@ export class CampScene {
   private renderer!: THREE.WebGLRenderer;
   private scene!: THREE.Scene;
   private camera!: THREE.OrthographicCamera;
-  private flameVfx!: FlameVfx;
   private bloom: BloomComposer | null = null;
   private clock = new THREE.Clock();
   private animFrameId = 0;
@@ -213,7 +211,6 @@ export class CampScene {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.95;
     container.appendChild(this.renderer.domElement);
-    this.flameVfx = new FlameVfx(this.scene);
     this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h);
 
     this.buildEnvironment();
@@ -861,7 +858,6 @@ export class CampScene {
         : origin.clone().add(dir.clone().multiplyScalar(reach * 0.5));
     this.spawnVfx(center, arch.color, reach);
     this.skillVfx.spawn(isCast ? "cloud" : "tornado", center, isCast ? 4 : 3, isCast ? 1.1 : 1.3);
-    this.flameVfx?.burst(center.clone().setY(0.6), { kind: "fire", color: arch.color, big: true, scale: isCast ? 1.25 : 1.0 });
     if (kind === "nova" || kind === "circle") this.particles?.nova(center.clone().setY(0.4), reach, arch.color);
     else this.particles?.impact(center.clone().setY(0.6), arch.color, 1.1);
 
@@ -1057,7 +1053,6 @@ export class CampScene {
     }
 
     this.skillVfx.update(delta);
-    this.flameVfx?.update(delta);
     this.telegraphs?.update(delta);
     this.particles?.update(delta);
 
@@ -1264,7 +1259,6 @@ export class CampScene {
       this.heroAnim = null;
     }
     this.skillVfx?.dispose();
-    this.flameVfx?.dispose();
     this.telegraphs?.dispose();
     this.particles?.dispose();
     for (const t of this.townsfolk) {
