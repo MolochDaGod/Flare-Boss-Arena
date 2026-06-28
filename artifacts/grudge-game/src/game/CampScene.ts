@@ -1054,6 +1054,8 @@ export class CampScene {
 
     for (const t of this.townsfolk) t.update(delta);
 
+    for (const t of this.townsfolk) t.update(delta);
+
     // Dummies: hit-flash decay, death tip-over + respawn.
     for (const d of this.dummies) {
       if (d.flash > 0) {
