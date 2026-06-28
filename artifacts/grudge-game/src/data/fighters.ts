@@ -8,9 +8,10 @@
  * account, persisted in localStorage) — NOT per-API-character.
  *
  * Each fighter references a `skinId` from `data/skins.ts` (the GLB model + its
- * native animation scheme). Three models ship thin animation sets and degrade
- * gracefully to a static idle: `jozu` (0 clips), `koby` (cryptic clips), `mr_5`
- * (3 clips) — noted per-fighter as `staticPose`.
+ * native animation scheme). Two models ship thin animation sets and degrade
+ * gracefully to a static idle: `jozu` (0 clips) and `mr_5` (3 clips) — noted
+ * per-fighter as `staticPose`. `koby` ships cryptic numeric clips that ARE wired
+ * (idle/run/cast + a blended jump attack) via the "koby" scheme, so it animates.
  */
 
 import { SKINS, getSkin, type SkinDef } from "./skins";
@@ -221,7 +222,6 @@ export const FIGHTERS: FighterDef[] = [
     blurb: "A rising Marine with raw potential still waiting to bloom.",
     skinId: "koby",
     stats: S(4, 5, 5, 5, 5, 6, 6, 6),
-    staticPose: true,
   },
 ];
 

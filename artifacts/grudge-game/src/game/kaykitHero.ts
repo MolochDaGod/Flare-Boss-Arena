@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { PlayerAnimator, pickSkinClips } from "./PlayerAnimator";
+import { PlayerAnimator, buildSkinAnim } from "./PlayerAnimator";
 import { RootMotion } from "./rootMotion";
 import { getActiveFighter, RACALVIN_ID } from "../data/fighters";
 import { getSkin, skinUrl } from "../data/skins";
@@ -420,8 +420,8 @@ export function loadActiveFighterModel(
       model.position.z -= center.z;
       model.position.y -= box2.min.y;
       wrapper.add(model);
-      const clips = pickSkinClips(gltf.animations, skin.scheme);
-      onReady(wrapper, new SkinHeroAdapter(new PlayerAnimator(model, clips, gltf.animations)));
+      const { actions, pool, attackBlend } = buildSkinAnim(gltf.animations, skin.scheme);
+      onReady(wrapper, new SkinHeroAdapter(new PlayerAnimator(model, actions, pool, { attackBlend })));
     },
     undefined,
     () => onMiss(),

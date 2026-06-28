@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { SKIN_CLIP_SUFFIX } from "../data/skins";
+import { SKIN_CLIP_SUFFIX, KOBY_CLIPS, type SkinScheme } from "../data/skins";
 import { RootMotion } from "./rootMotion";
 
 /**
@@ -32,6 +32,10 @@ export class PlayerAnimator {
   private pool = new Map<string, THREE.AnimationClip>();
   /** The one-shot action currently playing (attack or a named skill clip). */
   private oneShot: THREE.AnimationAction | null = null;
+  /** Multi-clip blended one-shot (e.g. koby's jump attack = two clips at once). */
+  private oneShotBlend: THREE.AnimationAction[] = [];
+  /** Clips blended together for the primary attack (overrides a single attack). */
+  private attackBlend: THREE.AnimationClip[] = [];
   /** Extracts in-clip root translation so the world position follows the anim. */
   private rm: RootMotion;
 
@@ -39,6 +43,7 @@ export class PlayerAnimator {
     root: THREE.Object3D,
     clips: Partial<Record<PAction, THREE.AnimationClip>>,
     pool?: THREE.AnimationClip[],
+    opts?: { attackBlend?: THREE.AnimationClip[] },
   ) {
     this.mixer = new THREE.AnimationMixer(root);
     this.rm = new RootMotion(root);
@@ -50,16 +55,20 @@ export class PlayerAnimator {
       const key = c.name.toLowerCase();
       if (!this.pool.has(key)) this.pool.set(key, c);
     }
+    this.attackBlend = opts?.attackBlend?.filter(Boolean) ?? [];
 
     const idle = this.actions.idle ?? this.actions.walk;
     if (idle) idle.reset().play();
     this.current = this.actions.idle ? "idle" : "walk";
 
     this.mixer.addEventListener("finished", () => {
+      if (!this.attacking) return; // ignore stray finishes (and the 2nd of a pair)
       this.attacking = false;
       this.rm.end();
       this.oneShot?.fadeOut(0.15);
       this.oneShot = null;
+      for (const a of this.oneShotBlend) a.fadeOut(0.15);
+      this.oneShotBlend = [];
       const cur = this.actions[this.current];
       cur?.reset().fadeIn(0.15).play();
     });
@@ -75,14 +84,31 @@ export class PlayerAnimator {
     this.actions[next]?.reset().fadeIn(0.18).play();
   }
 
-  /** True when a dedicated attack clip resolved (skin shipped a labelled attack). */
+  /** True when a dedicated attack clip resolved (a labelled attack OR a blend). */
   get canAttack(): boolean {
-    return !!this.actions.attack;
+    return !!this.actions.attack || this.attackBlend.length > 0;
   }
 
   triggerAttack() {
+    if (this.attacking) return;
+    // Blended attack (e.g. koby's jump attack): play all clips at once so the
+    // mixer averages their poses into one combined strike.
+    if (this.attackBlend.length) {
+      this.attacking = true;
+      this.oneShotBlend = this.attackBlend.map((c) => this.mixer.clipAction(c));
+      for (const a of this.oneShotBlend) {
+        a.reset();
+        a.setLoop(THREE.LoopOnce, 1);
+        a.clampWhenFinished = true;
+        a.setEffectiveWeight(1);
+        a.fadeIn(0.06).play();
+      }
+      this.actions[this.current]?.fadeOut(0.06);
+      this.rm.begin();
+      return;
+    }
     const a = this.actions.attack;
-    if (!a || this.attacking) return;
+    if (!a) return;
     this.attacking = true;
     this.oneShot = a;
     a.reset();
@@ -108,7 +134,7 @@ export class PlayerAnimator {
       if (clip) break;
     }
     if (!clip) {
-      if (this.actions.attack) {
+      if (this.canAttack) {
         this.triggerAttack();
         return true;
       }
@@ -166,6 +192,54 @@ export function pickSkinClips(
     walk: findBySuffix(clips, SKIN_CLIP_SUFFIX.walk),
     attack: findBySuffix(clips, SKIN_CLIP_SUFFIX.attack),
   };
+}
+
+/** Everything PlayerAnimator needs for a native-skin model. */
+export interface SkinAnim {
+  actions: Partial<Record<PAction, THREE.AnimationClip>>;
+  /** Clips searchable by `triggerNamed` (named skill candidates). */
+  pool: THREE.AnimationClip[];
+  /** Clips blended together for the primary attack, if any. */
+  attackBlend?: THREE.AnimationClip[];
+}
+
+function byExactName(clips: THREE.AnimationClip[], name: string): THREE.AnimationClip | undefined {
+  const lc = name.toLowerCase();
+  return clips.find((c) => c.name.toLowerCase() === lc);
+}
+
+/**
+ * Resolve a skin's role clips + skill pool + optional blended attack.
+ *
+ * The `koby` scheme maps its cryptic numeric clips by EXACT name (see
+ * `KOBY_CLIPS`): idle ← 0011, run ← 0110, and a primary attack BLENDED from
+ * 0063 + 0062_Low (a leaping strike). 0062 is aliased into the pool as a
+ * "spellcast" clip so cast/skill triggers resolve to it.
+ */
+export function buildSkinAnim(clips: THREE.AnimationClip[], scheme: SkinScheme): SkinAnim {
+  if (scheme === "koby") {
+    const idle = byExactName(clips, KOBY_CLIPS.idle);
+    const run = byExactName(clips, KOBY_CLIPS.run);
+    const cast = byExactName(clips, KOBY_CLIPS.cast);
+    const jumpA = byExactName(clips, KOBY_CLIPS.jumpAttackA);
+    const jumpB = byExactName(clips, KOBY_CLIPS.jumpAttackB);
+    const attackBlend = [jumpA, jumpB].filter((c): c is THREE.AnimationClip => !!c);
+
+    // Alias the cast clip to a labelled name so `triggerNamed(["cast"...])`
+    // (and any "spell"/"skill" candidates) resolve to it for koby.
+    const pool = [...clips];
+    if (cast) {
+      const alias = cast.clone();
+      alias.name = "koby_spellcast";
+      pool.push(alias);
+    }
+    return {
+      actions: { idle: idle ?? clips[0], walk: run },
+      pool,
+      attackBlend: attackBlend.length ? attackBlend : undefined,
+    };
+  }
+  return { actions: pickSkinClips(clips, scheme), pool: clips };
 }
 
 /* ── Authored Biped clips for the race models ─────────────────────────────── */

@@ -7,7 +7,7 @@ import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./procedura
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
 import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle } from "./PirateNPC";
 import { Townsperson } from "./Townsfolk";
-import { PlayerAnimator, buildAuthoredClips, pickSkinClips } from "./PlayerAnimator";
+import { PlayerAnimator, buildAuthoredClips, buildSkinAnim } from "./PlayerAnimator";
 import { DungeonMap } from "./DungeonMap";
 import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "../data/characterMeshes";
 import { getSkin, skinUrl, type SkinDef } from "../data/skins";
@@ -574,8 +574,8 @@ export class GameEngine {
           if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; }
         });
         const wrapper = this.buildPlayerWrapper(model, skin.height ?? 1.9);
-        const clips = pickSkinClips(gltf.animations, skin.scheme);
-        this.finalizePlayer(wrapper, new PlayerAnimator(model, clips, gltf.animations));
+        const { actions, pool, attackBlend } = buildSkinAnim(gltf.animations, skin.scheme);
+        this.finalizePlayer(wrapper, new PlayerAnimator(model, actions, pool, { attackBlend }));
       },
       undefined,
       () => this.loadRaceModel(), // graceful fallback to the race model

@@ -11,11 +11,12 @@
  *   pl_<name>_<variant>_damage   → hurt (unused for now)
  *
  * We therefore match clips by SUFFIX (endsWith) so the per-file prefix doesn't
- * matter. `koby` ships only cryptic numeric clips (0011, 0012…) with no usable
- * labels, so it falls back to playing its first clip as a static idle.
+ * matter. `koby` ships 18 clips under a cryptic NUMERIC scheme (0011, 0062,
+ * 0110…) with no role labels, so its roles are mapped EXPLICITLY by exact clip
+ * name via `KOBY_CLIPS` (see the "koby" scheme in PlayerAnimator).
  */
 
-export type SkinScheme = "bountyrush" | "cryptic";
+export type SkinScheme = "bountyrush" | "cryptic" | "koby";
 
 export interface SkinDef {
   id: string;
@@ -40,8 +41,24 @@ export const SKINS: SkinDef[] = [
   { id: "marine_mullet",  name: "Marine Grunt",      file: "marine_mullet",  scheme: "bountyrush" },
   { id: "shiryu",         name: "Shiryu",            file: "shiryu",         scheme: "bountyrush" },
   { id: "ace_sabo_luffy", name: "Ace · Sabo · Luffy", file: "ace_sabo_luffy", scheme: "bountyrush" },
-  { id: "koby",           name: "Koby",              file: "koby",           scheme: "cryptic" },
+  { id: "koby",           name: "Koby",              file: "koby",           scheme: "koby" },
 ];
+
+/**
+ * Koby's cryptic numeric clips, mapped to roles by EXACT name (case-insensitive):
+ *   idle ← 0011 (2.0s breathing stance)
+ *   run  ← 0110 (0.9s locomotion loop)
+ *   cast ← 0062 (1.5s strike, used for cast/skill animations)
+ *   jumpAttack ← 0063 + 0062_Low blended together (a leaping melee strike) used
+ *               as koby's primary attack.
+ */
+export const KOBY_CLIPS = {
+  idle: "0011",
+  run: "0110",
+  cast: "0062",
+  jumpAttackA: "0063",
+  jumpAttackB: "0062_Low",
+} as const;
 
 export function getSkin(id: string | null | undefined): SkinDef | undefined {
   if (!id) return undefined;
