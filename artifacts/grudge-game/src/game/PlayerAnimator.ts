@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { SKIN_CLIP_SUFFIX } from "../data/skins";
+import { RootMotion } from "./rootMotion";
 
 /**
  * PlayerAnimator — drives idle / walk / attack on the player model.
@@ -31,6 +32,8 @@ export class PlayerAnimator {
   private pool = new Map<string, THREE.AnimationClip>();
   /** The one-shot action currently playing (attack or a named skill clip). */
   private oneShot: THREE.AnimationAction | null = null;
+  /** Extracts in-clip root translation so the world position follows the anim. */
+  private rm: RootMotion;
 
   constructor(
     root: THREE.Object3D,
@@ -38,6 +41,7 @@ export class PlayerAnimator {
     pool?: THREE.AnimationClip[],
   ) {
     this.mixer = new THREE.AnimationMixer(root);
+    this.rm = new RootMotion(root);
     (Object.keys(clips) as PAction[]).forEach((key) => {
       const clip = clips[key];
       if (clip) this.actions[key] = this.mixer.clipAction(clip);
@@ -53,6 +57,7 @@ export class PlayerAnimator {
 
     this.mixer.addEventListener("finished", () => {
       this.attacking = false;
+      this.rm.end();
       this.oneShot?.fadeOut(0.15);
       this.oneShot = null;
       const cur = this.actions[this.current];
@@ -85,6 +90,7 @@ export class PlayerAnimator {
     a.clampWhenFinished = true;
     a.fadeIn(0.06).play();
     this.actions[this.current]?.fadeOut(0.06);
+    this.rm.begin();
   }
 
   /** Play the first pool clip whose name includes one of `candidates` as a
@@ -116,11 +122,18 @@ export class PlayerAnimator {
     action.clampWhenFinished = true;
     action.fadeIn(0.06).play();
     this.actions[this.current]?.fadeOut(0.06);
+    this.rm.begin();
     return true;
   }
 
   update(delta: number) {
     this.mixer.update(delta);
+    this.rm.sample(delta);
+  }
+
+  /** World-space horizontal displacement banked from root motion this frame. */
+  consumeRootMotion(out: THREE.Vector3): boolean {
+    return this.rm.consume(out);
   }
 
   dispose() {

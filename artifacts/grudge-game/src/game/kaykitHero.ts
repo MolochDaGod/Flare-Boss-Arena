@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { PlayerAnimator, pickSkinClips } from "./PlayerAnimator";
+import { RootMotion } from "./rootMotion";
 import { getActiveFighter, RACALVIN_ID } from "../data/fighters";
 import { getSkin, skinUrl } from "../data/skins";
 import { loadRacalvinBase, loadRacalvinClips } from "./racalvinHero";
@@ -130,6 +131,8 @@ export interface HeroLike {
   /** Play the first matching clip (by substring) as a one-shot skill animation. */
   triggerNamed(candidates: string[]): boolean;
   update(delta: number): void;
+  /** World-space horizontal displacement banked from root motion this frame. */
+  consumeRootMotion(out: THREE.Vector3): boolean;
   addLibraryClips(clips: THREE.AnimationClip[]): void;
   dispose(): void;
 }
@@ -186,16 +189,20 @@ export class HeroAnimator implements HeroLike {
   private oneShot: THREE.AnimationAction | null = null;
   private wantMoving = false;
   private onFinished: (e: { action: THREE.AnimationAction }) => void;
+  /** Extracts in-clip root translation so the world position follows the anim. */
+  private rm: RootMotion;
 
   constructor(root: THREE.Object3D, embedded: THREE.AnimationClip[]) {
     this.root = root;
     this.mixer = new THREE.AnimationMixer(root);
+    this.rm = new RootMotion(root);
     this.indexClips(embedded);
     this.rebuildActions();
 
     this.onFinished = (e) => {
       if (this.oneShot && e.action === this.oneShot) {
         this.oneShot = null;
+        this.rm.end();
         const back = this.actions[this.wantMoving ? this.locomotion() : "idle"];
         if (back) {
           back.reset().fadeIn(0.12).play();
@@ -276,6 +283,7 @@ export class HeroAnimator implements HeroLike {
     a.clampWhenFinished = false;
     a.fadeIn(0.06).play();
     this.actions[this.current]?.fadeOut(0.06);
+    this.rm.begin();
     return true;
   }
 
@@ -300,11 +308,17 @@ export class HeroAnimator implements HeroLike {
     a.clampWhenFinished = false;
     a.fadeIn(0.06).play();
     this.actions[this.current]?.fadeOut(0.06);
+    this.rm.begin();
     return true;
   }
 
   update(delta: number) {
     this.mixer.update(delta);
+    this.rm.sample(delta);
+  }
+
+  consumeRootMotion(out: THREE.Vector3): boolean {
+    return this.rm.consume(out);
   }
 
   dispose() {
@@ -345,6 +359,10 @@ export class SkinHeroAdapter implements HeroLike {
 
   update(delta: number) {
     this.inner.update(delta);
+  }
+
+  consumeRootMotion(out: THREE.Vector3): boolean {
+    return this.inner.consumeRootMotion(out);
   }
 
   // Skins are self-contained (labelled clips ship in the GLB) — no shared library.

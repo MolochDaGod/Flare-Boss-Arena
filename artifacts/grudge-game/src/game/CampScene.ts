@@ -127,6 +127,7 @@ export class CampScene {
   private playerGroup: THREE.Group | null = null;
   private heroAnim: HeroLike | null = null;
   private playerPos = new THREE.Vector3(0, 0, 6);
+  private _rmTmp = new THREE.Vector3();
   private playerTarget: THREE.Vector3 | null = null;
   private playerFacing = 0;
   private playerSpeed = 6;
@@ -790,12 +791,14 @@ export class CampScene {
 
   /** Dodge roll — quick dash in the facing direction + animation. */
   doDodge() {
+    this.playerTarget = null;
+    // Dodge clips carry their own forward lunge via root motion; only dash
+    // manually when the active model has no dodge clip (e.g. fighter skins).
+    if (this.heroAnim?.trigger("dodge")) return;
     const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
     const B = this.BOUNDS - 1;
     this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + forward.x * 2.4));
     this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + forward.z * 2.4));
-    this.playerTarget = null;
-    this.heroAnim?.trigger("dodge");
   }
 
   /** Provide resolved HUD skills so archetypes map to real skill flavor. */
@@ -1022,6 +1025,14 @@ export class CampScene {
       } else {
         this.playerTarget = null;
       }
+    }
+
+    // Root motion: let lunging/dodge/jump clips carry the logical position so
+    // the mesh moves WITH the character instead of sliding and snapping back.
+    if (this.heroAnim && this.heroAnim.consumeRootMotion(this._rmTmp)) {
+      const B = this.BOUNDS - 1;
+      this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + this._rmTmp.x));
+      this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + this._rmTmp.z));
     }
 
     if (this.playerGroup) {

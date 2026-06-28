@@ -150,6 +150,7 @@ export class GameEngine {
   private initStats!: PlayerInitStats;
   private _camLook = new THREE.Vector3(0, 0, 0);
   private playerPos = new THREE.Vector3(0, 0, 0);
+  private _rmTmp = new THREE.Vector3();
   private playerTarget: THREE.Vector3 | null = null;
   private playerSpeed = 6;
   private playerFacing = 0;
@@ -1304,6 +1305,13 @@ export class GameEngine {
         this.playerTarget = null;
         if (this.indicatorRing) this.indicatorRing.visible = false;
       }
+    }
+
+    // Root motion: lunging/dodge/jump clips translate the player so the mesh
+    // moves WITH the character; collision + floor are resolved next.
+    if (this.playerAnimator && this.playerAnimator.consumeRootMotion(this._rmTmp)) {
+      this.playerPos.x += this._rmTmp.x;
+      this.playerPos.z += this._rmTmp.z;
     }
 
     // Resolve the freshly-moved player against the real dungeon geometry.

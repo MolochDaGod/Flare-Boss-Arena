@@ -214,6 +214,7 @@ export class ArenaScene {
   private playerGroup: THREE.Object3D | null = null;
   private heroAnim: HeroLike | null = null;
   private playerPos = new THREE.Vector3(0, 0, 9);
+  private _rmTmp = new THREE.Vector3();
   private playerFacing = Math.PI;
   private playerTarget: THREE.Vector3 | null = null;
   private attackBoss = false; // auto-approach + basic-attack the boss
@@ -621,12 +622,14 @@ export class ArenaScene {
 
   doDodge() {
     if (this.outcome !== "fighting") return;
+    this.playerTarget = null;
+    // Dodge clips carry their own forward lunge via root motion; only dash
+    // manually when the active model has no dodge clip (e.g. fighter skins).
+    if (this.heroAnim?.trigger("dodge")) return;
     const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
     this.playerPos.x += forward.x * 3.0;
     this.playerPos.z += forward.z * 3.0;
     this.clampToArena(this.playerPos);
-    this.playerTarget = null;
-    this.heroAnim?.trigger("dodge");
   }
 
   useSkill(idx: number) {
@@ -966,6 +969,14 @@ export class ArenaScene {
       } else {
         this.playerTarget = null;
       }
+    }
+
+    // Root motion: let lunging/dodge/jump clips carry the logical position so
+    // the mesh moves WITH the character instead of sliding and snapping back.
+    if (this.heroAnim && this.heroAnim.consumeRootMotion(this._rmTmp)) {
+      this.playerPos.x += this._rmTmp.x;
+      this.playerPos.z += this._rmTmp.z;
+      this.clampToArena(this.playerPos);
     }
 
     if (this.playerGroup) {
