@@ -28,6 +28,8 @@ export * from './getSprites200';
 export * from './getWeapons200';
 export * from './getWeaponSkills200';
 export * from './healthStatus';
+export * from './level';
+export * from './levelUnlockReq';
 export * from './lootResult';
 export * from './skill';
 export * from './skillLoadout';

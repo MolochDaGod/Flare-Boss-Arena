@@ -127,6 +127,25 @@ export interface DefeatInput {
   timeToDefeat?: number;
 }
 
+export type LevelUnlockReq = {
+  minLevel?: number;
+  requiresZone?: string;
+};
+
+export interface Level {
+  id: number;
+  slug: string;
+  name: string;
+  biome: string;
+  seed: number;
+  difficulty: number;
+  description?: string;
+  recommendedLevel: number;
+  unlockReq: LevelUnlockReq;
+  sortOrder: number;
+  createdAt?: string;
+}
+
 export interface LootResult {
   xpGained: number;
   itemsDropped: string[];

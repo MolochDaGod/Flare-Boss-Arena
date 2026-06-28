@@ -11,6 +11,7 @@ import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { useResolvedSkills } from "@/data/skillsResolver";
 import { SkillIcon } from "@/components/SkillIcon";
 import { BarGauge, OrbGauge, Separator, WarningBanner } from "@/components/CraftpixUI";
+import loadingSpinner from "@assets/grudgestudio_1782639192041.gif";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
 class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -297,7 +298,11 @@ function Game() {
             transition={{ duration: 0.6, ease: "easeOut" }}
             className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-4 z-20"
           >
-            <Loader2 className="w-10 h-10 animate-spin text-primary" />
+            <img
+              src={loadingSpinner}
+              alt="Loading"
+              className="w-36 h-36 object-contain drop-shadow-[0_0_18px_rgba(197,160,89,0.35)]"
+            />
             <p className="font-serif text-primary uppercase tracking-widest text-sm animate-pulse">
               {!ready
                 ? "Loading Grudge Data..."

@@ -36,6 +36,7 @@ import type {
   GetWeaponSkills200,
   GetWeapons200,
   HealthStatus,
+  Level,
   LootResult,
   SkillLoadout
 } from './api.schemas';
@@ -1179,6 +1180,160 @@ export function useGetWeaponSkills<TData = Awaited<ReturnType<typeof getWeaponSk
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetWeaponSkillsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getListLevelsUrl = () => {
+
+
+
+
+  return `/api/levels`
+}
+
+/**
+ * @summary List dungeon levels and zones
+ */
+export const listLevels = async ( options?: RequestInit): Promise<Level[]> => {
+
+  return customFetch<Level[]>(getListLevelsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListLevelsQueryKey = () => {
+    return [
+    `/api/levels`
+    ] as const;
+    }
+
+
+export const getListLevelsQueryOptions = <TData = Awaited<ReturnType<typeof listLevels>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listLevels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListLevelsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listLevels>>> = ({ signal }) => listLevels({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listLevels>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListLevelsQueryResult = NonNullable<Awaited<ReturnType<typeof listLevels>>>
+export type ListLevelsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List dungeon levels and zones
+ */
+
+export function useListLevels<TData = Awaited<ReturnType<typeof listLevels>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listLevels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListLevelsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
+export const getGetLevelUrl = (slug: string,) => {
+
+
+
+
+  return `/api/levels/${slug}`
+}
+
+/**
+ * @summary Get a level by slug
+ */
+export const getLevel = async (slug: string, options?: RequestInit): Promise<Level> => {
+
+  return customFetch<Level>(getGetLevelUrl(slug),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetLevelQueryKey = (slug: string,) => {
+    return [
+    `/api/levels/${slug}`
+    ] as const;
+    }
+
+
+export const getGetLevelQueryOptions = <TData = Awaited<ReturnType<typeof getLevel>>, TError = ErrorType<void>>(slug: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLevel>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetLevelQueryKey(slug);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLevel>>> = ({ signal }) => getLevel(slug, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: !!(slug), ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getLevel>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetLevelQueryResult = NonNullable<Awaited<ReturnType<typeof getLevel>>>
+export type GetLevelQueryError = ErrorType<void>
+
+
+/**
+ * @summary Get a level by slug
+ */
+
+export function useGetLevel<TData = Awaited<ReturnType<typeof getLevel>>, TError = ErrorType<void>>(
+ slug: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLevel>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetLevelQueryOptions(slug,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

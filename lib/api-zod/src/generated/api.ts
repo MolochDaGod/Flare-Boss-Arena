@@ -258,6 +258,53 @@ export const GetWeaponSkillsResponse = zod.object({
 
 
 /**
+ * @summary List dungeon levels and zones
+ */
+export const ListLevelsResponseItem = zod.object({
+  "id": zod.number(),
+  "slug": zod.string(),
+  "name": zod.string(),
+  "biome": zod.string(),
+  "seed": zod.number(),
+  "difficulty": zod.number(),
+  "description": zod.string().optional(),
+  "recommendedLevel": zod.number(),
+  "unlockReq": zod.object({
+  "minLevel": zod.number().optional(),
+  "requiresZone": zod.string().optional()
+}),
+  "sortOrder": zod.number(),
+  "createdAt": zod.string().optional()
+})
+export const ListLevelsResponse = zod.array(ListLevelsResponseItem)
+
+
+/**
+ * @summary Get a level by slug
+ */
+export const GetLevelParams = zod.object({
+  "slug": zod.coerce.string()
+})
+
+export const GetLevelResponse = zod.object({
+  "id": zod.number(),
+  "slug": zod.string(),
+  "name": zod.string(),
+  "biome": zod.string(),
+  "seed": zod.number(),
+  "difficulty": zod.number(),
+  "description": zod.string().optional(),
+  "recommendedLevel": zod.number(),
+  "unlockReq": zod.object({
+  "minLevel": zod.number().optional(),
+  "requiresZone": zod.string().optional()
+}),
+  "sortOrder": zod.number(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
  * @summary List all generated boss encounters
  */
 export const ListBossesResponseItem = zod.object({

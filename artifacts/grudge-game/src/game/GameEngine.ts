@@ -1243,6 +1243,16 @@ export class GameEngine {
   private update(delta: number) {
     const elapsed = this.clock.getElapsedTime();
 
+    // Freeze the whole simulation until the player has actually entered the
+    // scene (player model loaded AND the dungeon GLB/BVH built). This keeps
+    // enemies, pirate NPCs and all AI from moving or acting behind the loading
+    // veil, so the world is pristine the instant the veil lifts. The state is
+    // still pushed each frame so the veil receives the ready signal promptly.
+    if (!this.loaded || !this.mapReady) {
+      this.notifyState();
+      return;
+    }
+
     if (this.playerAttackCooldown > 0) this.playerAttackCooldown -= delta;
 
     // Keyboard movement

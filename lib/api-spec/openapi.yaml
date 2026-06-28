@@ -17,6 +17,8 @@ tags:
     description: AI boss generation and combat
   - name: gamedata
     description: Static game data from R2
+  - name: levels
+    description: Dungeon levels and zones
   - name: openai
     description: OpenAI AI boss generation
 
@@ -257,6 +259,42 @@ paths:
             application/json:
               schema:
                 type: object
+
+  /levels:
+    get:
+      operationId: listLevels
+      tags: [levels]
+      summary: List dungeon levels and zones
+      responses:
+        "200":
+          description: List of levels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Level"
+
+  /levels/{slug}:
+    get:
+      operationId: getLevel
+      tags: [levels]
+      summary: Get a level by slug
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Level
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Level"
+        "404":
+          description: Not found
 
   /bosses:
     get:
@@ -541,6 +579,38 @@ components:
           type: integer
         timeToDefeat:
           type: integer
+
+    Level:
+      type: object
+      required: [id, slug, name, biome, seed, difficulty, recommendedLevel, unlockReq, sortOrder]
+      properties:
+        id:
+          type: integer
+        slug:
+          type: string
+        name:
+          type: string
+        biome:
+          type: string
+        seed:
+          type: integer
+        difficulty:
+          type: integer
+        description:
+          type: string
+        recommendedLevel:
+          type: integer
+        unlockReq:
+          type: object
+          properties:
+            minLevel:
+              type: integer
+            requiresZone:
+              type: string
+        sortOrder:
+          type: integer
+        createdAt:
+          type: string
 
     LootResult:
       type: object

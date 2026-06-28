@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { seedLevels } from "./routes/levels";
 
 const rawPort = process.env["PORT"];
 
@@ -15,11 +16,23 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
+async function start() {
+  // Seed deterministic game data before accepting traffic so read-only
+  // resources (levels/zones) are never briefly empty on a cold start.
+  try {
+    await seedLevels();
+  } catch (err) {
+    logger.error({ err }, "Level seed failed");
   }
 
-  logger.info({ port }, "Server listening");
-});
+  app.listen(port, (err) => {
+    if (err) {
+      logger.error({ err }, "Error listening on port");
+      process.exit(1);
+    }
+
+    logger.info({ port }, "Server listening");
+  });
+}
+
+start();
