@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { createEnemyModel, updateEnemyAnimation, makeAnimState, type EnemyModel, type AnimState } from "./EnemyFactory";
-import { isMonsterId, loadMonsterModel, disposeMonsterModel, MONSTER_TEMPLATES } from "./MonsterModels";
+import { createEnemyModel, updateEnemyAnimation, makeAnimState, archetypeFor, type EnemyModel, type AnimState } from "./EnemyFactory";
+import { isMonsterId, loadMonsterModel, disposeMonsterModel, ANIMATED_MONSTER_TEMPLATES } from "./MonsterModels";
 import { isKitMonsterId, loadKitMonster, disposeKitModel, KIT_TEMPLATES } from "./KayKitCharacter";
 import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
@@ -693,9 +693,9 @@ export class GameEngine {
 
     const configs = picked.map((t) => ({ template: t, count: t.tier === 1 ? 2 : 1 }));
 
-    // Always spawn one of each imported GLB monster so they're guaranteed to
-    // appear in the dungeon alongside the procedural roster.
-    for (const m of MONSTER_TEMPLATES) configs.push({ template: m, count: 1 });
+    // Always spawn one of each ANIMATED imported GLB monster so they're
+    // guaranteed to appear in the dungeon.
+    for (const m of ANIMATED_MONSTER_TEMPLATES) configs.push({ template: m, count: 1 });
 
     // Spawn the KayKit skeleton minions (real shared-library skeletal animation).
     for (const m of KIT_TEMPLATES) configs.push({ template: m, count: m.tier === 1 ? 3 : 2 });
@@ -715,6 +715,48 @@ export class GameEngine {
     }
   }
 
+  /** FNV-1a hash → deterministic per-template model pick. */
+  private hashStr(s: string): number {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+
+  /**
+   * Resolve any enemy template to a REAL animated GLB model id. Roster ids
+   * (kit_* / mon_*) pass through unchanged; every data-driven bestiary enemy is
+   * mapped by archetype + tier to an animated skeletal GLB — so no enemy ever
+   * renders as the crude procedural-primitive placeholder. Deterministic per
+   * template, so a given bestiary entry always looks the same across spawns.
+   */
+  private resolveAnimatedModelId(template: EnemyTemplate): string {
+    if (isKitMonsterId(template.id) || isMonsterId(template.id)) return template.id;
+    const KIT_BY_TIER = ["kit_skel_minion", "kit_skel_minion", "kit_skel_warrior", "kit_skel_rogue", "kit_skel_mage"];
+    const seed = this.hashStr(template.id || template.name);
+    const t = Math.max(1, Math.min(template.tier, 5));
+    let pool: string[];
+    switch (archetypeFor(template.type)) {
+      case "arachnid": pool = ["mon_pincher"]; break;
+      case "quadruped": pool = ["mon_dante_beast", "mon_pincher"]; break;
+      case "dragon": pool = ["mon_dante_beast"]; break;
+      case "golem": pool = ["mon_dante_beast", "mon_medusa"]; break;
+      case "flying": pool = ["kit_skel_mage"]; break;
+      case "humanoid":
+      default:
+        if (t <= 1) pool = ["kit_skel_minion"];
+        else if (t === 2) pool = ["kit_skel_warrior", "kit_skel_rogue", "mon_cultist"];
+        else if (t === 3) pool = ["kit_skel_mage", "kit_skel_rogue", "mon_cultist"];
+        else pool = ["mon_medusa", "mon_cultist", "kit_skel_mage"];
+        break;
+    }
+    const chosen = pool[seed % pool.length] ?? KIT_BY_TIER[t - 1] ?? "kit_skel_warrior";
+    if (import.meta.env.DEV && !isKitMonsterId(chosen) && !isMonsterId(chosen)) {
+      // Catch a future roster-id typo before the GLB loaders silently fall back.
+      console.warn(`[GameEngine] resolveAnimatedModelId produced unknown model id "${chosen}" for "${template.id}"`);
+    }
+    return chosen;
+  }
+
   private createEnemy(template: EnemyTemplate, pos: THREE.Vector3): EnemyInstance {
     const id = `e${this.enemyIdCounter++}`;
     const retag = (m: EnemyModel) => {
@@ -722,10 +764,11 @@ export class GameEngine {
       // works on the real meshes.
       m.group.traverse((c) => { c.userData.enemyId = id; });
     };
-    const model = isKitMonsterId(template.id)
-      ? loadKitMonster(template.id, this.loader, retag)
-      : isMonsterId(template.id)
-        ? loadMonsterModel(template.id, this.loader, retag)
+    const modelId = this.resolveAnimatedModelId(template);
+    const model = isKitMonsterId(modelId)
+      ? loadKitMonster(modelId, this.loader, retag)
+      : isMonsterId(modelId)
+        ? loadMonsterModel(modelId, this.loader, retag)
         : createEnemyModel(template.name, template.type, template.tier);
     model.group.position.set(pos.x, model.baseY, pos.z);
     model.group.userData.baseY = model.baseY;
@@ -1114,9 +1157,9 @@ export class GameEngine {
       enemy.state = "dead";
       this.scene.remove(enemy.model.group);
       enemy.model.group.userData.disposed = true;
-      if (isKitMonsterId(enemy.template.id)) {
+      if (enemy.model.kit) {
         disposeKitModel(enemy.model);
-      } else if (isMonsterId(enemy.template.id)) {
+      } else if (enemy.model.isGLB) {
         // Thorough GLB cleanup (mixer + geometry + materials + textures), and
         // releases resources even if the GLB is still streaming in.
         disposeMonsterModel(enemy.model);
@@ -1490,9 +1533,9 @@ export class GameEngine {
     this.renderer.dispose();
     for (const en of this.enemies) {
       en.model.group.userData.disposed = true;
-      if (isKitMonsterId(en.template.id)) {
+      if (en.model.kit) {
         disposeKitModel(en.model);
-      } else if (isMonsterId(en.template.id)) {
+      } else if (en.model.isGLB) {
         disposeMonsterModel(en.model);
       } else {
         en.model.group.traverse((c) => {

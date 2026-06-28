@@ -62,7 +62,7 @@ export interface KitAnimator {
 }
 
 /** Map enemy type → archetype */
-function archetypeFor(type: string): Archetype {
+export function archetypeFor(type: string): Archetype {
   switch (type) {
     case "beast":     return "quadruped";   // wolves, tigers, raptors, rhinos
     case "reptile":   return "quadruped";

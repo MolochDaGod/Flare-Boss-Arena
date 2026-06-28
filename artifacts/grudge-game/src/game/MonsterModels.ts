@@ -70,6 +70,15 @@ export const MONSTER_TEMPLATES = MONSTER_DEFS.map((d) => ({
   id: d.id, name: d.name, type: d.type, tier: d.tier, hp: d.hp, damage: d.damage,
 }));
 
+/**
+ * Only the monsters that ship a real skeletal clip. The two static (rig-less)
+ * `big_scary_*` GLBs are excluded so the spawn pool never seats a non-animated
+ * unit — every showcased monster actually animates.
+ */
+export const ANIMATED_MONSTER_TEMPLATES = MONSTER_DEFS.filter((d) => d.clip).map((d) => ({
+  id: d.id, name: d.name, type: d.type, tier: d.tier, hp: d.hp, damage: d.damage,
+}));
+
 export function isMonsterId(id: string): boolean {
   return MONSTER_BY_ID.has(id);
 }
