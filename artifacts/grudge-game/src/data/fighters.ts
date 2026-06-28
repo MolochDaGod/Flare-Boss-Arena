@@ -112,6 +112,16 @@ export const FIGHTERS: FighterDef[] = [
     featured: true,
   },
   {
+    id: "shanks",
+    name: "Shanks",
+    title: "Red-Haired Yonko",
+    role: "Emperor",
+    blurb: "One of the Four Emperors — a peerless swordsman whose Conqueror's Haki bends the battlefield to his will.",
+    skinId: "shanks",
+    stats: S(10, 9, 8, 8, 9, 8, 10, 9),
+    featured: true,
+  },
+  {
     id: "law",
     name: "Trafalgar Law",
     title: "Surgeon of Death",

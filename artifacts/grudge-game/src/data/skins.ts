@@ -39,6 +39,7 @@ export const SKINS: SkinDef[] = [
   { id: "marine_mullet",  name: "Marine Grunt",      file: "marine_mullet",  scheme: "bountyrush" },
   { id: "shiryu",         name: "Shiryu",            file: "shiryu",         scheme: "bountyrush" },
   { id: "ace_sabo_luffy", name: "Ace · Sabo · Luffy", file: "ace_sabo_luffy", scheme: "bountyrush" },
+  { id: "shanks",         name: "Shanks",            file: "shanks",         scheme: "bountyrush" },
   { id: "koby",           name: "Koby",              file: "koby",           scheme: "koby" },
 ];
 
