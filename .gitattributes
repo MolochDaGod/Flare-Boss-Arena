@@ -10,3 +10,6 @@ attached_assets/Meshy_AI_Eternal_Colosseum_0628065023_texture_1782630355323.glb 
 attached_assets/vfx-sandbox_1782637164088.zip filter=lfs diff=lfs merge=lfs -text
 attached_assets/vfx-sandbox_1782637164089.zip filter=lfs diff=lfs merge=lfs -text
 attached_assets/icons-src_1782638972142.zip filter=lfs diff=lfs merge=lfs -text
+attached_assets/jason__multiversus_1782641079347.glb filter=lfs diff=lfs merge=lfs -text
+attached_assets/venom__marvel_rivals_1782641090996.glb filter=lfs diff=lfs merge=lfs -text
+attached_assets/venom__marvel_rivals_1782641090998.glb filter=lfs diff=lfs merge=lfs -text
