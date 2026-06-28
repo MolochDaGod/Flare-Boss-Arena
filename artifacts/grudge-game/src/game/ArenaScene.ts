@@ -138,6 +138,46 @@ function bossMonsterId(tier: number): string {
   }
 }
 
+/** Deterministic 32-bit hash so the same assetPack always picks the same model. */
+function hashString(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Resolve the AI-generated `assetPack` to an actual in-repo boss model.
+ *
+ * No dedicated Boss GLBs / R2 boss assets exist in this project, so the
+ * generated `assetPack` string drives the choice among the shipped monster
+ * models: first by thematic keyword, then by a deterministic hash so distinct
+ * bosses get distinct (but stable) bodies. Empty `assetPack` falls back to a
+ * tier-based pick. The caller still guards the result with `isMonsterId`.
+ */
+function resolveBossModelId(assetPack: string | undefined, tier: number): string {
+  const pack = (assetPack ?? "").toLowerCase();
+  if (!pack.trim() || pack === "boss_character_default") return bossMonsterId(tier);
+
+  const keywordMap: Array<[RegExp, string]> = [
+    [/colossus|titan|giant|golem|wrath|dread|hulk|behemoth|leviathan/, "mon_big_scary_t3"],
+    [/gloom|brute|ogre|troll|abomination/, "mon_big_scary_t2"],
+    [/thorn|queen|briar|medusa|serpent|gorgon|witch|matriarch|naga/, "mon_medusa"],
+    [/hunter|predator|beast|wolf|hound|stalker|fang|claw/, "mon_dante_beast"],
+    [/cult|undead|wraith|lich|priest|acolyte|necro|bone|grave/, "mon_cultist"],
+    [/spider|arachnid|chitin|scuttle|pincher|crawler/, "mon_pincher"],
+  ];
+  for (const [re, id] of keywordMap) {
+    if (re.test(pack)) return id;
+  }
+
+  // No thematic match — hash the pack for a stable, varied body (rigged first).
+  const pool = ["mon_dante_beast", "mon_medusa", "mon_cultist", "mon_pincher", "mon_big_scary_t3", "mon_big_scary_t2"];
+  return pool[hashString(pack) % pool.length]!;
+}
+
 function normalizeAbilityType(t: string): BossAbilityType {
   const s = (t ?? "").toLowerCase();
   if (s.includes("aoe") || s.includes("area")) return "aoe";
@@ -453,7 +493,10 @@ export class ArenaScene {
   // ── Boss ──────────────────────────────────────────────────────────────────
   private loadBoss() {
     const loader = new GLTFLoader();
-    const monsterId = bossMonsterId(this.boss.tier);
+    // Drive the body from the AI-generated assetPack; fall back to tier if the
+    // resolved id is somehow not a shipped monster.
+    let monsterId = resolveBossModelId(this.boss.assetPack, this.boss.tier);
+    if (!isMonsterId(monsterId)) monsterId = bossMonsterId(this.boss.tier);
     if (!isMonsterId(monsterId)) return;
 
     const tierScale = 1.5 + Math.max(0, Math.min(5, this.boss.tier)) * 0.16;
