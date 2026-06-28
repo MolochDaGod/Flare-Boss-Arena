@@ -196,6 +196,26 @@ export class ParticleVfx {
     }
   }
 
+  /**
+   * A glowing additive billboard for a tracked projectile body (boss bolts).
+   * Reuses the shared soft-radial particle texture so projectiles match the
+   * burst VFX instead of being flat-shaded primitive spheres. The caller adds
+   * it to the scene, moves it each frame, and disposes the returned material
+   * (the texture is shared and freed once on `dispose()`).
+   */
+  projectileSprite(color: number, size = 1): THREE.Sprite {
+    const mat = new THREE.SpriteMaterial({
+      map: this.tex,
+      color: new THREE.Color(color),
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.setScalar(size);
+    return sprite;
+  }
+
   update(delta: number) {
     if (this.disposed) return;
     try {

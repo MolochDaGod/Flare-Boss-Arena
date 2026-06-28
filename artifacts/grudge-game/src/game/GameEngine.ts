@@ -326,24 +326,17 @@ export class GameEngine {
   }
 
   /**
-   * Load the forge dungeon GLB (~5.6 MB, 822 meshes, Synty SD_* asset pack)
-   * from `public/models/forge-scene.glb`, recenter its XZ bbox to the origin,
-   * scale it to fit the playable area (DUNGEON*2), drop it so the floor sits
-   * at y=0, and enable shadow casting/receiving on every mesh.
+   * Environment setup. The forge-scene.glb dungeon model (which sat centered at
+   * the origin) has been removed at the user's request — the arena now uses the
+   * procedural flat stone floor + terrain skirt built in `buildDungeon()`, with
+   * movement clamped to the ±DUNGEON square. `dungeonMap` stays null so every
+   * `dungeonMap?.ready` branch takes the flat-plane fallback. We mark the map
+   * ready immediately so the loading veil clears.
    */
   private loadEnvironment() {
-    const url = `${import.meta.env.BASE_URL}models/forge-scene.glb`;
-    // The forge GLB IS the dungeon now: scaled up, walkable, with real floor +
-    // wall colliders (BVH). It stays centered at the origin so the orc camp and
-    // pirate cove ring it. DungeonMap fires onReady on success OR failure so any
-    // loading veil can clear, and gameplay falls back to the flat plane until
-    // the BVH is built.
-    this.dungeonMap = new DungeonMap({ targetExtent: 130 });
-    this.dungeonMap.load(this.loader, this.scene, url, () => {
-      this.mapReady = true;
-      this.onMapReady?.();
-      this.notifyState();
-    });
+    this.mapReady = true;
+    this.onMapReady?.();
+    this.notifyState();
   }
 
   /**

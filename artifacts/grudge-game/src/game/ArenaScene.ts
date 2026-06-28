@@ -94,7 +94,7 @@ export interface ArenaSceneOptions {
 // ─── Internal entity types ────────────────────────────────────────────────────
 
 interface Projectile {
-  mesh: THREE.Mesh;
+  sprite: THREE.Sprite; // glowing additive billboard (shared particle texture)
   light: THREE.PointLight | null;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
@@ -103,14 +103,14 @@ interface Projectile {
   damage: number;
   radius: number;
   homing: boolean;
+  color: number;
+  trailT: number;
 }
 
 type TelegraphKind = "melee" | "aoe" | "debuff";
 
 interface Telegraph {
   kind: TelegraphKind;
-  ring: THREE.Mesh; // outer warning ring (static)
-  fill: THREE.Mesh; // inner disc that grows during wind-up
   center: THREE.Vector3;
   radius: number;
   t: number;
@@ -118,14 +118,6 @@ interface Telegraph {
   struck: boolean;
   damage: number;
   label: string;
-}
-
-interface ArenaVfx {
-  mesh: THREE.Mesh;
-  life: number;
-  max: number;
-  grow: number;
-  fade: number;
 }
 
 /** Pick an in-repo (rigged) monster GLB to embody the boss, by tier. */
@@ -263,7 +255,6 @@ export class ArenaScene {
 
   private projectiles: Projectile[] = [];
   private telegraphs: Telegraph[] = [];
-  private vfx: ArenaVfx[] = [];
 
   // HUD streaming
   private damageNumbers: ArenaDamageNumber[] = [];
@@ -729,21 +720,21 @@ export class ArenaScene {
 
   private spawnProjectile(ability: ArenaBossAbility, dmg: number, homing: boolean) {
     const color = homing ? 0xaa44ff : 0xff5522;
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.4, 12, 10),
-      new THREE.MeshBasicMaterial({ color }),
-    );
     const start = this.bossPos.clone().add(new THREE.Vector3(0, this.bossWorldHeight * 0.55, 0));
-    mesh.position.copy(start);
-    this.scene.add(mesh);
-    const light = new THREE.PointLight(color, 2.2, 8, 2);
-    mesh.add(light);
+    // Glowing additive billboard (shared particle texture) — not a primitive sphere.
+    const sprite = this.particles.projectileSprite(color, homing ? 1.5 : 1.25);
+    sprite.position.copy(start);
+    this.scene.add(sprite);
+    const light = new THREE.PointLight(color, 2.4, 9, 2);
+    sprite.add(light);
+    // Muzzle flash where the bolt is born.
+    this.particles?.impact(start.clone(), color, 0.7);
 
     const target = this.playerPos.clone().add(new THREE.Vector3(0, 1, 0));
     const dir = new THREE.Vector3().subVectors(target, start).normalize();
     const speed = homing ? 12 : 16;
     this.projectiles.push({
-      mesh,
+      sprite,
       light,
       pos: start.clone(),
       vel: dir.multiplyScalar(speed),
@@ -752,31 +743,22 @@ export class ArenaScene {
       damage: dmg,
       radius: 1.2,
       homing,
+      color,
+      trailT: 0,
     });
   }
 
   private spawnTelegraph(kind: TelegraphKind, center: THREE.Vector3, radius: number, windup: number, damage: number, label: string) {
     const color = kind === "melee" ? 0xff3322 : kind === "aoe" ? 0xff8800 : 0xaa33ff;
     center.y = 0;
-
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(radius - 0.18, radius, 40),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, side: THREE.DoubleSide }),
+    // Wind-up warning uses the shared native-shader ground telegraph (a circle
+    // that sweeps its fill over the wind-up), not primitive ring/disc meshes.
+    this.skillTelegraphs?.show(
+      { kind: "circle", origin: center.clone(), dir: new THREE.Vector3(1, 0, 0), radius },
+      windup,
+      color,
     );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(center.x, 0.06, center.z);
-    this.scene.add(ring);
-
-    const fill = new THREE.Mesh(
-      new THREE.CircleGeometry(radius, 40),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, side: THREE.DoubleSide }),
-    );
-    fill.rotation.x = -Math.PI / 2;
-    fill.position.set(center.x, 0.05, center.z);
-    fill.scale.setScalar(0.02);
-    this.scene.add(fill);
-
-    this.telegraphs.push({ kind, ring, fill, center: center.clone(), radius, t: 0, windup, struck: false, damage, label });
+    this.telegraphs.push({ kind, center: center.clone(), radius, t: 0, windup, struck: false, damage, label });
   }
 
   private damageBoss(amount: number, isCrit: boolean) {
@@ -844,15 +826,13 @@ export class ArenaScene {
   }
 
   // ── VFX + helpers ───────────────────────────────────────────────────────────
-  private spawnVfx(at: THREE.Vector3, color: number, grow: number, max: number) {
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.3, 0.6, 36),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, side: THREE.DoubleSide }),
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(at.x, 0.18, at.z);
-    this.scene.add(ring);
-    this.vfx.push({ mesh: ring, life: 0, max, grow, fade: 0.85 });
+  /**
+   * Ground detonation: an expanding particle nova + spark burst via the shared
+   * ParticleVfx system (no primitive ring mesh). `grow` scales the radius.
+   */
+  private spawnVfx(at: THREE.Vector3, color: number, grow: number, _max: number) {
+    this.particles?.nova(at.clone().setY(0.35), Math.max(1.5, grow * 0.5), color);
+    this.particles?.impact(at.clone().setY(0.6), color, Math.min(2.2, 0.7 + grow * 0.12));
   }
 
   private spawnDamageNumber(world: THREE.Vector3, value: number, isCrit: boolean, isPlayer: boolean) {
@@ -1008,22 +988,6 @@ export class ArenaScene {
     this.updateProjectiles(delta);
     this.updateTelegraphs(delta);
 
-    // ── VFX rings ──
-    for (let i = this.vfx.length - 1; i >= 0; i--) {
-      const v = this.vfx[i]!;
-      v.life += delta;
-      const p = v.life / v.max;
-      const s = 0.4 + p * v.grow;
-      v.mesh.scale.set(s, s, s);
-      (v.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, v.fade * (1 - p));
-      if (v.life >= v.max) {
-        this.scene.remove(v.mesh);
-        v.mesh.geometry.dispose();
-        (v.mesh.material as THREE.Material).dispose();
-        this.vfx.splice(i, 1);
-      }
-    }
-
     // Damage numbers age out.
     for (let i = this.damageNumbers.length - 1; i >= 0; i--) {
       this.damageNumbers[i]!.age += delta;
@@ -1066,18 +1030,26 @@ export class ArenaScene {
         p.vel.lerp(desired, 0.06);
       }
       p.pos.addScaledVector(p.vel, delta);
-      p.mesh.position.copy(p.pos);
+      p.sprite.position.copy(p.pos);
+      // Subtle pulse so the bolt reads as live energy.
+      p.sprite.scale.setScalar((p.homing ? 1.5 : 1.25) * (1 + Math.sin(p.life * 22) * 0.12));
+
+      // Ember trail via the shared particle system (throttled).
+      p.trailT += delta;
+      if (p.trailT >= 0.06 && p.life < p.max * 0.9) {
+        p.trailT = 0;
+        this.particles?.impact(p.pos.clone(), p.color, 0.32);
+      }
 
       const hitPlayer = p.pos.distanceTo(this.playerPos.clone().setY(p.pos.y)) <= p.radius;
       const outOfBounds = Math.abs(p.pos.x) > B + 2 || Math.abs(p.pos.z) > B + 2 || p.pos.y < 0;
       if ((hitPlayer && this.outcome === "fighting") || p.life > p.max || outOfBounds) {
         if (hitPlayer && this.outcome === "fighting") {
           this.damagePlayer(p.damage, this.boss.name + "'s bolt");
-          this.spawnVfx(this.playerPos.clone(), p.homing ? 0xaa44ff : 0xff5522, 2, 0.4);
+          this.spawnVfx(this.playerPos.clone(), p.color, 2, 0.4);
         }
-        this.scene.remove(p.mesh);
-        p.mesh.geometry.dispose();
-        (p.mesh.material as THREE.Material).dispose();
+        this.scene.remove(p.sprite);
+        (p.sprite.material as THREE.Material).dispose();
         this.projectiles.splice(i, 1);
       }
     }
@@ -1085,22 +1057,21 @@ export class ArenaScene {
 
   private updateTelegraphs(delta: number) {
     this.activeTelegraphLabel = null;
+    // The ground warning decal is owned by `skillTelegraphs` (TelegraphField),
+    // updated in the main loop; here we only resolve the strike + its VFX.
     for (let i = this.telegraphs.length - 1; i >= 0; i--) {
       const tg = this.telegraphs[i]!;
       tg.t += delta;
-      const p = Math.min(1, tg.t / tg.windup);
-      // Fill grows during wind-up to telegraph the timing.
-      tg.fill.scale.setScalar(Math.max(0.02, p));
-      (tg.fill.material as THREE.MeshBasicMaterial).opacity = 0.15 + p * 0.35;
-      const ringMat = tg.ring.material as THREE.MeshBasicMaterial;
-      ringMat.opacity = 0.55 + Math.sin(tg.t * 18) * 0.3;
 
       if (!tg.struck && this.outcome === "fighting") this.activeTelegraphLabel = tg.label;
 
       if (!tg.struck && tg.t >= tg.windup) {
         tg.struck = true;
+        const color = tg.kind === "melee" ? 0xff3322 : tg.kind === "aoe" ? 0xff8800 : 0xaa33ff;
         const inside = this.playerPos.distanceTo(tg.center) <= tg.radius;
-        this.spawnVfx(tg.center.clone(), tg.kind === "melee" ? 0xff3322 : tg.kind === "aoe" ? 0xff8800 : 0xaa33ff, tg.radius * 1.4, 0.45);
+        // Detonation: particle nova + a GLB flourish (cloud burst) on the strike.
+        this.spawnVfx(tg.center.clone(), color, tg.radius * 1.4, 0.45);
+        this.skillVfx?.spawn(tg.kind === "debuff" ? "tornado" : "cloud", tg.center.clone(), tg.radius, 1.0);
         if (inside && this.outcome === "fighting") {
           this.damagePlayer(tg.damage, tg.label);
           if (tg.kind === "debuff") {
@@ -1108,17 +1079,9 @@ export class ArenaScene {
             this.pushLog("You are slowed!");
           }
         }
-        // Strike flash on the ring.
-        ringMat.opacity = 1;
       }
 
       if (tg.t >= tg.windup + 0.25) {
-        this.scene.remove(tg.ring);
-        this.scene.remove(tg.fill);
-        tg.ring.geometry.dispose();
-        (tg.ring.material as THREE.Material).dispose();
-        tg.fill.geometry.dispose();
-        (tg.fill.material as THREE.Material).dispose();
         this.telegraphs.splice(i, 1);
       }
     }
@@ -1191,9 +1154,12 @@ export class ArenaScene {
     this.particles?.dispose();
     if (this.bossGroup) this.bossGroup.userData.disposed = true;
     if (this.bossModel) { disposeMonsterModel(this.bossModel); this.bossModel = null; }
+    for (const p of this.projectiles) {
+      this.scene.remove(p.sprite);
+      (p.sprite.material as THREE.Material).dispose();
+    }
     this.projectiles = [];
     this.telegraphs = [];
-    this.vfx = [];
     this.braziers = [];
     this.playerGroup = null;
     this.bossGroup = null;
