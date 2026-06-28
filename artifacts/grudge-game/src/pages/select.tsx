@@ -83,11 +83,6 @@ export default function Select() {
                 Featured
               </span>
             )}
-            {selected.staticPose && (
-              <span className="absolute right-4 top-4 rounded-full border border-amber-700/40 bg-black/50 px-3 py-1 font-serif text-[10px] uppercase tracking-widest text-amber-500/80">
-                Static pose
-              </span>
-            )}
           </div>
           <div className="space-y-4 p-6">
             <div>

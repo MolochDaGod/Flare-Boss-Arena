@@ -8,10 +8,10 @@
  * account, persisted in localStorage) — NOT per-API-character.
  *
  * Each fighter references a `skinId` from `data/skins.ts` (the GLB model + its
- * native animation scheme). Two models ship thin animation sets and degrade
- * gracefully to a static idle: `jozu` (0 clips) and `mr_5` (3 clips) — noted
- * per-fighter as `staticPose`. `koby` ships cryptic numeric clips that ARE wired
- * (idle/run/cast + a blended jump attack) via the "koby" scheme, so it animates.
+ * native animation scheme). Every fighter on the roster animates: the
+ * bounty-rush skins ship labelled idle/run/attack clips, and `koby` ships
+ * cryptic numeric clips wired (idle/run/cast + a blended jump attack) via the
+ * "koby" scheme. Animationless models are not offered as fighters.
  */
 
 import { SKINS, getSkin, type SkinDef } from "./skins";
@@ -52,8 +52,6 @@ export interface FighterDef {
   skinId: string;
   /** Default attributes (1–10 scale). */
   stats: Record<AttrKey, number>;
-  /** True if the model has no usable locomotion/skill clips (static idle). */
-  staticPose?: boolean;
   /** Featured (e.g. Racalvin) — surfaced first on the lobby. */
   featured?: boolean;
 }
@@ -184,26 +182,6 @@ export const FIGHTERS: FighterDef[] = [
     blurb: "A vanished-warden swordsman who strikes from the unseen.",
     skinId: "shiryu",
     stats: S(9, 6, 8, 8, 6, 5, 6, 5),
-  },
-  {
-    id: "jozu",
-    name: "Jozu",
-    title: "Diamond",
-    role: "Diamond Tank",
-    blurb: "Turns his body to unbreakable diamond — pure defensive bulk.",
-    skinId: "jozu",
-    stats: S(8, 10, 4, 3, 10, 3, 5, 4),
-    staticPose: true,
-  },
-  {
-    id: "mr_5",
-    name: "Mr. 5",
-    title: "Bomb-Bomb",
-    role: "Bomber",
-    blurb: "Every part of him is a detonation waiting to happen.",
-    skinId: "mr_5",
-    stats: S(6, 6, 6, 5, 6, 7, 8, 5),
-    staticPose: true,
   },
   {
     id: "marine_mullet",

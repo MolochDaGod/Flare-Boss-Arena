@@ -36,8 +36,6 @@ export const SKINS: SkinDef[] = [
   { id: "ryuma",          name: "Ryuma",             file: "ryuma",          scheme: "bountyrush" },
   { id: "page_one",       name: "Page One",          file: "page_one",       scheme: "bountyrush" },
   { id: "marco",          name: "Marco",             file: "marco",          scheme: "bountyrush" },
-  { id: "jozu",           name: "Jozu",              file: "jozu",           scheme: "bountyrush" },
-  { id: "mr_5",           name: "Mr. 5",             file: "mr_5",           scheme: "bountyrush" },
   { id: "marine_mullet",  name: "Marine Grunt",      file: "marine_mullet",  scheme: "bountyrush" },
   { id: "shiryu",         name: "Shiryu",            file: "shiryu",         scheme: "bountyrush" },
   { id: "ace_sabo_luffy", name: "Ace · Sabo · Luffy", file: "ace_sabo_luffy", scheme: "bountyrush" },
