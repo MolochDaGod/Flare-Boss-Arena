@@ -404,6 +404,9 @@ importers:
       three:
         specifier: ^0.184.0
         version: 0.184.0
+      three-mesh-bvh:
+        specifier: ^0.9.10
+        version: 0.9.10(three@0.184.0)
       three.quarks:
         specifier: ^0.17.1
         version: 0.17.1(three@0.184.0)
@@ -3255,6 +3258,11 @@ packages:
   thread-stream@3.1.0:
     resolution: {integrity: sha512-OqyPZ9u96VohAyMfJykzmivOrY2wfMSf3C5TtFJVgN+Hm6aj+voFhlK+kZEIv2FBh1X6Xp3DlnCOfEQ3B2J86A==}
 
+  three-mesh-bvh@0.9.10:
+    resolution: {integrity: sha512-UOlTgPIeqUURcwaG8knxvBaruwZlC4X3/WSHEFO7rYvMVv/YNUrkfFEszvfj36pXV88dCHoHNnIp0PifkirnTQ==}
+    peerDependencies:
+      three: '>= 0.159.0'
+
   three.quarks@0.17.1:
     resolution: {integrity: sha512-HiyORXkPZTfy7OBA/IRJqTcNxpo53yctgV3N8dSUG/jdisiVciDFGyf6hVnOLQDrIEmzU0yOtNFvzo+JHCjc7A==}
     peerDependencies:
@@ -6062,6 +6070,10 @@ snapshots:
   thread-stream@3.1.0:
     dependencies:
       real-require: 0.2.0
+
+  three-mesh-bvh@0.9.10(three@0.184.0):
+    dependencies:
+      three: 0.184.0
 
   three.quarks@0.17.1(three@0.184.0):
     dependencies:

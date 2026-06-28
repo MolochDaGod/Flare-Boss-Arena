@@ -286,28 +286,41 @@ function Game() {
       {/* 3D canvas */}
       <div ref={mountRef} className="absolute inset-0" style={{ cursor: "crosshair" }} />
 
-      {/* Loading overlay */}
-      {(!gameState || !gameState.loaded) && (
-        <div className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center gap-4 z-20">
-          <Loader2 className="w-10 h-10 animate-spin text-primary" />
-          <p className="font-serif text-primary uppercase tracking-widest text-sm animate-pulse">
-            {!ready ? "Loading Grudge Data..." : "Entering the Dungeon..."}
-          </p>
-          {playerStats && (
-            <div className="text-center space-y-1 mt-2">
-              <p className="text-[11px] font-serif tracking-widest text-muted-foreground uppercase">
-                {playerStats.charName} · {playerStats.charRace} {playerStats.charClass}
-              </p>
-              <p className="text-[10px] font-mono text-muted-foreground/70">
-                HP {playerStats.hp} · MP {playerStats.mana} · DMG {playerStats.baseDamage} · DEF {playerStats.defense}
-              </p>
-              <p className="text-[10px] font-mono text-muted-foreground/50">
-                CRIT {Math.round(playerStats.critChance * 100)}% · {enemyTemplates.length} enemy types loaded
-              </p>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Loading overlay — held until the dungeon GLB + collision BVH are built */}
+      <AnimatePresence>
+        {(!gameState || !gameState.loaded || !gameState.mapReady) && (
+          <motion.div
+            key="dungeon-loading-veil"
+            initial={{ opacity: 1 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.6, ease: "easeOut" }}
+            className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-4 z-20"
+          >
+            <Loader2 className="w-10 h-10 animate-spin text-primary" />
+            <p className="font-serif text-primary uppercase tracking-widest text-sm animate-pulse">
+              {!ready
+                ? "Loading Grudge Data..."
+                : !gameState?.loaded
+                ? "Summoning your Warlord..."
+                : "Raising the Dungeon..."}
+            </p>
+            {playerStats && (
+              <div className="text-center space-y-1 mt-2">
+                <p className="text-[11px] font-serif tracking-widest text-muted-foreground uppercase">
+                  {playerStats.charName} · {playerStats.charRace} {playerStats.charClass}
+                </p>
+                <p className="text-[10px] font-mono text-muted-foreground/70">
+                  HP {playerStats.hp} · MP {playerStats.mana} · DMG {playerStats.baseDamage} · DEF {playerStats.defense}
+                </p>
+                <p className="text-[10px] font-mono text-muted-foreground/50">
+                  CRIT {Math.round(playerStats.critChance * 100)}% · {enemyTemplates.length} enemy types loaded
+                </p>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Top — zone + back */}
       <div className="absolute top-0 left-0 right-0 flex items-start justify-between px-4 pt-3 z-10 pointer-events-none">

@@ -8,6 +8,7 @@ import { buildOrcCamp, type CampHandle } from "./CampBuilder";
 import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle } from "./PirateNPC";
 import { Townsperson } from "./Townsfolk";
 import { PlayerAnimator, buildAuthoredClips, pickSkinClips } from "./PlayerAnimator";
+import { DungeonMap } from "./DungeonMap";
 import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "../data/characterMeshes";
 import { getSkin, skinUrl, type SkinDef } from "../data/skins";
 import { RACALVIN_ID } from "../data/fighters";
@@ -98,6 +99,8 @@ export interface GameState {
   combatLog: string[];
   zone: string;
   loaded: boolean;
+  /** True once the dungeon GLB + collision BVH are built (or load failed). */
+  mapReady: boolean;
 }
 
 export interface PlayerInitStats {
@@ -150,6 +153,14 @@ export class GameEngine {
   private playerAttackCooldown = 0;
   private playerMaxAttackCooldown = 0.75;
   private indicatorRing: THREE.Mesh | null = null;
+
+  // Real dungeon geometry (forge-scene.glb): floor + wall colliders via BVH.
+  private dungeonMap: DungeonMap | null = null;
+  private mapReady = false;
+  /** Public hook fired once the dungeon GLB + collision BVH are ready. */
+  public onMapReady: (() => void) | null = null;
+  private readonly PLAYER_RADIUS = 0.5;
+  private readonly PLAYER_HEIGHT = 1.9;
 
   private playerHp = 500;
   private playerMaxHp = 500;
@@ -315,43 +326,44 @@ export class GameEngine {
    */
   private loadEnvironment() {
     const url = `${import.meta.env.BASE_URL}models/forge-scene.glb`;
-    this.loader.load(
-      url,
-      (gltf) => {
-        const root = gltf.scene;
-        // Measure the raw bbox so we can recenter + scale uniformly.
-        const bbox = new THREE.Box3().setFromObject(root);
-        const size = new THREE.Vector3(); bbox.getSize(size);
-        const center = new THREE.Vector3(); bbox.getCenter(center);
+    // The forge GLB IS the dungeon now: scaled up, walkable, with real floor +
+    // wall colliders (BVH). It stays centered at the origin so the orc camp and
+    // pirate cove ring it. DungeonMap fires onReady on success OR failure so any
+    // loading veil can clear, and gameplay falls back to the flat plane until
+    // the BVH is built.
+    this.dungeonMap = new DungeonMap({ targetExtent: 56 });
+    this.dungeonMap.load(this.loader, this.scene, url, () => {
+      this.mapReady = true;
+      this.onMapReady?.();
+      this.notifyState();
+    });
+  }
 
-        // Keep the forge a fixed-size central landmark (~40 units) instead of
-        // stretching it across the whole enlarged map — the textured ground +
-        // rock field fill the rest, giving a real sense of scale.
-        const targetExtent = 40;
-        const longestXZ = Math.max(size.x, size.z) || 1;
-        const scale = targetExtent / longestXZ;
+  /**
+   * Resolve the just-moved player against the real dungeon: slide along walls
+   * (capsule vs BVH) and follow the actual floor height. Stays inside the arena
+   * via the ±DUNGEON clamp. Off the forge footprint (or before the BVH is ready)
+   * it gracefully falls back to the flat ground at y=0.
+   */
+  private resolvePlayer() {
+    const dm = this.dungeonMap;
+    if (dm?.ready) dm.collideHorizontal(this.playerPos, this.PLAYER_RADIUS, this.PLAYER_HEIGHT);
+    const D = this.DUNGEON - 1;
+    this.playerPos.x = Math.max(-D, Math.min(D, this.playerPos.x));
+    this.playerPos.z = Math.max(-D, Math.min(D, this.playerPos.z));
+    // Probe from just above the current foot height (step-up allowance) so the
+    // floor under the player is found, never a roof/ceiling overhead.
+    const fy = dm?.ready
+      ? dm.sampleFloorY(this.playerPos.x, this.playerPos.z, this.playerPos.y + 0.6)
+      : null;
+    this.playerPos.y = fy ?? 0;
+  }
 
-        root.scale.setScalar(scale);
-        // After scaling, recenter so (cx, cz) lands at origin and floor sits at y≈0.
-        root.position.set(-center.x * scale, -bbox.min.y * scale, -center.z * scale);
-
-        root.traverse((child) => {
-          const m = child as THREE.Mesh;
-          if (m.isMesh) {
-            m.castShadow = true;
-            m.receiveShadow = true;
-          }
-        });
-
-        this.scene.add(root);
-      },
-      undefined,
-      (err) => {
-        // Non-fatal: gameplay still works on the invisible click plane.
-        // eslint-disable-next-line no-console
-        console.warn("[GameEngine] forge-scene.glb failed to load:", err);
-      },
-    );
+  /** Clamp an arbitrary XZ point to the playable arena (±DUNGEON). */
+  private clampToArena(v: THREE.Vector3) {
+    const D = this.DUNGEON - 1;
+    v.x = Math.max(-D, Math.min(D, v.x));
+    v.z = Math.max(-D, Math.min(D, v.z));
   }
 
   /**
@@ -788,10 +800,12 @@ export class GameEngine {
       -((e.clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(mouse, this.camera);
-    const fh = this.raycaster.intersectObject(this.floorPlane);
-    if (fh.length > 0) {
+    const gp = this.dungeonMap?.ready
+      ? this.dungeonMap.floorPickFromRay(this.raycaster.ray)
+      : (this.raycaster.intersectObject(this.floorPlane)[0]?.point ?? null);
+    if (gp) {
       if (!this.pointerGround) this.pointerGround = new THREE.Vector3();
-      this.pointerGround.copy(fh[0].point);
+      this.pointerGround.copy(gp);
     }
   }
 
@@ -813,10 +827,12 @@ export class GameEngine {
     const hits = this.raycaster.intersectObjects(liveGroups, true);
 
     // Track the cursor's ground point for cursor-aim.
-    const fh = this.raycaster.intersectObject(this.floorPlane);
-    if (fh.length > 0) {
+    const gp = this.dungeonMap?.ready
+      ? this.dungeonMap.floorPickFromRay(this.raycaster.ray)
+      : (this.raycaster.intersectObject(this.floorPlane)[0]?.point ?? null);
+    if (gp) {
       if (!this.pointerGround) this.pointerGround = new THREE.Vector3();
-      this.pointerGround.copy(fh[0].point);
+      this.pointerGround.copy(gp);
     }
 
     let hovered: EnemyInstance | null = null;
@@ -877,18 +893,18 @@ export class GameEngine {
       }
     }
 
-    const floorHit = this.raycaster.intersectObject(this.floorPlane);
-    if (floorHit.length > 0) {
-      const pt = floorHit[0].point;
-      const D = this.DUNGEON - 1;
-      this.playerTarget = new THREE.Vector3(
-        Math.max(-D, Math.min(D, pt.x)),
-        0,
-        Math.max(-D, Math.min(D, pt.z))
-      );
+    // Click-to-move: pick the real dungeon floor when the BVH is ready, else
+    // fall back to the flat plane.
+    const pt = this.dungeonMap?.ready
+      ? this.dungeonMap.floorPickFromRay(this.raycaster.ray)
+      : (this.raycaster.intersectObject(this.floorPlane)[0]?.point ?? null);
+    if (pt) {
+      this.clampToArena(pt);
+      this.playerTarget = new THREE.Vector3(pt.x, 0, pt.z);
       this.targetEnemy = null;
       if (this.indicatorRing) {
-        this.indicatorRing.position.set(this.playerTarget.x, 0.08, this.playerTarget.z);
+        // Seat the marker on the actually-picked surface (pt.y from the ray hit).
+        this.indicatorRing.position.set(this.playerTarget.x, pt.y + 0.08, this.playerTarget.z);
         this.indicatorRing.visible = true;
       }
     }
@@ -990,9 +1006,7 @@ export class GameEngine {
     if (arch.shape === "deployable") {
       const dep = arch.deployable ?? "fire_totem";
       const place = origin.clone().add(dir.clone().multiplyScalar(arch.range));
-      const D = this.DUNGEON - 1;
-      place.x = Math.max(-D, Math.min(D, place.x));
-      place.z = Math.max(-D, Math.min(D, place.z));
+      this.clampToArena(place);
       this.deployables.deploy(dep, place, arch.color, this.playerBaseDamage * arch.damageMult, arch.radius ?? 4);
       this.particles?.fireColumn(place.clone().setY(0.3), arch.color);
       this.log(`You deploy a ${dep.replace("_", " ")}.`);
@@ -1162,9 +1176,8 @@ export class GameEngine {
     let playerMoving = false;
     if (raw.length() > 0) {
       raw.normalize();
-      const D = this.DUNGEON - 1;
-      this.playerPos.x = Math.max(-D, Math.min(D, this.playerPos.x + raw.x * this.playerSpeed * delta));
-      this.playerPos.z = Math.max(-D, Math.min(D, this.playerPos.z + raw.y * this.playerSpeed * delta));
+      this.playerPos.x += raw.x * this.playerSpeed * delta;
+      this.playerPos.z += raw.y * this.playerSpeed * delta;
       this.playerTarget = null;
       this.targetEnemy = null;
       if (this.indicatorRing) this.indicatorRing.visible = false;
@@ -1178,9 +1191,8 @@ export class GameEngine {
       const stopDist = this.targetEnemy ? 2.8 : 0.2;
       if (distToTarget > stopDist) {
         toTarget.normalize();
-        const D = this.DUNGEON - 1;
-        this.playerPos.x = Math.max(-D, Math.min(D, this.playerPos.x + toTarget.x * this.playerSpeed * delta));
-        this.playerPos.z = Math.max(-D, Math.min(D, this.playerPos.z + toTarget.z * this.playerSpeed * delta));
+        this.playerPos.x += toTarget.x * this.playerSpeed * delta;
+        this.playerPos.z += toTarget.z * this.playerSpeed * delta;
         this.playerFacing = Math.atan2(toTarget.x, toTarget.z);
         playerMoving = true;
       } else {
@@ -1193,6 +1205,9 @@ export class GameEngine {
       }
     }
 
+    // Resolve the freshly-moved player against the real dungeon geometry.
+    this.resolvePlayer();
+
     if (this.targetEnemy && this.playerAttackCooldown <= 0) {
       const d = this.playerPos.distanceTo(this.targetEnemy.position);
       if (d <= 3.2 && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death") {
@@ -1201,7 +1216,7 @@ export class GameEngine {
     }
 
     if (this.playerGroup) {
-      const targetPos = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z);
+      const targetPos = new THREE.Vector3(this.playerPos.x, this.playerPos.y, this.playerPos.z);
       this.playerGroup.position.lerp(targetPos, 0.35);
       // Shortest-arc turn toward facing — avoids the long way around at ±π.
       let dy = this.playerFacing - this.playerGroup.rotation.y;
@@ -1316,9 +1331,9 @@ export class GameEngine {
         } else {
           en.state = "chase";
           const dir = new THREE.Vector3().subVectors(this.playerPos, en.position).normalize();
-          const D = this.DUNGEON - 1;
-          en.position.x = Math.max(-D, Math.min(D, en.position.x + dir.x * en.speed * delta));
-          en.position.z = Math.max(-D, Math.min(D, en.position.z + dir.z * en.speed * delta));
+          en.position.x += dir.x * en.speed * delta;
+          en.position.z += dir.z * en.speed * delta;
+          this.clampToArena(en.position);
           en.anim.isWalking = true;
         }
       } else {
@@ -1341,9 +1356,14 @@ export class GameEngine {
       }
     }
 
-    // Sync mesh position + rotation
+    // Sync mesh position + rotation; follow the real dungeon floor height
+    // (the rig animator reads userData.baseY each frame to place y).
     en.model.group.position.x = en.position.x;
     en.model.group.position.z = en.position.z;
+    if (this.dungeonMap?.ready) {
+      const efy = this.dungeonMap.sampleFloorY(en.position.x, en.position.z, en.model.group.position.y + 1.0);
+      en.model.group.userData.baseY = (efy ?? 0) + en.model.baseY;
+    }
     en.model.group.rotation.y += (en.facing - en.model.group.rotation.y) * 0.15;
 
     // Run procedural rig animation
@@ -1388,6 +1408,7 @@ export class GameEngine {
       combatLog: [...this.combatLog],
       zone: "Grudge Dungeon — Starter Island",
       loaded: this.loaded,
+      mapReady: this.mapReady,
     });
   }
 
@@ -1439,6 +1460,8 @@ export class GameEngine {
       (this.terrainMesh.material as THREE.Material).dispose();
     }
     this.camp?.dispose();
+    this.dungeonMap?.dispose();
+    this.dungeonMap = null;
     for (const p of this.pirates) {
       this.scene.remove(p.group);
       disposePirate(p);
