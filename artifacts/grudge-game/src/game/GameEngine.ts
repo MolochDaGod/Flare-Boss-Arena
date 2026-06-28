@@ -135,6 +135,7 @@ export class GameEngine {
   /** Resolved HUD skills for archetype mapping; idx fallback works if unset. */
   private hudSkills: (ClassSkill | undefined)[] = [];
   private pointerDown = false;
+  private attackHeld = false;
   private pointerGround: THREE.Vector3 | null = null;
   private animFrameId = 0;
   private floorPlane!: THREE.Mesh;
@@ -203,7 +204,8 @@ export class GameEngine {
   private hoverEmissive = new Map<THREE.MeshStandardMaterial, { hex: number; intensity: number }>();
   private _moveHandler!: (e: MouseEvent) => void;
   private _downHandler!: (e: MouseEvent) => void;
-  private _upHandler!: () => void;
+  private _upHandler!: (e: MouseEvent) => void;
+  private _contextHandler!: (e: MouseEvent) => void;
 
   init(
     container: HTMLDivElement,
@@ -820,18 +822,33 @@ export class GameEngine {
     this._keyUpHandler = (e: KeyboardEvent) => this.keys.delete(e.code);
     this._clickHandler = (e: MouseEvent) => this.handleClick(e, container);
     this._moveHandler = (e: MouseEvent) => this.handleHover(e, container);
-    // Hold the mouse to cursor-aim skills (auto-aim nearest enemy otherwise).
+    // LEFT button = selection / move (handled by the `click` event) and, while
+    // held, cursor-aims skills. RIGHT button = attack (hold to keep swinging).
     this._downHandler = (e: MouseEvent) => {
-      this.pointerDown = true;
-      this.updatePointerGround(e, container);
+      if (e.button === 2) {
+        e.preventDefault();
+        this.attackHeld = true;
+        this.updatePointerGround(e, container);
+        return;
+      }
+      if (e.button === 0) {
+        this.pointerDown = true;
+        this.updatePointerGround(e, container);
+      }
     };
-    this._upHandler = () => { this.pointerDown = false; };
+    this._upHandler = (e: MouseEvent) => {
+      if (e.button === 2) this.attackHeld = false;
+      if (e.button === 0) this.pointerDown = false;
+    };
+    // Right-click is the attack button — suppress the browser context menu.
+    this._contextHandler = (e: MouseEvent) => e.preventDefault();
 
     window.addEventListener("keydown", this._keyDownHandler);
     window.addEventListener("keyup", this._keyUpHandler);
     container.addEventListener("click", this._clickHandler);
     container.addEventListener("mousemove", this._moveHandler);
     container.addEventListener("mousedown", this._downHandler);
+    container.addEventListener("contextmenu", this._contextHandler);
     window.addEventListener("mouseup", this._upHandler);
   }
 
@@ -912,6 +929,7 @@ export class GameEngine {
   private _clickHandler!: (e: MouseEvent) => void;
 
   private handleClick(e: MouseEvent, container: HTMLDivElement) {
+    if (e.button !== 0) return; // LEFT button only — RIGHT button is attack
     const rect = container.getBoundingClientRect();
     const mouse = new THREE.Vector2(
       ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -963,6 +981,18 @@ export class GameEngine {
       if (d < nearestDist) { nearestDist = d; nearest = en; }
     }
     if (nearest && nearestDist < 4.5) this.doAttack(nearest);
+  }
+
+  /** Nearest live enemy within `maxDist` (used by the RMB hold-to-attack lock). */
+  private nearestEnemy(maxDist: number): EnemyInstance | null {
+    let nearest: EnemyInstance | null = null;
+    let nearestDist = maxDist;
+    for (const en of this.enemies) {
+      if (en.state === "dead" || en.state === "death") continue;
+      const d = en.position.distanceTo(this.playerPos);
+      if (d < nearestDist) { nearestDist = d; nearest = en; }
+    }
+    return nearest;
   }
 
   /** Provide resolved HUD skills so archetypes map to real skill flavor.
@@ -1228,35 +1258,51 @@ export class GameEngine {
       playerMoving = true;
     }
 
-    if (this.playerTarget) {
+    // RIGHT mouse held = attack. Lock the LEFT-selected enemy if it's still
+    // alive, otherwise auto-acquire the nearest one; advance into melee, strike.
+    let attacking = false;
+    if (!playerMoving && this.attackHeld) {
+      const locked =
+        this.targetEnemy && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death"
+          ? this.targetEnemy
+          : this.nearestEnemy(14);
+      if (locked) {
+        this.targetEnemy = locked;
+        const toFoe = new THREE.Vector3().subVectors(locked.position, this.playerPos);
+        const dist = toFoe.length();
+        this.playerFacing = Math.atan2(toFoe.x, toFoe.z);
+        if (dist > 3.0) {
+          toFoe.normalize();
+          this.playerPos.x += toFoe.x * this.playerSpeed * delta;
+          this.playerPos.z += toFoe.z * this.playerSpeed * delta;
+          playerMoving = true;
+        } else if (this.playerAttackCooldown <= 0) {
+          this.doAttack(locked);
+        }
+        attacking = true;
+        this.playerTarget = null;
+        if (this.indicatorRing) this.indicatorRing.visible = false;
+      }
+    }
+
+    // LEFT-click move (selection / move) — no auto-attack; attacking is RMB-only.
+    if (!attacking && this.playerTarget) {
       const toTarget = new THREE.Vector3().subVectors(this.playerTarget, this.playerPos);
       const distToTarget = toTarget.length();
-      const stopDist = this.targetEnemy ? 2.8 : 0.2;
-      if (distToTarget > stopDist) {
+      if (distToTarget > 0.2) {
         toTarget.normalize();
         this.playerPos.x += toTarget.x * this.playerSpeed * delta;
         this.playerPos.z += toTarget.z * this.playerSpeed * delta;
         this.playerFacing = Math.atan2(toTarget.x, toTarget.z);
         playerMoving = true;
       } else {
-        if (this.targetEnemy && this.playerAttackCooldown <= 0) {
-          this.doAttack(this.targetEnemy);
-        } else if (!this.targetEnemy) {
-          this.playerTarget = null;
-          if (this.indicatorRing) this.indicatorRing.visible = false;
-        }
+        this.playerTarget = null;
+        if (this.indicatorRing) this.indicatorRing.visible = false;
       }
     }
 
     // Resolve the freshly-moved player against the real dungeon geometry.
     this.resolvePlayer();
-
-    if (this.targetEnemy && this.playerAttackCooldown <= 0) {
-      const d = this.playerPos.distanceTo(this.targetEnemy.position);
-      if (d <= 3.2 && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death") {
-        this.doAttack(this.targetEnemy);
-      }
-    }
 
     if (this.playerGroup) {
       const targetPos = new THREE.Vector3(this.playerPos.x, this.playerPos.y, this.playerPos.z);
@@ -1480,6 +1526,7 @@ export class GameEngine {
       this.container.removeEventListener("click", this._clickHandler);
       if (this._moveHandler) this.container.removeEventListener("mousemove", this._moveHandler);
       if (this._downHandler) this.container.removeEventListener("mousedown", this._downHandler);
+      if (this._contextHandler) this.container.removeEventListener("contextmenu", this._contextHandler);
       if (this.renderer.domElement.parentNode === this.container) {
         this.container.removeChild(this.renderer.domElement);
       }
