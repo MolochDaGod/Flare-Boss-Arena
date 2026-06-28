@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
 import { Sword, Skull, Swords, Flame, Shield, Zap, Tent, Sparkles } from "lucide-react";
 import { SKINS, getSelectedSkin, setSelectedSkin } from "@/data/skins";
+import { RACALVIN_ID } from "@/data/fighters";
 import { ParchmentPanel } from "@/components/CraftpixUI";
 import { PortraitCanvas } from "@/components/PortraitCanvas";
 import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "@/data/characterMeshes";
@@ -257,6 +258,16 @@ export default function Home() {
                     }`}
                   >
                     Default
+                  </button>
+                  <button
+                    onClick={() => chooseSkin(RACALVIN_ID)}
+                    className={`col-span-2 px-3 py-2 rounded border text-xs font-serif tracking-widest uppercase text-left transition-colors ${
+                      skinId === RACALVIN_ID
+                        ? "border-primary/70 bg-primary/10 text-primary"
+                        : "border-primary/30 bg-primary/5 text-foreground/80 hover:border-primary/60"
+                    }`}
+                  >
+                    Racalvin — Corsair King
                   </button>
                   {SKINS.map((s) => (
                     <button
