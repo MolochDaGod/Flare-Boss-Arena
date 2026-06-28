@@ -391,11 +391,7 @@ function Camp() {
                       className="w-11 h-11 rounded flex items-center justify-center overflow-hidden bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all"
                       style={{ boxShadow: "inset 0 0 5px #000" }}
                     >
-                      {sk.icon ? (
-                        <img src={`https://molochdagod.github.io/ObjectStore/icons/skill_nobg/${sk.icon}`} alt={sk.name} className="w-7 h-7 object-contain" />
-                      ) : (
-                        <Swords className="w-5 h-5 text-amber-400" />
-                      )}
+                      <SkillIcon icon={sk.icon} glyph="⚔️" size={28} radius={4} />
                     </button>
                   );
                 })}

@@ -209,9 +209,7 @@ function BossArena() {
       return {
         name: sk?.name ?? slot.label,
         glyph: undefined as string | undefined,
-        icon: sk?.icon
-          ? `https://molochdagod.github.io/ObjectStore/icons/skill_nobg/${sk.icon}`
-          : undefined,
+        icon: skillIconSrc(sk?.icon) ?? undefined,
       };
     });
     return [...classPart, ...weaponPart].slice(0, 5);

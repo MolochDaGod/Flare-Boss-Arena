@@ -11,8 +11,17 @@
  */
 const BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
 
+/** KayKit icon CDN — serves `/icons/pack/**` (weapon/skill art). */
+const OBJECT_STORE = "https://molochdagod.github.io/ObjectStore";
+
 export function skillIconSrc(icon?: string | null): string | null {
   if (!icon) return null;
   if (/^https?:\/\//.test(icon)) return icon;
-  return `${BASE}/${icon.replace(/^\//, "")}`;
+  const path = icon.replace(/^\//, "");
+  // Skilltree art is bundled in this app's `public/icons/skilltree/**`.
+  if (path.startsWith("icons/skilltree/")) return `${BASE}/${path}`;
+  // Everything else under `icons/**` (e.g. `icons/pack/weapons/Sword_01.png`,
+  // returned by the API) lives only on the ObjectStore CDN.
+  if (path.startsWith("icons/")) return `${OBJECT_STORE}/${path}`;
+  return `${BASE}/${path}`;
 }

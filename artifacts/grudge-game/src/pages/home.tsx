@@ -6,6 +6,9 @@ import { Link, useLocation } from "wouter";
 import { Sword, Skull, Swords, Flame, Shield, Zap, Tent, Sparkles } from "lucide-react";
 import { SKINS, getSelectedSkin, setSelectedSkin } from "@/data/skins";
 import { ParchmentPanel } from "@/components/CraftpixUI";
+import { PortraitCanvas } from "@/components/PortraitCanvas";
+import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "@/data/characterMeshes";
+import { SkillIcon } from "@/components/SkillIcon";
 
 const FACTION_COLORS: Record<string, string> = {
   Crusade: "#d4891a",
@@ -13,31 +16,50 @@ const FACTION_COLORS: Record<string, string> = {
   Legion: "#ef4444",
 };
 
-const CLASS_ICONS: Record<string, React.ReactNode> = {
-  warrior: <Shield className="w-8 h-8" />,
-  mage: <Zap className="w-8 h-8" />,
-  ranger: <Sword className="w-8 h-8" />,
-  worge: <Flame className="w-8 h-8" />,
+const RACE_IDS: readonly RaceId[] = ["human", "elf", "dwarf", "orc", "undead", "barbarian"];
+function toRaceId(race?: string): RaceId {
+  const r = (race ?? "human").toLowerCase();
+  return (RACE_IDS as readonly string[]).includes(r) ? (r as RaceId) : "human";
+}
+
+/** Emoji slot glyphs — render reliably and match the Main Panel's slot set. */
+const EQUIP_SLOT_ICONS: Record<string, string> = {
+  mainHand: "⚔️", offHand: "🛡️", helm: "🪖", chest: "🎽", legs: "👖",
+  boots: "🥾", gloves: "🧤", amulet: "📿", ring1: "💍", ring2: "💍",
 };
 
-function CharacterPortrait({ char }: { char: { name: string; race: string; class: string; level: number; faction?: string } }) {
-  const faction = (char as { faction?: string }).faction ?? "";
+function CharacterPortrait({
+  char,
+}: {
+  char: { name: string; race: string; class: string; level: number; faction?: string; equipment?: Record<string, string | undefined> };
+}) {
+  const faction = char.faction ?? "";
   const factionColor = FACTION_COLORS[faction] ?? "#d4891a";
-  const classKey = char.class?.toLowerCase() ?? "warrior";
+  const race = toRaceId(char.race);
+  const equipment = char.equipment ?? {};
+
+  // Show the real race GLB with a base avatar + a shield when an offhand is
+  // equipped. We don't have item categories here, so weapon meshes stay hidden;
+  // the point is rendering the actual warlord, not the placeholder silhouette.
+  const visibilityFor = React.useMemo(() => {
+    const equip = { hasOffhand: !!equipment.offHand, hasShoulder: false };
+    const seed = `${char.name}::${race}`;
+    return (names: string[]) => resolveVisibleMeshes(names, race, equip, seed);
+  }, [char.name, race, equipment.offHand]);
 
   return (
     <div
-      className="w-full min-h-[360px] flex flex-col items-center justify-center relative overflow-hidden"
+      className="w-full min-h-[460px] relative overflow-hidden"
       style={{ background: "radial-gradient(ellipse at center, #1a0a0030 0%, #060608 70%)" }}
     >
       {/* Ambient glow */}
       <div
-        className="absolute inset-0 opacity-10"
+        className="absolute inset-0 opacity-10 pointer-events-none"
         style={{ background: `radial-gradient(ellipse at 50% 60%, ${factionColor} 0%, transparent 65%)` }}
       />
 
       {/* Isometric grid lines */}
-      <svg className="absolute inset-0 w-full h-full opacity-5" viewBox="0 0 400 360" preserveAspectRatio="none">
+      <svg className="absolute inset-0 w-full h-full opacity-5 pointer-events-none" viewBox="0 0 400 360" preserveAspectRatio="none">
         {Array.from({ length: 10 }).map((_, i) => (
           <React.Fragment key={i}>
             <line x1={i * 44} y1="0" x2={i * 44 + 200} y2="360" stroke="#ffaa00" strokeWidth="0.5" />
@@ -46,32 +68,21 @@ function CharacterPortrait({ char }: { char: { name: string; race: string; class
         ))}
       </svg>
 
-      {/* Class silhouette icon */}
-      <div className="relative z-10 flex flex-col items-center gap-6">
-        <div
-          className="w-28 h-28 rounded-full flex items-center justify-center border-2"
-          style={{
-            background: `radial-gradient(ellipse, ${factionColor}22 0%, #0a0a0c 70%)`,
-            borderColor: `${factionColor}60`,
-            boxShadow: `0 0 40px -8px ${factionColor}`,
-            color: factionColor,
-          }}
-        >
-          {CLASS_ICONS[classKey] ?? <Sword className="w-8 h-8" />}
-        </div>
+      {/* Live 3D warlord */}
+      <div className="absolute inset-0">
+        <PortraitCanvas src={PORTRAIT_URL(race)} visibilityFor={visibilityFor} accent={factionColor} />
+      </div>
 
-        <div className="text-center">
-          <p className="font-serif text-3xl tracking-widest uppercase text-white">{char.name}</p>
-          <p className="font-serif text-sm tracking-widest mt-1" style={{ color: factionColor }}>
-            Level {char.level} · {char.race} {char.class}
-          </p>
-          {faction && (
-            <p className="font-serif text-xs tracking-[0.3em] uppercase mt-1 text-muted-foreground">{faction} Faction</p>
-          )}
-        </div>
-
-        {/* Decorative divider */}
-        <div className="flex items-center gap-3 w-48">
+      {/* Name plate */}
+      <div className="absolute bottom-0 left-0 right-0 z-20 flex flex-col items-center gap-2 px-6 pb-6 pt-12 pointer-events-none bg-gradient-to-t from-[#060608] via-[#060608]/80 to-transparent">
+        <p className="font-serif text-3xl tracking-widest uppercase text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">{char.name}</p>
+        <p className="font-serif text-sm tracking-widest" style={{ color: factionColor }}>
+          Level {char.level} · {char.race} {char.class}
+        </p>
+        {faction && (
+          <p className="font-serif text-xs tracking-[0.3em] uppercase text-muted-foreground">{faction} Faction</p>
+        )}
+        <div className="flex items-center gap-3 w-48 mt-1">
           <div className="h-px flex-1" style={{ background: `linear-gradient(to right, transparent, ${factionColor}80)` }} />
           <Flame className="w-3 h-3" style={{ color: factionColor }} />
           <div className="h-px flex-1" style={{ background: `linear-gradient(to left, transparent, ${factionColor}80)` }} />
@@ -156,7 +167,7 @@ export default function Home() {
             <Card className="bg-card/40 border-primary/20 shadow-[0_0_30px_-10px_rgba(255,165,0,0.1)] relative overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent z-10 pointer-events-none" />
               <CardContent className="p-0 relative">
-                <CharacterPortrait char={{ name: activeChar.name, race: activeChar.race, class: activeChar.class, level: activeChar.level ?? 1, faction: (activeChar as { faction?: string }).faction }} />
+                <CharacterPortrait char={{ name: activeChar.name, race: activeChar.race, class: activeChar.class, level: activeChar.level ?? 1, faction: (activeChar as { faction?: string }).faction, equipment: (activeChar.equipment as Record<string, string | undefined>) ?? undefined }} />
               </CardContent>
             </Card>
 
@@ -170,11 +181,7 @@ export default function Home() {
                     {skills.activeSkills.map(skill => (
                       <div key={skill.id} className="p-4 rounded-md border border-border/50 bg-background/50 flex flex-col items-center text-center gap-3 hover:border-primary/50 transition-colors">
                         <div className="w-12 h-12 rounded bg-muted/50 border border-border/50 flex items-center justify-center overflow-hidden">
-                          {skill.icon ? (
-                            <img src={`https://molochdagod.github.io/ObjectStore/icons/skill_nobg/${skill.icon}`} alt={skill.name} className="w-8 h-8 object-contain" />
-                          ) : (
-                            <Sword className="w-6 h-6 text-muted-foreground" />
-                          )}
+                          <SkillIcon icon={skill.icon} glyph="⚔️" size={32} radius={4} />
                         </div>
                         <div>
                           <p className="font-serif text-sm tracking-wide">{skill.name}</p>
@@ -215,8 +222,11 @@ export default function Home() {
                   const itemId = (activeChar.equipment as any)?.[slot];
                   return (
                     <div key={slot} className="flex items-center gap-3 p-2 rounded border border-border/30 bg-background/30">
-                      <div className="w-8 h-8 rounded bg-muted/50 flex items-center justify-center text-[10px] uppercase font-mono text-muted-foreground shrink-0 border border-border/50">
-                        {slot.slice(0, 2)}
+                      <div
+                        className="w-8 h-8 rounded bg-muted/50 flex items-center justify-center text-base shrink-0 border border-border/50"
+                        style={{ opacity: itemId ? 1 : 0.4 }}
+                      >
+                        {EQUIP_SLOT_ICONS[slot] ?? "▫️"}
                       </div>
                       <div className="flex-1 truncate">
                         <p className="text-xs font-serif tracking-widest text-muted-foreground uppercase">{slot}</p>

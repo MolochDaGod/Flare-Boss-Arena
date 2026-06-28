@@ -132,11 +132,7 @@ export default function Skills() {
                       {skills?.activeSkills?.length ? skills.activeSkills.map(skill => (
                         <div key={skill.id} className="flex gap-4 p-4 rounded border border-border/50 bg-background/50 hover:border-primary/30 transition-colors">
                           <div className="w-16 h-16 rounded bg-muted/50 border border-border/50 shrink-0 flex items-center justify-center p-1">
-                             {skill.icon ? (
-                              <img src={`https://molochdagod.github.io/ObjectStore/icons/skill_nobg/${skill.icon}`} alt={skill.name} className="w-full h-full object-contain" />
-                            ) : (
-                              <Book className="w-8 h-8 text-muted-foreground" />
-                            )}
+                            <SkillIcon icon={skill.icon} glyph="📖" size={56} radius={4} />
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex justify-between items-start mb-1">
@@ -172,11 +168,7 @@ export default function Skills() {
                       {skills?.passives?.length ? skills.passives.map(skill => (
                         <div key={skill.id} className="flex gap-4 p-4 rounded border border-border/50 bg-background/50 hover:border-secondary/30 transition-colors">
                            <div className="w-12 h-12 rounded bg-muted/50 border border-border/50 shrink-0 flex items-center justify-center p-1">
-                             {skill.icon ? (
-                              <img src={`https://molochdagod.github.io/ObjectStore/icons/skill_nobg/${skill.icon}`} alt={skill.name} className="w-full h-full object-contain" />
-                            ) : (
-                              <Shield className="w-6 h-6 text-muted-foreground" />
-                            )}
+                            <SkillIcon icon={skill.icon} glyph="🛡️" size={40} radius={4} />
                           </div>
                           <div className="flex-1 min-w-0 py-1">
                             <h3 className="font-serif text-sm tracking-wide text-secondary mb-1">{skill.name}</h3>
