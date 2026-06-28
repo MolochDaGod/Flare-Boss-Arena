@@ -161,9 +161,11 @@ function resolveBossModelId(assetPack: string | undefined, tier: number): string
   const pack = (assetPack ?? "").toLowerCase();
   if (!pack.trim() || pack === "boss_character_default") return bossMonsterId(tier);
 
+  // Only animated (rigged, non-null clip) monsters are eligible — the boss must
+  // visibly idle/move/attack, so the static `mon_big_scary_*` GLBs are excluded.
   const keywordMap: Array<[RegExp, string]> = [
-    [/colossus|titan|giant|golem|wrath|dread|hulk|behemoth|leviathan/, "mon_big_scary_t3"],
-    [/gloom|brute|ogre|troll|abomination/, "mon_big_scary_t2"],
+    [/colossus|titan|giant|golem|wrath|dread|hulk|behemoth|leviathan/, "mon_dante_beast"],
+    [/gloom|brute|ogre|troll|abomination/, "mon_medusa"],
     [/thorn|queen|briar|medusa|serpent|gorgon|witch|matriarch|naga/, "mon_medusa"],
     [/hunter|predator|beast|wolf|hound|stalker|fang|claw/, "mon_dante_beast"],
     [/cult|undead|wraith|lich|priest|acolyte|necro|bone|grave/, "mon_cultist"],
@@ -173,8 +175,8 @@ function resolveBossModelId(assetPack: string | undefined, tier: number): string
     if (re.test(pack)) return id;
   }
 
-  // No thematic match — hash the pack for a stable, varied body (rigged first).
-  const pool = ["mon_dante_beast", "mon_medusa", "mon_cultist", "mon_pincher", "mon_big_scary_t3", "mon_big_scary_t2"];
+  // No thematic match — hash the pack for a stable, varied body (animated only).
+  const pool = ["mon_dante_beast", "mon_medusa", "mon_cultist", "mon_pincher"];
   return pool[hashString(pack) % pool.length]!;
 }
 

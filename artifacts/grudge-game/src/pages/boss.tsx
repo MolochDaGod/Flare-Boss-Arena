@@ -170,6 +170,7 @@ function BossArena() {
   const [, setLocation] = useLocation();
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<ArenaScene | null>(null);
+  const autoSummonRef = useRef(false);
 
   const { data: characters } = useListCharacters();
   const { data: classesData } = useGetClasses();
@@ -309,7 +310,20 @@ function BossArena() {
     setBoss(null);
     setHud(null);
     setReward(null);
+    autoSummonRef.current = false;
   };
+
+  // Auto-conjure a boss the moment the arena is entered (and after a rematch).
+  // No mandatory summon gate — the encounter generates on entry; the manual
+  // panel only resurfaces if generation fails.
+  useEffect(() => {
+    if (!char || !stats) return;
+    if (boss || generateBoss.isPending || generateBoss.isError) return;
+    if (autoSummonRef.current) return;
+    autoSummonRef.current = true;
+    handleSummon();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [char, stats, boss, generateBoss.isPending, generateBoss.isError]);
 
   if (!char) {
     return (
@@ -342,8 +356,8 @@ function BossArena() {
         <ArrowLeft className="w-4 h-4" /> War Panel
       </button>
 
-      {/* ── Pre-fight: summon screen ── */}
-      {!boss && !generateBoss.isPending && (
+      {/* ── Conjuring failed: manual retry screen (no mandatory gate on entry) ── */}
+      {!boss && generateBoss.isError && (
         <div className="absolute inset-0 z-30 flex items-center justify-center p-6">
           <ParchmentPanel className="max-w-md w-full p-8 text-center space-y-6">
             <Rivets />
@@ -355,8 +369,7 @@ function BossArena() {
                 Arena of Blood
               </h1>
               <p className="text-muted-foreground text-sm leading-relaxed">
-                The AI forges a unique boss tailored to your might. Step into the arena and fight it in real time — dodge its
-                telegraphs, weave your skills, break its phases.
+                The ritual faltered — no adversary answered the call. Choose a tier and conjure again to enter the fight.
               </p>
             </div>
             <div className="flex items-center justify-center gap-2">
@@ -387,8 +400,8 @@ function BossArena() {
         </div>
       )}
 
-      {/* ── Generating ── */}
-      {generateBoss.isPending && (
+      {/* ── Auto-conjuring on entry (covers the brief pre-request window too) ── */}
+      {!boss && !generateBoss.isError && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-black/60">
           <Loader2 className="w-12 h-12 animate-spin" style={{ color: GOLD }} />
           <p className="font-serif tracking-widest uppercase animate-pulse" style={{ color: GOLD }}>
