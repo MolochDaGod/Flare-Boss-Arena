@@ -1,0 +1,7 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "pnpm install",
+  "buildCommand": "pnpm --filter @workspace/grudge-game run build",
+  "outputDirectory": "artifacts/grudge-game/dist/public",
+  "framework": "vite"
+}

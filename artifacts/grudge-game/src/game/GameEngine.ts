@@ -23,6 +23,7 @@ import { ParticleVfx } from "./combat/particles";
 import { TelegraphField } from "./combat/telegraphs";
 import { DeployableManager } from "./combat/deployables";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
+import { FX2D } from "./FX2D";
 
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
 
@@ -209,6 +210,7 @@ export class GameEngine {
   private _downHandler!: (e: MouseEvent) => void;
   private _upHandler!: (e: MouseEvent) => void;
   private _contextHandler!: (e: MouseEvent) => void;
+  private fx: FX2D | null = null;
 
   init(
     container: HTMLDivElement,
@@ -273,6 +275,8 @@ export class GameEngine {
     this.loadPlayerModel();
     this.spawnInitialEnemies();
     this.setupInput(container);
+
+    this.fx = new FX2D(container);
 
     window.addEventListener("resize", this.onResize);
     this.animate();
@@ -1159,6 +1163,16 @@ export class GameEngine {
     wp.y += enemy.model.height * 0.7;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
 
+    // 2D hit spark at the enemy's screen position
+    if (this.fx) {
+      const sc = this.worldToScreen(wp);
+      if (isCrit) {
+        this.fx.spawnSpellImpact(sc.x, sc.y, "#ff4400", 50);
+      } else {
+        this.fx.spawnHitSparks(sc.x, sc.y, "#ffaa00", 10);
+      }
+    }
+
     this.log(`You hit ${enemy.template.name} for ${dmg}${isCrit ? " CRIT!" : ""}`);
 
     if (enemy.hp <= 0) {
@@ -1237,6 +1251,11 @@ export class GameEngine {
       this.bloom.composer.render();
     } else {
       this.renderer.render(this.scene, this.camera);
+    }
+    // 2D overlay effects (crosshair, sparks, projectiles)
+    if (this.fx) {
+      this.fx.update(delta);
+      this.fx.draw();
     }
   };
 
@@ -1557,6 +1576,8 @@ export class GameEngine {
       }
     }
     this.clearHover();
+    this.fx?.dispose();
+    this.fx = null;
     this.playerAnimator?.dispose();
     this.skillVfx?.dispose();
     this.particles?.dispose();
