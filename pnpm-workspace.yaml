@@ -7,6 +7,7 @@ packages:
 autoInstallPeers: false
 
 catalog:
+  '@dimforge/rapier3d-compat': 0.19.3
   '@replit/vite-plugin-cartographer': ^0.5.1
   '@replit/vite-plugin-dev-banner': ^0.1.1
   '@replit/vite-plugin-runtime-error-modal': ^0.0.6
@@ -15,6 +16,7 @@ catalog:
   '@types/node': ^25.3.3
   '@types/react': 19.2.14
   '@types/react-dom': ^19.2.0
+  '@types/three': ^0.185.0
   '@vitejs/plugin-react': ^5.0.4
   class-variance-authority: ^0.7.1
   clsx: ^2.1.1
@@ -25,7 +27,11 @@ catalog:
   react-dom: 19.1.0
   tailwind-merge: ^3.3.1
   tailwindcss: ^4.1.14
+  three: ^0.185.0
+  three-mesh-bvh: ^0.9.10
+  three.quarks: ^0.17.1
   tsx: ^4.21.0
+  typescript: ~5.9.3
   vite: ^7.3.2
   wouter: ^3.3.5
   zod: ^3.25.76

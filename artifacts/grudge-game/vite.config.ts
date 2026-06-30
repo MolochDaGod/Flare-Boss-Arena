@@ -28,6 +28,7 @@ export default defineConfig({
       "three",
       "three/examples/jsm/loaders/GLTFLoader.js",
       "three/examples/jsm/loaders/FBXLoader.js",
+      "@dimforge/rapier3d-compat",
     ],
     include: [
       "react",
@@ -107,6 +108,7 @@ export default defineConfig({
         ]
       : []),
   ],
+  assetsInclude: ["**/*.wasm"],
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "src"),
@@ -118,6 +120,21 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    chunkSizeWarningLimit: 2500,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("@dimforge/")) {
+            return "rapier-vendor";
+          }
+          if (id.includes("/three/") || id.includes("three-mesh-bvh")) {
+            return "three-vendor";
+          }
+          return undefined;
+        },
+      },
+    },
   },
   server: {
     port,
