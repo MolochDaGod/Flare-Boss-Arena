@@ -19,6 +19,11 @@ const Equipment = lazy(() => import("@/pages/equipment"));
 const Skills = lazy(() => import("@/pages/skills"));
 const Boss = lazy(() => import("@/pages/boss"));
 const Enemies = lazy(() => import("@/pages/enemies"));
+const Units = lazy(() => import("@/pages/units"));
+const Perks = lazy(() => import("@/pages/perks"));
+const Rewards = lazy(() => import("@/pages/rewards"));
+const Account = lazy(() => import("@/pages/account"));
+const Content = lazy(() => import("@/pages/content"));
 const Game = lazy(() => import("@/pages/game"));
 const Camp = lazy(() => import("@/pages/camp"));
 
@@ -48,6 +53,11 @@ function Router() {
             <Route path="/character/new" component={CharacterNew} />
             <Route path="/equipment" component={Equipment} />
             <Route path="/skills" component={Skills} />
+            <Route path="/perks" component={Perks} />
+            <Route path="/units" component={Units} />
+            <Route path="/rewards" component={Rewards} />
+            <Route path="/account" component={Account} />
+            <Route path="/content" component={Content} />
             <Route path="/enemies" component={Enemies} />
             <Route component={NotFound} />
           </Switch>

@@ -24,6 +24,8 @@ import { TelegraphField } from "./combat/telegraphs";
 import { DeployableManager } from "./combat/deployables";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import { FX2D } from "./FX2D";
+import { DUNGEON_COLLECTABLES } from "../data/worldProps";
+import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
 
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
 
@@ -201,6 +203,8 @@ export class GameEngine {
   private pirates: PirateHandle[] = [];
   private townsfolk: Townsperson[] = [];
   private coveProps: THREE.Group[] = [];
+  private worldCollectables: LoadedWorldProp[] = [];
+  private collectedPropIds = new Set<string>();
   private coveLabel: THREE.Sprite | null = null;
   private coveCenter = new THREE.Vector3(70, 0, -14);
   private disposed = false;
@@ -271,6 +275,7 @@ export class GameEngine {
     this.loadEnvironment();
     this.camp = buildOrcCamp(this.loader, this.scene, `${import.meta.env.BASE_URL}models/buildings/orc_camp_set.glb`);
     this.buildPirateCove();
+    this.buildWorldCollectables();
     this.setupLighting();
     this.loadPlayerModel();
     this.spawnInitialEnemies();
@@ -424,6 +429,48 @@ export class GameEngine {
       });
       this.scene.add(t.group);
       this.townsfolk.push(t);
+    }
+  }
+
+  /** Perk symbols + gumball machine scattered in the dungeon as pickups. */
+  private buildWorldCollectables() {
+    for (const place of DUNGEON_COLLECTABLES) {
+      const key = `${place.propId}@${place.x},${place.z}`;
+      const loaded = loadWorldProp(place.propId, this.loader, {
+        position: new THREE.Vector3(place.x, 0.8, place.z),
+        rotationY: place.rotY ?? 0,
+      });
+      loaded.holder.userData.collectKey = key;
+      loaded.holder.userData.stationId = place.stationId;
+      this.scene.add(loaded.holder);
+      this.worldCollectables.push(loaded);
+    }
+  }
+
+  private updateWorldCollectables(delta: number, elapsed: number) {
+    const pickupRadius = 2.8;
+    for (let i = this.worldCollectables.length - 1; i >= 0; i--) {
+      const wp = this.worldCollectables[i]!;
+      wp.mixer?.update(delta);
+      if (wp.def.kind === "perk_symbol") {
+        const t = elapsed * 1.8 + wp.holder.position.x;
+        wp.holder.position.y = 0.8 + Math.sin(t) * 0.18;
+        wp.holder.rotation.y += delta * 0.5;
+      }
+
+      const key = wp.holder.userData.collectKey as string;
+      if (this.collectedPropIds.has(key)) continue;
+
+      const dx = wp.holder.position.x - this.playerPos.x;
+      const dz = wp.holder.position.z - this.playerPos.z;
+      if (dx * dx + dz * dz <= pickupRadius * pickupRadius) {
+        this.collectedPropIds.add(key);
+        const label = wp.def.perkId ?? wp.def.name;
+        this.log(`Collected ${label}!`);
+        this.scene.remove(wp.holder);
+        disposeWorldProp(wp);
+        this.worldCollectables.splice(i, 1);
+      }
     }
   }
 
@@ -1274,6 +1321,8 @@ export class GameEngine {
 
     if (this.playerAttackCooldown > 0) this.playerAttackCooldown -= delta;
 
+    this.updateWorldCollectables(delta, elapsed);
+
     // Keyboard movement
     const raw = new THREE.Vector2();
     if (this.keys.has("KeyW") || this.keys.has("ArrowUp"))    { raw.x -= 1; raw.y -= 1; }
@@ -1608,6 +1657,12 @@ export class GameEngine {
       t.dispose();
     }
     this.townsfolk = [];
+    for (const wp of this.worldCollectables) {
+      this.scene.remove(wp.holder);
+      disposeWorldProp(wp);
+    }
+    this.worldCollectables = [];
+    this.collectedPropIds.clear();
     for (const g of this.coveProps) {
       this.scene.remove(g);
       disposeGltfObject(g);

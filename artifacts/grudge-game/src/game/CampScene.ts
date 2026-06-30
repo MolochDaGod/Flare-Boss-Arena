@@ -14,6 +14,8 @@ import { TelegraphField } from "./combat/telegraphs";
 import { ParticleVfx } from "./combat/particles";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import type { ClassSkill } from "../data/classSkills";
+import { CAMP_PROP_PLACEMENTS } from "../data/worldProps";
+import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
 
 export type CampStationId =
   | "anvil"
@@ -22,7 +24,14 @@ export type CampStationId =
   | "quests"
   | "stash"
   | "portal_dungeon"
-  | "portal_boss";
+  | "portal_boss"
+  | "perk_machines"
+  | "gumball"
+  | "perk_firebug"
+  | "perk_medic"
+  | "perk_support"
+  | "perk_gunslinger"
+  | "weapon_panel";
 
 export interface CampStation {
   id: CampStationId;
@@ -140,6 +149,10 @@ export class CampScene {
   // ── Ambient townsfolk (KayKit heroes, non-targetable) ──
   private townsfolk: Townsperson[] = [];
 
+  // ── Perk machines, collectable symbols, environment props ──
+  private worldProps: LoadedWorldProp[] = [];
+  private propLoader = new GLTFLoader();
+
   // ── Combat / testing-ground ──
   private dummies: CampDummy[] = [];
   private vfx: CampVfx[] = [];
@@ -170,7 +183,7 @@ export class CampScene {
 
   private readonly STATION_RADIUS = 6.2; // engage marker (doorway) distance from centre
   private readonly BUILDING_RADIUS = 9.2; // building distance from centre
-  private readonly BOUNDS = 16;
+  private readonly BOUNDS = 18;
 
   private options: CampSceneOptions;
   private _engaged = false;
@@ -217,6 +230,7 @@ export class CampScene {
     this.buildEnvironment();
     this.buildStations();
     this.loadTown();
+    this.buildWorldProps();
     this.buildCampfire();
     this.buildDummies();
     this.buildTownsfolk();
@@ -534,6 +548,87 @@ export class CampScene {
 
   private buildStations() {
     for (const def of this.STATION_DEFS) this.addStation(def);
+  }
+
+  /** Perk machines, gumball, weapon panel, trenches — from `worldProps` catalog. */
+  private buildWorldProps() {
+    for (const place of CAMP_PROP_PLACEMENTS) {
+      const loaded = loadWorldProp(place.propId, this.propLoader, {
+        position: new THREE.Vector3(place.x, 0, place.z),
+        rotationY: place.rotY,
+      });
+      this.scene.add(loaded.holder);
+      this.worldProps.push(loaded);
+
+      if (place.stationId && place.label && place.hint && place.color != null) {
+        this.addStationAt(place.x, place.z, {
+          id: place.stationId as CampStationId,
+          label: place.label,
+          hint: place.hint,
+          color: place.color,
+        });
+      }
+    }
+  }
+
+  /** Interaction pad at an explicit world position (perk alley / props). */
+  private addStationAt(
+    x: number,
+    z: number,
+    def: { id: CampStationId; label: string; hint: string; color: number },
+  ): CampStation {
+    const { id, label, hint, color } = def;
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    const ringMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.75, 1.1, 32), ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.06;
+    group.add(ring);
+    (group.userData as { ring: THREE.Mesh }).ring = ring;
+
+    const glyphMat = new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.85,
+      roughness: 0.35,
+      metalness: 0.6,
+    });
+    const glyph = new THREE.Mesh(new THREE.OctahedronGeometry(0.28, 0), glyphMat);
+    glyph.position.y = 1.35;
+    glyph.castShadow = true;
+    group.add(glyph);
+
+    const labelTex = this.makeLabelTexture(label.toUpperCase());
+    const labelMat = new THREE.SpriteMaterial({ map: labelTex, transparent: true, depthTest: false });
+    const labelSprite = new THREE.Sprite(labelMat);
+    labelSprite.position.y = 2.6;
+    labelSprite.scale.set(2.4, 0.6, 1);
+    group.add(labelSprite);
+
+    const glow = new THREE.PointLight(color, 1.4, 8, 2);
+    glow.position.y = 1.6;
+    group.add(glow);
+
+    this.scene.add(group);
+
+    const station: CampStation = {
+      id,
+      label,
+      hint,
+      position: new THREE.Vector3(x, 0, z),
+      color,
+      group,
+      glow,
+    };
+    this.stations.push(station);
+    return station;
   }
 
   /**
@@ -1130,6 +1225,16 @@ export class CampScene {
     this.camera.position.lerp(camTarget, 0.04);
     this.camera.lookAt(this.playerPos.x * 0.4, 0, this.playerPos.z * 0.4);
 
+    // World prop animation mixers + floating perk symbols.
+    for (const wp of this.worldProps) {
+      wp.mixer?.update(delta);
+      if (wp.def.kind === "perk_symbol") {
+        const t = elapsed * 1.6 + wp.holder.position.x;
+        wp.holder.position.y = Math.sin(t) * 0.12;
+        wp.holder.rotation.y += delta * 0.35;
+      }
+    }
+
     // Campfire flicker
     if (this.campfireLight) {
       this.campfireLight.intensity = 5.2 + Math.sin(elapsed * 6.3) * 0.7 + Math.sin(elapsed * 17) * 0.35;
@@ -1283,6 +1388,11 @@ export class CampScene {
       t.dispose();
     }
     this.townsfolk = [];
+    for (const wp of this.worldProps) {
+      this.scene.remove(wp.holder);
+      disposeWorldProp(wp);
+    }
+    this.worldProps = [];
     this.embers = [];
     this.vfx = [];
     this.dummies = [];

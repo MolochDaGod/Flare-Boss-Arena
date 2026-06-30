@@ -14,7 +14,12 @@ import {
   PawPrint,
   Hammer,
   ChevronRight,
+  Gift,
+  Wallet,
+  Map,
+  Sparkles,
 } from "lucide-react";
+import { PLAY_LOOP } from "@/data/gameFlow";
 import {
   getActiveFighter,
   ATTR_ORDER,
@@ -125,9 +130,14 @@ function FighterStage({ fighter }: { fighter: FighterDef }) {
 }
 
 const WAR_ROOM: { href: string; label: string; sub: string; icon: React.ElementType }[] = [
+  { href: "/units", label: "Unit Roster", sub: "Champion compendium", icon: PawPrint },
   { href: "/equipment", label: "Armory", sub: "Weapons & armor", icon: Shield },
   { href: "/skills", label: "Grimoire", sub: "Skill trees", icon: ScrollText },
-  { href: "/enemies", label: "Bestiary", sub: "Know your prey", icon: PawPrint },
+  { href: "/perks", label: "Perks", sub: "KF2 machines", icon: Sparkles },
+  { href: "/rewards", label: "Rewards", sub: "Dailies & season", icon: Gift },
+  { href: "/account", label: "Wallet", sub: "Currencies", icon: Wallet },
+  { href: "/content", label: "Atlas", sub: "Modes & props", icon: Map },
+  { href: "/enemies", label: "Bestiary", sub: "Enemy units", icon: Skull },
   { href: "/character/new", label: "Soul Forge", sub: "Forge a warlord", icon: Hammer },
 ];
 
@@ -331,6 +341,27 @@ export default function Home() {
                     <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{sub}</p>
                   </div>
                   <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="border-border/50 bg-card/50">
+            <CardHeader className="border-b border-border/50 pb-3">
+              <CardTitle className="font-serif text-sm uppercase tracking-widest text-muted-foreground">
+                Play Loop
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 pt-4">
+              {PLAY_LOOP.map((step) => (
+                <Link
+                  key={step.step}
+                  href={step.route}
+                  className="flex items-center gap-2 rounded border border-border/20 px-2 py-1.5 text-xs hover:border-primary/40 transition-colors"
+                >
+                  <span className="font-mono text-primary w-4">{step.step}</span>
+                  <span className="font-serif uppercase tracking-wide flex-1">{step.label}</span>
+                  <ChevronRight className="h-3 w-3 text-muted-foreground" />
                 </Link>
               ))}
             </CardContent>

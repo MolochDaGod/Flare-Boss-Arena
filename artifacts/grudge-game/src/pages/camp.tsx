@@ -42,7 +42,22 @@ const STATION_TO_PANEL: Partial<Record<CampStationId, PanelKey>> = {
   stats: "attributes",
   quests: "quests",
   stash: "equipment",
+  perk_machines: "skills",
+  perk_firebug: "skills",
+  perk_medic: "skills",
+  perk_support: "skills",
+  perk_gunslinger: "skills",
+  weapon_panel: "equipment",
 };
+
+const PERK_STATIONS: CampStationId[] = [
+  "perk_machines",
+  "gumball",
+  "perk_firebug",
+  "perk_medic",
+  "perk_support",
+  "perk_gunslinger",
+];
 
 // ─── Stone/gold HUD theme (shared with the dungeon HUD) ─────────────────────────
 const GOLD = "#c5a059";
@@ -81,6 +96,7 @@ function Camp() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<PanelKey>("equipment");
   const [showHint, setShowHint] = useState(true);
+  const [perkToast, setPerkToast] = useState<string | null>(null);
 
   useMainPanelHotkeys(
     () => setPanelOpen((v) => !v),
@@ -111,6 +127,15 @@ function Camp() {
       if (id === "portal_boss") {
         setLocation("/boss");
         return;
+      }
+      if (id === "gumball") {
+        setPerkToast("Gumball spun — perk roll coming soon!");
+        window.setTimeout(() => setPerkToast(null), 2800);
+        return;
+      }
+      if (PERK_STATIONS.includes(id)) {
+        setPerkToast(`Perk station: ${id.replace("perk_", "").replace("_", " ")}`);
+        window.setTimeout(() => setPerkToast(null), 2400);
       }
       const panel = STATION_TO_PANEL[id];
       if (panel) {
@@ -250,6 +275,22 @@ function Camp() {
                 </kbd>
                 <span className="text-[10px] font-serif tracking-widest uppercase text-muted-foreground">Engage</span>
               </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {perkToast && (
+          <motion.div
+            key={perkToast}
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="absolute top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-none"
+          >
+            <div className="bg-black/85 border border-amber-500/50 rounded px-4 py-2 text-center backdrop-blur-sm">
+              <p className="text-xs font-serif tracking-widest uppercase text-amber-300">{perkToast}</p>
             </div>
           </motion.div>
         )}

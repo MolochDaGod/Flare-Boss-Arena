@@ -1,21 +1,22 @@
 import React from "react";
 import { Link, useLocation } from "wouter";
-import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarHeader } from "@/components/ui/sidebar";
-import { Shield, Sword, Skull, Book, Flame, ScrollText, Tent, Users } from "lucide-react";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarHeader,
+} from "@/components/ui/sidebar";
+import { Flame } from "lucide-react";
+import { NAV_SECTIONS } from "@/data/gameFlow";
 
 export default function Shell({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
-
-  const navItems = [
-    { label: "War Panel", href: "/", icon: Flame },
-    { label: "Choose Fighter", href: "/select", icon: Users },
-    { label: "Sanctuary Camp", href: "/camp", icon: Tent },
-    { label: "New Character", href: "/character/new", icon: ScrollText },
-    { label: "Equipment", href: "/equipment", icon: Sword },
-    { label: "Skills", href: "/skills", icon: Book },
-    { label: "Boss Arena", href: "/boss", icon: Skull },
-    { label: "Bestiary", href: "/enemies", icon: Shield },
-  ];
 
   return (
     <SidebarProvider>
@@ -33,29 +34,31 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             </div>
           </SidebarHeader>
           <SidebarContent>
-            <SidebarGroup>
-              <SidebarGroupLabel className="text-xs font-serif uppercase tracking-widest text-muted-foreground">Sanctuary</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {navItems.map((item) => (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton asChild isActive={location === item.href} tooltip={item.label}>
-                        <Link href={item.href} className="flex items-center gap-3">
-                          <item.icon className="w-4 h-4" />
-                          <span className="font-serif tracking-wide">{item.label}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
+            {NAV_SECTIONS.map((section) => (
+              <SidebarGroup key={section.label}>
+                <SidebarGroupLabel className="text-xs font-serif uppercase tracking-widest text-muted-foreground">
+                  {section.label}
+                </SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {section.items.map((item) => (
+                      <SidebarMenuItem key={item.href}>
+                        <SidebarMenuButton asChild isActive={location === item.href} tooltip={item.description ?? item.label}>
+                          <Link href={item.href} className="flex items-center gap-3">
+                            <item.icon className="w-4 h-4" />
+                            <span className="font-serif tracking-wide">{item.label}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            ))}
           </SidebarContent>
         </Sidebar>
         <main className="flex-1 flex flex-col relative overflow-hidden h-[100dvh]">
-          {/* Subtle noise/texture overlay */}
           <div className="pointer-events-none fixed inset-0 opacity-[0.015] mix-blend-overlay z-50 bg-[url('https://pub-e7fcf1fd4c9946ecb84b3766bbc7b50d.r2.dev/noise.png')] bg-repeat" />
-          
           <div className="flex-1 overflow-y-auto">
             <div className="container max-w-7xl mx-auto p-4 md:p-8 h-full">
               {children}
