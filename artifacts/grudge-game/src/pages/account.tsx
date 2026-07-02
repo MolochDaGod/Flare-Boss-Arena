@@ -5,15 +5,14 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageChrome";
 import { CURRENCIES, getWallet, saveWallet, type WalletBalances } from "@/data/wallet";
 import { getActiveFighter } from "@/data/fighters";
-import { useListCharacters } from "@workspace/api-client-react";
 import { ParchmentPanel } from "@/components/CraftpixUI";
 import { Gift } from "lucide-react";
+import { getPlayableCharacter } from "@/data/playableIdentity";
 
 export default function Account() {
   const [wallet, setWallet] = useState<WalletBalances>(() => getWallet());
   const fighter = getActiveFighter();
-  const { data: characters } = useListCharacters();
-  const warlord = characters?.[0];
+  const playable = getPlayableCharacter();
 
   const addDemoGold = () => {
     const next = { ...wallet, gold: wallet.gold + 100 };
@@ -24,26 +23,26 @@ export default function Account() {
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <PageHeader
-        kicker="MMO account / wallet"
+        kicker="Grudge Studio account"
         title="Account"
-        subtitle="Currencies, warlord profile, and linked fighter identity"
+        subtitle="Wallet, active fighter, and session profile — no character creation required"
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <ParchmentPanel className="lg:col-span-2 p-6 space-y-4">
-          <h2 className="font-serif text-sm uppercase tracking-widest text-[#c5a059]">Warlord Profile</h2>
+          <h2 className="font-serif text-sm uppercase tracking-widest text-[#c5a059]">Play Profile</h2>
           <div className="grid grid-cols-2 gap-4 text-sm font-serif">
-            <div>
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">API Character</p>
-              <p className="text-foreground">{warlord ? String(warlord.name) : "—"}</p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Level</p>
-              <p className="font-mono text-primary">{warlord ? String((warlord as { level?: number }).level ?? 1) : "—"}</p>
-            </div>
             <div>
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Active Fighter</p>
               <p className="text-foreground">{fighter.name}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Class</p>
+              <p className="font-mono text-primary capitalize">{playable.class}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Title</p>
+              <p className="text-foreground">{fighter.title}</p>
             </div>
             <div>
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Role</p>

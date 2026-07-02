@@ -1,6 +1,6 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 import { useLocation } from "wouter";
-import { useListCharacters } from "@workspace/api-client-react";
+import { getPlayableCharacter } from "@/data/playableIdentity";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Flame, LayoutGrid, Loader2, Skull, Swords } from "lucide-react";
 import { CampScene, type CampStateUpdate, type CampStationId } from "@/game/CampScene";
@@ -108,11 +108,10 @@ function Camp() {
     },
   );
 
-  const { data: characters } = useListCharacters();
-  const char = characters?.[0];
+  const char = getPlayableCharacter();
 
   // Resolve class + weapon skills for the camp HUD skill bar.
-  const hudClass = char ? String((char as unknown as Record<string, unknown>).class ?? "warrior").toLowerCase() : null;
+  const hudClass = String(char.class ?? "warrior").toLowerCase();
   const hudMainCategory = hudClass ? CLASS_STARTER_WEAPON[hudClass]?.category : null;
   const { classSkills: hudClassSkills, weaponSlots: hudWeaponSlots } = useResolvedSkills(hudClass, hudMainCategory);
 
@@ -147,7 +146,7 @@ function Camp() {
   );
 
   useEffect(() => {
-    if (!mountRef.current || !char) return;
+    if (!mountRef.current) return;
     const c = char as unknown as Record<string, unknown>;
     const attrs = (c.attributes as Record<string, number>) ?? {};
     const level = Number(c.level ?? 1);
@@ -182,32 +181,15 @@ function Camp() {
     return () => clearTimeout(t);
   }, []);
 
-  const charSummary = useMemo<CharSummary | null>(() => {
-    if (!char) return null;
-    return {
-      name: char.name as string,
-      race: char.race as string,
-      class: char.class as string,
-      level: (char.level as number) ?? 1,
-      faction: (char as { faction?: string }).faction,
-      attributes: (char.attributes as Record<string, number>) ?? {},
-      equipment: (char.equipment as Record<string, string | undefined>) ?? {},
-    };
-  }, [char]);
-
-  if (!char) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-6 bg-background min-h-[100dvh]">
-        <p className="font-serif text-muted-foreground tracking-widest text-lg uppercase">No Warlord Found</p>
-        <button
-          onClick={() => setLocation("/character/new")}
-          className="font-serif text-sm tracking-widest uppercase text-primary border border-primary/40 px-6 py-2 rounded hover:bg-primary/10 transition-colors"
-        >
-          Forge a Warlord
-        </button>
-      </div>
-    );
-  }
+  const charSummary = useMemo<CharSummary>(() => ({
+    name: char.name,
+    race: char.race,
+    class: char.class,
+    level: char.level,
+    faction: char.faction,
+    attributes: char.attributes,
+    equipment: char.equipment,
+  }), [char]);
 
   const loaded = state?.loaded ?? false;
   const nearby = state?.nearbyStationLabel ?? null;

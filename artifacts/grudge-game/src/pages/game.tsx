@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, useCallback, Component, useMemo, type ReactNode, type ErrorInfo } from "react";
 import { useLocation } from "wouter";
-import { useListCharacters, useGetEnemies, useGetClasses, useGetWeapons } from "@workspace/api-client-react";
+import { useGetEnemies, useGetClasses, useGetWeapons } from "@workspace/api-client-react";
 import { GameEngine, type GameState, type EnemyTemplate, type PlayerInitStats } from "@/game/GameEngine";
 import { Loader2, ArrowLeft, Swords, Zap, Shield, Crosshair, LayoutGrid } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type PanelKey } from "@/components/MainPanel";
 import { getSelectedSkin } from "@/data/skins";
 import { getActiveFighter } from "@/data/fighters";
+import { getPlayableCharacter } from "@/data/playableIdentity";
 import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { useResolvedSkills } from "@/data/skillsResolver";
 import { SkillIcon } from "@/components/SkillIcon";
@@ -76,7 +77,7 @@ function computePlayerStats(
   const level = Number(char.level ?? 1);
   const charClass = String(char.class ?? "warrior").toLowerCase();
   const charRace = String(char.race ?? "human");
-  const charName = String(char.name ?? "Warlord");
+  const charName = String(char.name ?? "Fighter");
 
   // Class base attributes from R2
   const classes = (classesData as Record<string, unknown>)?.classes as Record<string, Record<string, unknown>> | undefined;
@@ -198,12 +199,11 @@ function Game() {
     (idx) => { const k = MAIN_PANEL_KEYS[idx]; if (k) setPanelTab(k); },
   );
 
-  const { data: characters } = useListCharacters();
   const { data: enemiesData } = useGetEnemies();
   const { data: classesData } = useGetClasses();
   const { data: weaponsData } = useGetWeapons();
 
-  const char = characters?.[0];
+  const char = getPlayableCharacter();
 
   const handleStateUpdate = useCallback((state: GameState) => {
     setGameState(state);
@@ -214,7 +214,6 @@ function Game() {
 
   // Compute player stats from real class/weapon data
   const playerStats = useMemo(() => {
-    if (!char) return null;
     return computePlayerStats(
       char as unknown as Record<string, unknown>,
       classesData,
@@ -223,12 +222,12 @@ function Game() {
   }, [char, classesData, weaponsData]);
 
   // Resolve class + weapon skills for the in-game HUD skill bar.
-  const hudClass = char ? String((char as unknown as Record<string, unknown>).class ?? "warrior").toLowerCase() : null;
+  const hudClass = String(char.class ?? "warrior").toLowerCase();
   const hudMainCategory = hudClass ? CLASS_STARTER_WEAPON[hudClass]?.category : null;
   const { classSkills: hudClassSkills, weaponSlots: hudWeaponSlots } = useResolvedSkills(hudClass, hudMainCategory);
 
   // Only start the engine once we have enemies + stats
-  const ready = !!char && enemyTemplates.length > 0 && !!playerStats;
+  const ready = enemyTemplates.length > 0 && !!playerStats;
 
   useEffect(() => {
     if (!mountRef.current || !ready || !playerStats) return;
@@ -263,20 +262,6 @@ function Game() {
     return () => clearTimeout(t);
   }, []);
 
-  if (!char) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-6 bg-background">
-        <p className="font-serif text-muted-foreground tracking-widest text-lg uppercase">No Warlord Found</p>
-        <button
-          onClick={() => setLocation("/character/new")}
-          className="font-serif text-sm tracking-widest uppercase text-primary border border-primary/40 px-6 py-2 rounded hover:bg-primary/10 transition-colors"
-        >
-          Forge a Warlord
-        </button>
-      </div>
-    );
-  }
-
   const hpPct   = gameState ? (gameState.playerHp / gameState.playerMaxHp) * 100 : 100;
   const manaPct = gameState ? (gameState.playerMana / gameState.playerMaxMana) * 100 : 100;
   const atkPct  = gameState ? (1 - gameState.playerAttackCooldown) * 100 : 100;
@@ -307,7 +292,7 @@ function Game() {
               {!ready
                 ? "Loading Grudge Data..."
                 : !gameState?.loaded
-                ? "Summoning your Warlord..."
+                ? "Summoning your fighter..."
                 : "Raising the Dungeon..."}
             </p>
             {playerStats && (

@@ -3,5 +3,8 @@
   "installCommand": "pnpm install",
   "buildCommand": "pnpm --filter @workspace/grudge-game run build",
   "outputDirectory": "artifacts/grudge-game/dist/public",
-  "framework": "vite"
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }

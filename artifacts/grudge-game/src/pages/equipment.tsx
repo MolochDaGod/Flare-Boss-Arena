@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { useListCharacters, useGetWeapons, useGetArmor, useEquipItem } from "@workspace/api-client-react";
+import { useGetWeapons, useGetArmor } from "@workspace/api-client-react";
+import { getPlayableCharacter } from "@/data/playableIdentity";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2, Sword, Shield as ShieldIcon } from "lucide-react";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
 import { categoryToWeaponType } from "@/data/skillsResolver";
 import { fetchWeaponSkills, type WeaponSkillsData } from "@/game/weaponSkills";
 
@@ -197,24 +197,10 @@ const SLOTS = [
 ];
 
 export default function Equipment() {
-  const queryClient = useQueryClient();
-  const { data: characters } = useListCharacters();
-  const activeChar = characters?.[0];
+  const activeChar = getPlayableCharacter();
 
   const { data: weaponsData, isLoading: loadW } = useGetWeapons();
   const { data: armorData,   isLoading: loadA } = useGetArmor();
-
-  const equipItem = useEquipItem({
-    mutation: {
-      onSuccess: () => {
-        toast.success("Equipment bound to soul.");
-        if (activeChar?.id) {
-          queryClient.invalidateQueries({ queryKey: ["/api/characters"] });
-        }
-      },
-      onError: () => toast.error("Failed to equip item."),
-    },
-  });
 
   const [activeSlot, setActiveSlot] = useState("mainHand");
   const [search, setSearch] = useState("");
@@ -242,23 +228,13 @@ export default function Equipment() {
     return base.filter((a) => !q || a.name.toLowerCase().includes(q) || a.material.toLowerCase().includes(q));
   }, [isWeaponSlot, allWeapons, allArmor, activeSlot, search]);
 
-  const handleEquip = (itemId: string) => {
-    if (!activeChar) return;
-    equipItem.mutate({ id: activeChar.id, data: { slot: activeSlot, itemId } });
+  const handleEquip = () => {
+    toast.message("Loadout is tied to your chosen fighter — pick a different champion on /select.");
   };
 
   const handleUnequip = () => {
-    if (!activeChar) return;
-    equipItem.mutate({ id: activeChar.id, data: { slot: activeSlot, itemId: null } });
+    toast.message("Starter gear is fixed for the active fighter.");
   };
-
-  if (!activeChar) {
-    return (
-      <div className="p-8 text-center font-serif text-muted-foreground tracking-widest">
-        No character selected. Forge a warlord first.
-      </div>
-    );
-  }
 
   const equippedItemId = (activeChar.equipment as Record<string, string>)?.[activeSlot];
 
@@ -336,7 +312,7 @@ export default function Equipment() {
                     <Button
                       variant="outline" size="sm"
                       onClick={handleUnequip}
-                      disabled={equipItem.isPending}
+                      disabled={false}
                       className="border-destructive/60 text-destructive hover:bg-destructive/10 font-serif tracking-widest uppercase text-[10px] h-8"
                     >
                       Unequip
@@ -376,7 +352,7 @@ export default function Equipment() {
                               ? "border-primary bg-primary/8 shadow-[0_0_16px_-4px_rgba(255,165,0,0.4)] ring-1 ring-primary/60"
                               : "border-border/40 bg-background/40 hover:border-primary/40 hover:bg-muted/20"
                           }`}
-                          onClick={() => handleEquip(item.id)}
+                          onClick={() => handleEquip()}
                         >
                           {/* Icon */}
                           <div className="h-20 bg-gradient-to-b from-black/30 to-background/60 flex items-center justify-center p-3 border-b border-border/30 relative">
@@ -432,7 +408,7 @@ export default function Equipment() {
                               variant={isEquippedHere ? "default" : "secondary"}
                               size="sm"
                               className="w-full h-6 text-[10px] font-serif tracking-widest uppercase mt-1"
-                              disabled={isEquippedHere || equipItem.isPending}
+                              disabled={isEquippedHere}
                             >
                               {isEquippedHere ? "Equipped" : "Equip"}
                             </Button>

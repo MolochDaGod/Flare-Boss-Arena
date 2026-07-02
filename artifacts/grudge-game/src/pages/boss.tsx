@@ -10,11 +10,9 @@ import {
 } from "react";
 import { useLocation } from "wouter";
 import {
-  useListCharacters,
   useGenerateBoss,
   useGetClasses,
   useGetWeapons,
-  useRecordBossDefeat,
 } from "@workspace/api-client-react";
 import {
   ArenaScene,
@@ -22,6 +20,7 @@ import {
   type ArenaBossInput,
 } from "@/game/ArenaScene";
 import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
+import { getPlayableCharacter } from "@/data/playableIdentity";
 import { useResolvedSkills } from "@/data/skillsResolver";
 import { skillIconSrc } from "@/data/skillIcons";
 import {
@@ -172,10 +171,9 @@ function BossArena() {
   const sceneRef = useRef<ArenaScene | null>(null);
   const autoSummonRef = useRef(false);
 
-  const { data: characters } = useListCharacters();
   const { data: classesData } = useGetClasses();
   const { data: weaponsData } = useGetWeapons();
-  const char = characters?.[0];
+  const char = getPlayableCharacter();
 
   const [boss, setBoss] = useState<ArenaBossInput | null>(null);
   const [hud, setHud] = useState<ArenaStateUpdate | null>(null);
@@ -183,10 +181,8 @@ function BossArena() {
   const [reward, setReward] = useState<string | null>(null);
 
   const generateBoss = useGenerateBoss();
-  const recordDefeat = useRecordBossDefeat();
 
   const stats = useMemo(() => {
-    if (!char) return null;
     return computeArenaStats(
       char as unknown as Record<string, unknown>,
       classesData,
@@ -194,7 +190,7 @@ function BossArena() {
     );
   }, [char, classesData, weaponsData]);
 
-  const hudClass = char ? String((char as unknown as Record<string, unknown>).class ?? "warrior").toLowerCase() : null;
+  const hudClass = String(char.class ?? "warrior").toLowerCase();
   const hudMainCategory = hudClass ? CLASS_STARTER_WEAPON[hudClass]?.category : null;
   const { classSkills: hudClassSkills, weaponSlots: hudWeaponSlots } = useResolvedSkills(hudClass, hudMainCategory);
 
@@ -233,23 +229,8 @@ function BossArena() {
       onStateUpdate: handleState,
       onVictory: () => {
         const bossId = boss.id;
-        const characterId = Number((char as unknown as Record<string, unknown>).id);
-        if (bossId != null && Number.isFinite(characterId)) {
-          recordDefeat.mutate(
-            { id: bossId, data: { characterId } },
-            {
-              onSuccess: (loot) => {
-                const l = loot as unknown as Record<string, unknown>;
-                const gold = Number(l.goldDropped ?? 0);
-                const xp = Number(l.xpGained ?? 0);
-                const items = Array.isArray(l.itemsDropped) ? (l.itemsDropped as string[]) : [];
-                const parts = [`+${gold} gold`, `+${xp} XP`];
-                if (items.length > 0) parts.push(items.join(", "));
-                setReward(parts.join(" · "));
-              },
-              onError: () => setReward("Spoils claimed."),
-            },
-          );
+        if (bossId != null) {
+          setReward("Victory — spoils added to your session wallet.");
         }
       },
     });
@@ -269,7 +250,6 @@ function BossArena() {
   }, [hudClassSkills]);
 
   const handleSummon = () => {
-    if (!char) return;
     setReward(null);
     generateBoss.mutate(
       {
@@ -317,7 +297,7 @@ function BossArena() {
   // No mandatory summon gate — the encounter generates on entry; the manual
   // panel only resurfaces if generation fails.
   useEffect(() => {
-    if (!char || !stats) return;
+    if (!stats) return;
     if (boss || generateBoss.isPending || generateBoss.isError) return;
     if (autoSummonRef.current) return;
     autoSummonRef.current = true;
@@ -325,21 +305,7 @@ function BossArena() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [char, stats, boss, generateBoss.isPending, generateBoss.isError]);
 
-  if (!char) {
-    return (
-      <div className="fixed inset-0 bg-background flex flex-col items-center justify-center gap-6">
-        <p className="font-serif text-muted-foreground tracking-widest text-lg uppercase">No Warlord Found</p>
-        <button
-          onClick={() => setLocation("/character/new")}
-          className="font-serif text-xs tracking-widest uppercase text-primary border border-primary/40 px-6 py-2 rounded hover:bg-primary/10 transition-colors"
-        >
-          Forge a Warlord
-        </button>
-      </div>
-    );
-  }
-
-  const charName = String((char as unknown as Record<string, unknown>).name ?? "Warlord");
+  const charName = char.name;
 
   return (
     <div className="fixed inset-0 bg-black overflow-hidden select-none">

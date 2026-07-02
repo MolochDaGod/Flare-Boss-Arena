@@ -28,8 +28,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 <Flame className="w-5 h-5" />
               </div>
               <div>
-                <h1 className="text-lg font-serif font-bold text-primary uppercase tracking-widest leading-none">Grudge</h1>
-                <h2 className="text-xs font-sans text-muted-foreground uppercase tracking-[0.2em] leading-none mt-1">Warlords</h2>
+                <h1 className="text-lg font-serif font-bold text-primary uppercase tracking-widest leading-none">Flare Boss</h1>
+                <h2 className="text-xs font-sans text-muted-foreground uppercase tracking-[0.2em] leading-none mt-1">Grudge Studio</h2>
               </div>
             </div>
           </SidebarHeader>

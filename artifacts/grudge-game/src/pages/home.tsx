@@ -1,5 +1,6 @@
 import React from "react";
-import { useListCharacters, useGetCharacterSkills } from "@workspace/api-client-react";
+import { getPlayableCharacter } from "@/data/playableIdentity";
+import { useResolvedSkills } from "@/data/skillsResolver";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link, useLocation } from "wouter";
@@ -138,24 +139,16 @@ const WAR_ROOM: { href: string; label: string; sub: string; icon: React.ElementT
   { href: "/account", label: "Wallet", sub: "Currencies", icon: Wallet },
   { href: "/content", label: "Atlas", sub: "Modes & props", icon: Map },
   { href: "/enemies", label: "Bestiary", sub: "Enemy units", icon: Skull },
-  { href: "/character/new", label: "Soul Forge", sub: "Forge a warlord", icon: Hammer },
+  { href: "/character/new", label: "Account", sub: "Profile & wallet", icon: Hammer },
 ];
 
 export default function Home() {
   const [, setLocation] = useLocation();
-  // Single-warlord account model: the chosen fighter (getActiveFighter, below)
-  // is the playable combat identity, while the one warlord record owns the
-  // persistent equipment loadout + derived skills. The whole app keys off this
-  // first record, so the panels here track it too.
-  const { data: characters } = useListCharacters();
-  const warlord = characters?.[0];
-  const activeChar = warlord;
+  const activeChar = getPlayableCharacter();
+  const mainHandId = activeChar.equipment?.mainHand ?? undefined;
+  const { classSkills: classSkillSet } = useResolvedSkills(activeChar.class, mainHandId);
+  const classSkills = classSkillSet?.skills ?? [];
 
-  const { data: skills } = useGetCharacterSkills(activeChar?.id ?? 0, {
-    query: { enabled: !!activeChar?.id, queryKey: ["skills", activeChar?.id] },
-  });
-
-  // The fighter you actually play (chosen on /select, persisted to localStorage).
   const [fighter] = React.useState<FighterDef>(() => getActiveFighter());
 
   return (
@@ -235,28 +228,30 @@ export default function Home() {
             </Button>
           </div>
 
-          {skills && skills.activeSkills.length > 0 && (
+          {classSkills.length > 0 && (
             <Card className="border-border/50 bg-card/50">
               <CardHeader className="border-b border-border/50 pb-3">
                 <CardTitle className="font-serif text-sm uppercase tracking-widest text-muted-foreground">
-                  Derived Active Skills
+                  Class Skills
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-6">
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                  {skills.activeSkills.map((skill) => (
+                  {classSkills.slice(0, 8).map((skill) => (
                     <div
                       key={skill.id}
                       className="flex flex-col items-center gap-3 rounded-md border border-border/50 bg-background/50 p-4 text-center transition-colors hover:border-primary/50"
                     >
                       <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded border border-border/50 bg-muted/50">
-                        <SkillIcon icon={skill.icon} glyph="⚔️" size={32} radius={4} />
+                        <SkillIcon icon={skill.icon} glyph={skill.glyph} size={32} radius={4} />
                       </div>
                       <div>
                         <p className="font-serif text-sm tracking-wide">{skill.name}</p>
-                        <p className="mt-1 text-[10px] uppercase text-muted-foreground">
-                          CD: {skill.cooldown || "0"}s
-                        </p>
+                        {skill.cooldown ? (
+                          <p className="mt-1 text-[10px] uppercase text-muted-foreground">
+                            CD: {skill.cooldown}t
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   ))}
@@ -291,11 +286,9 @@ export default function Home() {
               </Button>
             </CardHeader>
             <CardContent className="space-y-3 pt-6">
-              {!activeChar && (
-                <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  Forge a warlord in the Soul Forge to track an equipment loadout.
-                </p>
-              )}
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                Loadout follows your active fighter from Choose Fighter — no separate character creation.
+              </p>
               {activeChar &&
                 EQUIP_SLOTS.map((slot) => {
                   const itemId = (activeChar.equipment as Record<string, string | undefined> | undefined)?.[slot];

@@ -1,5 +1,6 @@
 import React from "react";
-import { useListCharacters, useGetCharacterSkills } from "@workspace/api-client-react";
+import { useGetCharacterSkills } from "@workspace/api-client-react";
+import { getPlayableCharacter } from "@/data/playableIdentity";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -80,25 +81,20 @@ function WeaponSlotBlock({ slot }: { slot: WeaponSlot }) {
 }
 
 export default function Skills() {
-  const { data: characters } = useListCharacters();
-  const activeChar = characters?.[0];
+  const activeChar = getPlayableCharacter();
 
-  const { data: skills, isLoading: isLoadingSkills } = useGetCharacterSkills(activeChar?.id ?? 0, {
-    query: { enabled: !!activeChar?.id, queryKey: ["skills", activeChar?.id] }
+  const { data: skills, isLoading: isLoadingSkills } = useGetCharacterSkills(0, {
+    query: { enabled: false, queryKey: ["skills", activeChar.id] },
   });
 
-  const mainHandId = activeChar?.equipment?.mainHand ?? undefined;
+  const mainHandId = activeChar.equipment?.mainHand ?? undefined;
   const {
     classSkills,
     weaponType,
     weaponSlots,
     classWeaponTypes,
     isLoading: isLoadingTrees,
-  } = useResolvedSkills(activeChar?.class, mainHandId);
-
-  if (!activeChar) {
-    return <div className="p-8 text-center font-serif text-muted-foreground tracking-widest">No character selected.</div>;
-  }
+  } = useResolvedSkills(activeChar.class, mainHandId);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 h-full flex flex-col">

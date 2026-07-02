@@ -54,7 +54,7 @@ export default function Select() {
     setActiveFighterId(selected.id);
     toast({
       title: `${selected.name} chosen`,
-      description: `${selected.title} — ${selected.role}. They now fight as your warlord.`,
+      description: `${selected.title} — ${selected.role}. Ready to fight.`,
     });
     navigate("/");
   };

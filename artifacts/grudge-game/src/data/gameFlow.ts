@@ -76,7 +76,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Choose Fighter", href: "/select", icon: Users },
       { label: "Unit Roster", href: "/units", icon: PawPrint, description: "Playable champions compendium" },
-      { label: "New Character", href: "/character/new", icon: ScrollText },
+      { label: "Account", href: "/character/new", icon: ScrollText, description: "Profile & wallet" },
       { label: "Equipment", href: "/equipment", icon: Sword },
       { label: "Skills", href: "/skills", icon: Book },
       { label: "Perks", href: "/perks", icon: Sparkles, description: "KF2-style perk machines" },

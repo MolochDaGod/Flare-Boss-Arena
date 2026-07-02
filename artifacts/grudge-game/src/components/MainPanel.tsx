@@ -331,7 +331,7 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
             >
               <div className="flex items-center gap-3">
                 <h1 style={{ fontFamily: THEME.fontDisplay, fontSize: 15, color: THEME.gold, letterSpacing: 2, textTransform: "uppercase" }}>
-                  Grudge Warlords
+                  Flare Boss Arena
                 </h1>
               </div>
               <div className="flex items-center gap-3" style={{ fontSize: 12 }}>
