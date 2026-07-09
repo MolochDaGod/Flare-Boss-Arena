@@ -133,6 +133,8 @@ export interface HeroLike {
   update(delta: number): void;
   /** World-space horizontal displacement banked from root motion this frame. */
   consumeRootMotion(out: THREE.Vector3): boolean;
+  /** True while a one-shot (attack/skill/dodge) is playing and root motion is armed. */
+  isRootMotionActive(): boolean;
   addLibraryClips(clips: THREE.AnimationClip[]): void;
   dispose(): void;
 }
@@ -321,6 +323,10 @@ export class HeroAnimator implements HeroLike {
     return this.rm.consume(out);
   }
 
+  isRootMotionActive(): boolean {
+    return this.rm.isActive;
+  }
+
   dispose() {
     this.mixer.removeEventListener(
       "finished",
@@ -368,6 +374,10 @@ export class SkinHeroAdapter implements HeroLike {
 
   consumeRootMotion(out: THREE.Vector3): boolean {
     return this.inner.consumeRootMotion(out);
+  }
+
+  isRootMotionActive(): boolean {
+    return this.inner.isRootMotionActive();
   }
 
   // Skins are self-contained (labelled clips ship in the GLB) — no shared library.

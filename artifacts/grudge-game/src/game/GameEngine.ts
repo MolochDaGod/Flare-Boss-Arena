@@ -1122,6 +1122,15 @@ export class GameEngine {
     const isCast = arch.shape === "circle" || arch.shape === "nova" || arch.shape === "deployable";
     const played = this.playerAnimator?.triggerNamed(skillAnimCandidates(idx, isCast)) ?? false;
     if (!played) this.playerAnimator?.triggerAttack();
+    // If the model has no locomotion root bone, commit permanent forward travel
+    // so the fighter ends where the skill ends instead of sliding back.
+    if (!this.playerAnimator?.isRootMotionActive()) {
+      const dist = isCast ? 0.35 : 1.5;
+      const f = this.resolveAimDir();
+      this.playerPos.x += f.x * dist;
+      this.playerPos.z += f.z * dist;
+      this.clampToArena(this.playerPos);
+    }
     this.playerAttackCooldown = this.playerMaxAttackCooldown;
 
     const origin = this.playerPos.clone();
@@ -1385,11 +1394,18 @@ export class GameEngine {
       }
     }
 
-    // Root motion: lunging/dodge/jump clips translate the player so the mesh
-    // moves WITH the character; collision + floor are resolved next.
-    if (this.playerAnimator && this.playerAnimator.consumeRootMotion(this._rmTmp)) {
-      this.playerPos.x += this._rmTmp.x;
-      this.playerPos.z += this._rmTmp.z;
+    // Drive mixer first so root-motion sample sees this frame's pose, then
+    // fold travel into world position. Ending a skill must leave the body at
+    // the clip terminus (no snap back to the cast origin).
+    if (this.playerAnimator) {
+      this.playerAnimator.setMoving(playerMoving);
+      this.playerAnimator.update(delta);
+      if (this.playerAnimator.consumeRootMotion(this._rmTmp)) {
+        this.playerPos.x += this._rmTmp.x;
+        this.playerPos.z += this._rmTmp.z;
+      }
+    } else if (this.playerMixer) {
+      this.playerMixer.update(delta);
     }
 
     // Resolve the freshly-moved player against the real dungeon geometry.
@@ -1397,20 +1413,13 @@ export class GameEngine {
 
     if (this.playerGroup) {
       const targetPos = new THREE.Vector3(this.playerPos.x, this.playerPos.y, this.playerPos.z);
-      this.playerGroup.position.lerp(targetPos, 0.35);
+      const blend = this.playerAnimator?.isRootMotionActive() ? 0.9 : 0.4;
+      this.playerGroup.position.lerp(targetPos, blend);
       // Shortest-arc turn toward facing — avoids the long way around at ±π.
       let dy = this.playerFacing - this.playerGroup.rotation.y;
       while (dy > Math.PI) dy -= Math.PI * 2;
       while (dy < -Math.PI) dy += Math.PI * 2;
       this.playerGroup.rotation.y += dy * 0.25;
-    }
-
-    // Drive locomotion + attack animation from movement state.
-    if (this.playerAnimator) {
-      this.playerAnimator.setMoving(playerMoving);
-      this.playerAnimator.update(delta);
-    } else if (this.playerMixer) {
-      this.playerMixer.update(delta);
     }
 
     this.skillVfx.update(delta);

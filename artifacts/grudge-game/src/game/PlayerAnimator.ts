@@ -182,6 +182,11 @@ export class PlayerAnimator {
     return this.rm.consume(out);
   }
 
+  /** True while a one-shot attack/skill/dodge is extracting root travel. */
+  isRootMotionActive(): boolean {
+    return this.rm.isActive;
+  }
+
   dispose() {
     this.mixer.stopAllAction();
     this.mixer.uncacheRoot(this.mixer.getRoot() as THREE.Object3D);

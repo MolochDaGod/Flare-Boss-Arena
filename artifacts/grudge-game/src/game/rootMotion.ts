@@ -17,12 +17,31 @@ import * as THREE from "three";
  * bone's horizontal offset so the mesh stays centred on its wrapper. The scene
  * then `consume()`s the accumulated world displacement and folds it into the
  * player position before its own clamp / collision pass.
+ *
+ * Bone preference matters: One Piece bounty-rush skins put locomotion on
+ * `world_joint_*` / `Body_Pelvis_*`, NOT on the container `_rootJoint`. Sampling
+ * the wrong bone is what made skills "zoom forward then snap back".
  */
 
 const _pos = new THREE.Vector3();
 const _quat = new THREE.Quaternion();
 const _scl = new THREE.Vector3();
 const _d = new THREE.Vector3();
+
+/** Name patterns for bones that typically carry authored travel, most-specific first. */
+const PREFERRED_ROOT_NAMES: RegExp[] = [
+  /^world_joint/i,
+  /^hips$/i,
+  /^hip$/i,
+  /^body_pelvis/i,
+  /^pelvis$/i,
+  /^bip001[_\s-]?pelvis/i,
+  /^mixamorig:?hips$/i,
+  /^root$/i, // KayKit `root` (not `_rootJoint`)
+];
+
+/** Container-only joints that almost never hold travel tracks. */
+const SKIP_ROOT_NAMES = /^(_root|rootjoint|armature|scene|master)$/i;
 
 export class RootMotion {
   private bone: THREE.Object3D | null;
@@ -41,12 +60,20 @@ export class RootMotion {
     }
   }
 
+  /** True when a locomotion root bone was resolved. */
+  get hasBone(): boolean {
+    return !!this.bone;
+  }
+
   /** Arm extraction for a freshly-started one-shot clip. */
   begin() {
     if (!this.bone) return;
     this.active = true;
     this.pendingEnd = false;
     this.prev = null; // first sample establishes the baseline (no delta)
+    // Keep constructor bind pose — do NOT re-sample from a mid-clip offset.
+    this.bone.position.x = this.bindX;
+    this.bone.position.z = this.bindZ;
   }
 
   /**
@@ -57,6 +84,11 @@ export class RootMotion {
    */
   end() {
     this.pendingEnd = true;
+  }
+
+  /** Whether extraction is currently armed (one-shot in flight). */
+  get isActive(): boolean {
+    return this.active;
   }
 
   /**
@@ -75,7 +107,8 @@ export class RootMotion {
       const dz = cur.z - this.prev.z;
       // Guard against clip-start / cross-fade discontinuities producing a jump.
       // Scale the per-frame limit by how long this frame was vs a 60 FPS step.
-      const lim = 0.75 * Math.max(1, delta * 60);
+      // Skill lunges can move ~1–2 m over a second; allow a generous per-frame cap.
+      const lim = 1.4 * Math.max(1, delta * 60);
       if (Math.abs(dx) < lim && Math.abs(dz) < lim) {
         const parent = b.parent;
         if (parent) {
@@ -119,13 +152,26 @@ export class RootMotion {
 }
 
 /**
- * Resolve the bone that carries root motion: the top-most bone of the first
- * skinned mesh's skeleton (the one whose parent is outside the skeleton), with
- * a fallback to the first bone found in the hierarchy. Uses `.isSkinnedMesh` /
- * `.isBone` flag checks (NOT `instanceof`) because the app can load multiple
- * Three.js instances, which breaks `instanceof`.
+ * Resolve the bone that carries root motion.
+ *
+ * Prefer named locomotion roots (world_joint / hips / pelvis) over the skeleton
+ * container (`_rootJoint`), which rarely has travel tracks on bounty-rush skins.
+ * Falls back to the top-most non-container bone of the first skinned mesh.
+ * Uses `.isSkinnedMesh` / `.isBone` flags (NOT `instanceof`) for multi-Three safety.
  */
 function findRootMotionBone(root: THREE.Object3D): THREE.Object3D | null {
+  const bones: THREE.Object3D[] = [];
+  root.traverse((o) => {
+    if ((o as unknown as { isBone?: boolean }).isBone) bones.push(o);
+  });
+  if (bones.length === 0) return null;
+
+  for (const re of PREFERRED_ROOT_NAMES) {
+    const hit = bones.find((b) => re.test(b.name));
+    if (hit) return hit;
+  }
+
+  // Top-most bone of the first skinned skeleton, skipping pure containers.
   let skinned: THREE.SkinnedMesh | null = null;
   root.traverse((o) => {
     if (!skinned && (o as unknown as { isSkinnedMesh?: boolean }).isSkinnedMesh) {
@@ -134,16 +180,16 @@ function findRootMotionBone(root: THREE.Object3D): THREE.Object3D | null {
   });
   const sk = skinned as THREE.SkinnedMesh | null;
   if (sk && sk.skeleton?.bones?.length) {
-    const bones = sk.skeleton.bones;
-    const set = new Set<THREE.Object3D>(bones);
-    for (const b of bones) {
-      if (!b.parent || !set.has(b.parent)) return b;
+    const skBones = sk.skeleton.bones;
+    const set = new Set<THREE.Object3D>(skBones);
+    for (const b of skBones) {
+      if ((!b.parent || !set.has(b.parent)) && !SKIP_ROOT_NAMES.test(b.name)) return b;
     }
-    return bones[0];
+    for (const b of skBones) {
+      if (!SKIP_ROOT_NAMES.test(b.name)) return b;
+    }
+    return skBones[0];
   }
-  let bone: THREE.Object3D | null = null;
-  root.traverse((o) => {
-    if (!bone && (o as unknown as { isBone?: boolean }).isBone) bone = o;
-  });
-  return bone;
+
+  return bones.find((b) => !SKIP_ROOT_NAMES.test(b.name)) ?? bones[0];
 }

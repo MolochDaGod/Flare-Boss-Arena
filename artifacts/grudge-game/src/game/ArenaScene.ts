@@ -701,17 +701,21 @@ export class ArenaScene {
     // Resolve the skill's archetype shape (idx fallback gives a broad mix).
     const arch = archetypeForSkill(this.hudSkills[idx], idx);
     const isCast = arch.shape === "circle" || arch.shape === "nova" || arch.shape === "deployable";
-    if (this.heroAnim) {
-      const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
-      if (!played) this.proceduralLunge();
-    } else {
-      this.proceduralLunge();
-    }
-
-    // Auto-aim the boss so shaped skills read as aimed.
+    // Auto-aim the boss so shaped skills read as aimed (before travel).
     if (this.bossAlive) {
       this.playerFacing = Math.atan2(this.bossPos.x - this.playerPos.x, this.bossPos.z - this.playerPos.z);
     }
+
+    // Play skill clip; root motion (or committed lunge) carries the body to the
+    // skill's end pose — never snap back to the pre-cast station.
+    if (this.heroAnim) {
+      const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
+      if (!played) this.commitSkillTravel(isCast ? 0.4 : 1.6);
+      else if (!this.heroAnim.isRootMotionActive()) this.commitSkillTravel(isCast ? 0.35 : 1.4);
+    } else {
+      this.commitSkillTravel(isCast ? 0.4 : 1.6);
+    }
+
     const dir = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
     const origin = this.playerPos.clone();
 
@@ -762,23 +766,39 @@ export class ArenaScene {
     this.hudSkills = skills;
   }
 
-  private proceduralLunge() {
+  /**
+   * Commit a permanent forward displacement for skill/attack travel when the
+   * active model has no root-motion bone (or no clip). The character ends at
+   * the skill terminus — it does NOT ease back to the cast origin.
+   */
+  private commitSkillTravel(distance: number) {
+    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    const start = this.playerPos.clone();
+    const end = start.clone().add(forward.multiplyScalar(Math.max(0.15, distance)));
+    this.clampToArena(end);
+    // Logical position lands at the skill end immediately so combat ranges match.
+    this.playerPos.copy(end);
+    // Smooth the mesh from the cast origin to the committed end (no return trip).
     if (!this.playerGroup) return;
     const g = this.playerGroup;
-    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    const start = g.position.clone();
-    const peak = start.clone().add(forward.multiplyScalar(0.5));
+    g.position.copy(start);
     let t = 0;
-    const dur = 0.22;
+    const dur = 0.28;
     const step = () => {
-      if (this.disposed) return;
+      if (this.disposed || !this.playerGroup) return;
       t += 0.016;
       const p = Math.min(1, t / dur);
-      const e = p < 0.5 ? p * 2 : (1 - p) * 2;
-      g.position.lerpVectors(start, peak, e);
+      // Ease-out so the last frames settle on the end pose.
+      const e = 1 - (1 - p) * (1 - p);
+      g.position.lerpVectors(start, this.playerPos, e);
       if (p < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
+  }
+
+  /** @deprecated Use commitSkillTravel — kept name alias for attack fallback. */
+  private proceduralLunge() {
+    this.commitSkillTravel(1.1);
   }
 
   // ── Boss combat ─────────────────────────────────────────────────────────────
@@ -1195,19 +1215,6 @@ export class ArenaScene {
       }
     }
 
-    // Root motion: let lunging/dodge/jump clips carry the logical position so
-    // the mesh moves WITH the character instead of sliding and snapping back.
-    if (this.heroAnim && this.heroAnim.consumeRootMotion(this._rmTmp)) {
-      this.playerPos.x += this._rmTmp.x;
-      this.playerPos.z += this._rmTmp.z;
-      this.clampToArena(this.playerPos);
-    }
-
-    if (this.playerGroup) {
-      this.playerGroup.position.lerp(new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z), 0.3);
-      this.playerGroup.rotation.y += (this.playerFacing - this.playerGroup.rotation.y) * 0.2;
-    }
-
     // ── Player basic attack ──
     this.attackCdT = Math.max(0, this.attackCdT - delta);
     if (!moving && this.attackBoss && this.bossAlive) {
@@ -1216,7 +1223,7 @@ export class ArenaScene {
         this.attackCdT = this.attackInterval;
         if (this.heroAnim) {
           const played = this.heroAnim.trigger("attack");
-          if (!played) this.proceduralLunge();
+          if (!played || !this.heroAnim.isRootMotionActive()) this.proceduralLunge();
         } else { this.proceduralLunge(); }
         const isCrit = Math.random() < this.critChance;
         const dmg = Math.round(this.baseDamage * (isCrit ? 2 : 1) * (0.85 + Math.random() * 0.3));
@@ -1230,9 +1237,25 @@ export class ArenaScene {
       this.playerHp = Math.min(this.playerMaxHp, this.playerHp + 3 * delta);
     }
 
+    // Mixer first, then root-motion sample, then fold travel into world position.
+    // (Consume-before-update dropped the final frame and caused snap-back.)
     if (this.heroAnim) {
       this.heroAnim.setMoving(moving);
       this.heroAnim.update(delta);
+      if (this.heroAnim.consumeRootMotion(this._rmTmp)) {
+        this.playerPos.x += this._rmTmp.x;
+        this.playerPos.z += this._rmTmp.z;
+        this.clampToArena(this.playerPos);
+      }
+    }
+
+    if (this.playerGroup) {
+      const targetPos = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z);
+      // During root-motion skills, stick tightly so the body never rubber-bands
+      // back to a lagging wrapper position when the clip finishes.
+      const blend = this.heroAnim?.isRootMotionActive() ? 0.9 : 0.4;
+      this.playerGroup.position.lerp(targetPos, blend);
+      this.playerGroup.rotation.y += (this.playerFacing - this.playerGroup.rotation.y) * 0.2;
     }
 
     this.skillVfx.update(delta);

@@ -917,14 +917,8 @@ export class CampScene {
     // Resolve the skill's archetype shape (idx fallback gives a broad mix).
     const arch = archetypeForSkill(this.hudSkills[idx], idx);
     const isCast = arch.shape === "circle" || arch.shape === "nova" || arch.shape === "deployable";
-    if (this.heroAnim) {
-      const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
-      if (!played) this.proceduralLunge();
-    } else {
-      this.proceduralLunge();
-    }
 
-    // Auto-aim the nearest living dummy so shaped skills read as aimed.
+    // Auto-aim first so committed travel faces the target.
     let nearest: CampDummy | null = null;
     let nearestDist = Infinity;
     for (const d of this.dummies) {
@@ -933,6 +927,15 @@ export class CampScene {
       if (dist < nearestDist) { nearestDist = dist; nearest = d; }
     }
     if (nearest) this.playerFacing = Math.atan2(nearest.pos.x - this.playerPos.x, nearest.pos.z - this.playerPos.z);
+
+    if (this.heroAnim) {
+      const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
+      if (!played) this.commitSkillTravel(isCast ? 0.4 : 1.6);
+      else if (!this.heroAnim.isRootMotionActive()) this.commitSkillTravel(isCast ? 0.35 : 1.4);
+    } else {
+      this.commitSkillTravel(isCast ? 0.4 : 1.6);
+    }
+
     const dir = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
     const origin = this.playerPos.clone();
 
@@ -979,23 +982,33 @@ export class CampScene {
     this.emitState();
   }
 
-  private proceduralLunge() {
+  /** Permanent skill travel — end where the skill ends, never ease back. */
+  private commitSkillTravel(distance: number) {
+    const B = this.BOUNDS - 1;
+    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    const start = this.playerPos.clone();
+    const end = start.clone().add(forward.multiplyScalar(Math.max(0.15, distance)));
+    end.x = Math.max(-B, Math.min(B, end.x));
+    end.z = Math.max(-B, Math.min(B, end.z));
+    this.playerPos.copy(end);
     if (!this.playerGroup) return;
     const g = this.playerGroup;
-    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    const start = g.position.clone();
-    const peak = start.clone().add(forward.multiplyScalar(0.5));
+    g.position.copy(start);
     let t = 0;
-    const dur = 0.22;
+    const dur = 0.28;
     const step = () => {
-      if (this.disposed) return;
+      if (this.disposed || !this.playerGroup) return;
       t += 0.016;
       const p = Math.min(1, t / dur);
-      const e = p < 0.5 ? p * 2 : (1 - p) * 2;
-      g.position.lerpVectors(start, peak, e);
+      const e = 1 - (1 - p) * (1 - p);
+      g.position.lerpVectors(start, this.playerPos, e);
       if (p < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
+  }
+
+  private proceduralLunge() {
+    this.commitSkillTravel(1.1);
   }
 
   private damageDummy(d: CampDummy, dmg: number, isCrit: boolean, isPlayer: boolean) {
@@ -1122,20 +1135,6 @@ export class CampScene {
       }
     }
 
-    // Root motion: let lunging/dodge/jump clips carry the logical position so
-    // the mesh moves WITH the character instead of sliding and snapping back.
-    if (this.heroAnim && this.heroAnim.consumeRootMotion(this._rmTmp)) {
-      const B = this.BOUNDS - 1;
-      this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + this._rmTmp.x));
-      this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + this._rmTmp.z));
-    }
-
-    if (this.playerGroup) {
-      const targetPos = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z);
-      this.playerGroup.position.lerp(targetPos, 0.3);
-      this.playerGroup.rotation.y += (this.playerFacing - this.playerGroup.rotation.y) * 0.2;
-    }
-
     // Basic-attack loop against the current target when in range.
     this.attackCdT = Math.max(0, this.attackCdT - delta);
     if (!moving && this.attackTarget && this.attackTarget.alive) {
@@ -1144,7 +1143,7 @@ export class CampScene {
         this.attackCdT = this.attackInterval;
         if (this.heroAnim) {
           const played = this.heroAnim.trigger("attack");
-          if (!played) this.proceduralLunge();
+          if (!played || !this.heroAnim.isRootMotionActive()) this.proceduralLunge();
         } else {
           this.proceduralLunge();
         }
@@ -1158,10 +1157,22 @@ export class CampScene {
     this.playerMana = Math.min(this.playerMaxMana, this.playerMana + 14 * delta);
     this.playerHp = Math.min(this.playerMaxHp, this.playerHp + 6 * delta);
 
-    // Animator state.
+    // Mixer → sample root travel → apply world position (no snap-back).
     if (this.heroAnim) {
       this.heroAnim.setMoving(moving);
       this.heroAnim.update(delta);
+      if (this.heroAnim.consumeRootMotion(this._rmTmp)) {
+        const B = this.BOUNDS - 1;
+        this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + this._rmTmp.x));
+        this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + this._rmTmp.z));
+      }
+    }
+
+    if (this.playerGroup) {
+      const targetPos = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z);
+      const blend = this.heroAnim?.isRootMotionActive() ? 0.9 : 0.4;
+      this.playerGroup.position.lerp(targetPos, blend);
+      this.playerGroup.rotation.y += (this.playerFacing - this.playerGroup.rotation.y) * 0.2;
     }
 
     this.skillVfx.update(delta);
