@@ -4,6 +4,7 @@
  *
  * Files live under `public/models/{perks,props,ui}/`.
  */
+import { CAMP_PROP_LAYOUTS } from "./campTown";
 
 export type WorldPropKind =
   | "machine"
@@ -147,87 +148,8 @@ export interface CampPropPlacement {
   color?: number;
 }
 
-export const CAMP_PROP_PLACEMENTS: CampPropPlacement[] = [
-  {
-    propId: "prop_perk_machines",
-    x: -10.5,
-    z: 4,
-    rotY: Math.PI * 0.55,
-    stationId: "perk_machines",
-    label: "Perk Row",
-    hint: "Browse and purchase combat perks.",
-    color: 0xff6622,
-  },
-  {
-    propId: "prop_gumball",
-    x: -9,
-    z: 8.5,
-    rotY: Math.PI * 0.7,
-    stationId: "gumball",
-    label: "Gumball",
-    hint: "Spin for a random perk or loot roll.",
-    color: 0xff88cc,
-  },
-  {
-    propId: "prop_perk_firebug",
-    x: -12,
-    z: 0,
-    rotY: 0,
-    stationId: "perk_firebug",
-    label: "Firebug",
-    hint: "Incendiary perks — burn damage and splash.",
-    color: PERK_COLORS.firebug,
-  },
-  {
-    propId: "prop_perk_medic",
-    x: -11,
-    z: -4,
-    rotY: 0.2,
-    stationId: "perk_medic",
-    label: "Medic",
-    hint: "Healing and sustain perks.",
-    color: PERK_COLORS.medic,
-  },
-  {
-    propId: "prop_perk_support",
-    x: -8,
-    z: -7.5,
-    rotY: 0.5,
-    stationId: "perk_support",
-    label: "Support",
-    hint: "Team buffs and utility perks.",
-    color: PERK_COLORS.support,
-  },
-  {
-    propId: "prop_perk_gunslinger",
-    x: -4.5,
-    z: -10,
-    rotY: 0.9,
-    stationId: "perk_gunslinger",
-    label: "Gunslinger",
-    hint: "Ranged and crit-focused perks.",
-    color: PERK_COLORS.gunslinger,
-  },
-  {
-    propId: "prop_gunslinger_hero",
-    x: -3,
-    z: -11.5,
-    rotY: 1.1,
-  },
-  {
-    propId: "prop_weapon_panel",
-    x: 8,
-    z: -9,
-    rotY: -0.6,
-    stationId: "weapon_panel",
-    label: "Armory",
-    hint: "Open the weapon loadout panel.",
-    color: 0xc5a059,
-  },
-  { propId: "prop_grass_trenches", x: 14, z: 6, rotY: -0.4 },
-  { propId: "prop_grass_trenches", x: -14, z: -6, rotY: 2.1 },
-  { propId: "prop_grass_trenches", x: 6, z: 14, rotY: 1.4 },
-];
+/** Camp hub placements — synced with the 5× harbor layout in campTown.ts */
+export const CAMP_PROP_PLACEMENTS: CampPropPlacement[] = CAMP_PROP_LAYOUTS;
 
 /** Dungeon scatter — floating perk symbols the player can pick up. */
 export interface CollectablePlacement {

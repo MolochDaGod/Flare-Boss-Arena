@@ -3,8 +3,21 @@ import { useLocation } from "wouter";
 import { getPlayableCharacter } from "@/data/playableIdentity";
 import { getActiveFighterId, DEFAULT_FIGHTER_ID } from "@/data/fighters";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Flame, LayoutGrid, Loader2, Skull, Swords } from "lucide-react";
+import {
+  ArrowLeft,
+  Flame,
+  LayoutGrid,
+  Loader2,
+  MapPin,
+  Skull,
+  Sparkles,
+  Swords,
+  DoorOpen,
+  Wrench,
+  Target,
+} from "lucide-react";
 import { CampScene, type CampStateUpdate, type CampStationId } from "@/game/CampScene";
+import type { CampStationCategory } from "@/data/campTown";
 import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type PanelKey } from "@/components/MainPanel";
 import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { useResolvedSkills } from "@/data/skillsResolver";
@@ -68,6 +81,71 @@ const stonePanel: React.CSSProperties = {
   boxShadow: "inset 0 0 10px #000, 0 0 12px rgba(0,0,0,0.8), inset 1px 1px 0 rgba(255,255,255,0.18)",
   borderRadius: 8,
 };
+const CATEGORY_STYLE: Record<
+  CampStationCategory,
+  { accent: string; bg: string; Icon: typeof Sparkles; label: string }
+> = {
+  service: { accent: "#66ddaa", bg: "rgba(102,221,170,0.12)", Icon: Wrench, label: "Service" },
+  portal: { accent: "#ff6644", bg: "rgba(255,102,68,0.12)", Icon: DoorOpen, label: "Portal" },
+  perk: { accent: "#ff88cc", bg: "rgba(255,136,204,0.12)", Icon: Sparkles, label: "Perk" },
+  training: { accent: "#f59e0b", bg: "rgba(245,158,11,0.12)", Icon: Target, label: "Training" },
+  boss: { accent: "#ff22aa", bg: "rgba(255,34,170,0.18)", Icon: Skull, label: "Boss Sigil" },
+};
+
+function hexColor(n: number) {
+  return `#${n.toString(16).padStart(6, "0")}`;
+}
+
+function CampMinimap({ state }: { state: CampStateUpdate }) {
+  const size = 128;
+  const pad = 10;
+  const inner = size - pad * 2;
+  const toPx = (nx: number, nz: number) => ({
+    left: pad + ((nx + 1) / 2) * inner,
+    top: pad + ((nz + 1) / 2) * inner,
+  });
+  const player = toPx(state.playerMapX, state.playerMapZ);
+  return (
+    <div
+      className="pointer-events-none absolute top-16 right-4 z-10 rounded-lg border border-white/15 bg-black/70 backdrop-blur-sm p-2"
+      style={{ width: size + 8 }}
+    >
+      <p className="text-[8px] font-serif uppercase tracking-[0.2em] text-[#c5a059] mb-1.5 text-center">
+        Harbor Map
+      </p>
+      <div
+        className="relative mx-auto rounded-full border border-white/10 bg-[#0a0a12]"
+        style={{ width: size, height: size }}
+      >
+        <div className="absolute inset-[18%] rounded-full border border-dashed border-white/10" />
+        {state.mapMarkers.map((m) => {
+          const p = toPx(m.nx, m.nz);
+          const col = hexColor(m.color);
+          return (
+            <span
+              key={`${m.id}-${m.nx}`}
+              className="absolute rounded-full -translate-x-1/2 -translate-y-1/2"
+              style={{
+                left: p.left,
+                top: p.top,
+                width: m.category === "boss" ? 7 : 5,
+                height: m.category === "boss" ? 7 : 5,
+                background: col,
+                boxShadow: `0 0 6px ${col}`,
+              }}
+              title={m.id}
+            />
+          );
+        })}
+        <span
+          className="absolute rounded-full -translate-x-1/2 -translate-y-1/2 border-2 border-white bg-[#c5a059]"
+          style={{ left: player.left, top: player.top, width: 8, height: 8 }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function Rivets() {
   const dot: React.CSSProperties = {
     position: "absolute",
@@ -197,6 +275,9 @@ function Camp() {
 
   const loaded = state?.loaded ?? false;
   const nearby = state?.nearbyStationLabel ?? null;
+  const nearbyCat = state?.nearbyStationCategory ?? null;
+  const catStyle = nearbyCat ? CATEGORY_STYLE[nearbyCat] : null;
+  const isBossSigil = state?.nearbyStationId === "portal_boss";
 
   const hpPct = state ? (state.playerHp / state.playerMaxHp) * 100 : 100;
   const manaPct = state ? (state.playerMana / state.playerMaxMana) * 100 : 100;
@@ -227,7 +308,7 @@ function Camp() {
 
         <div className="flex items-center gap-2 px-3 py-1.5 bg-black/55 border border-primary/30 rounded backdrop-blur-sm">
           <Flame className="w-3.5 h-3.5 text-primary" />
-          <p className="text-[10px] font-serif uppercase tracking-[0.25em] text-primary">Training Camp</p>
+          <p className="text-[10px] font-serif uppercase tracking-[0.25em] text-primary">Grudge Harbor</p>
         </div>
 
         <div className="pointer-events-auto bg-black/60 border border-white/10 backdrop-blur-sm rounded px-3 py-1.5 text-right">
@@ -238,28 +319,69 @@ function Camp() {
         </div>
       </div>
 
-      {/* Engage prompt — appears when near a station */}
+      {state && loaded && <CampMinimap state={state} />}
+
+      {/* Engage prompt — district-aware station cards */}
       <AnimatePresence>
-        {loaded && nearby && (
+        {loaded && nearby && catStyle && (
           <motion.div
             key={state?.nearbyStationId}
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            className="absolute left-1/2 -translate-x-1/2 z-10 pointer-events-none"
-            style={{ bottom: "30%" }}
+            exit={{ opacity: 0, y: 12 }}
+            className="absolute left-1/2 -translate-x-1/2 z-10 pointer-events-none w-[min(92vw,26rem)]"
+            style={{ bottom: isBossSigil ? "34%" : "28%" }}
           >
-            <div className="bg-black/80 border border-primary/50 rounded px-5 py-3 text-center backdrop-blur-sm shadow-[0_0_24px_-8px_rgba(255,170,0,0.6)]">
-              <p className="text-[10px] font-serif uppercase tracking-[0.25em] text-muted-foreground">Approach</p>
-              <p className="font-serif text-primary uppercase tracking-widest text-base mt-0.5">{nearby}</p>
+            <div
+              className="rounded-lg px-5 py-4 text-center backdrop-blur-md shadow-lg"
+              style={{
+                background: isBossSigil
+                  ? "linear-gradient(180deg, rgba(40,8,32,0.92), rgba(10,5,12,0.95))"
+                  : "rgba(0,0,0,0.82)",
+                border: `2px solid ${catStyle.accent}`,
+                boxShadow: `0 0 32px -6px ${catStyle.accent}88`,
+              }}
+            >
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <span
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-serif uppercase tracking-widest"
+                  style={{ background: catStyle.bg, color: catStyle.accent }}
+                >
+                  <catStyle.Icon className="w-3 h-3" />
+                  {catStyle.label}
+                </span>
+                {state?.nearbyStationDistrict && (
+                  <span className="inline-flex items-center gap-1 text-[9px] font-mono text-muted-foreground/90">
+                    <MapPin className="w-3 h-3" />
+                    {state.nearbyStationDistrict}
+                  </span>
+                )}
+              </div>
+              <p className="font-serif uppercase tracking-widest text-lg" style={{ color: catStyle.accent }}>
+                {nearby}
+              </p>
               {state?.nearbyStationHint && (
-                <p className="text-[10px] font-mono text-muted-foreground/80 mt-1.5">{state.nearbyStationHint}</p>
+                <p className="text-[11px] font-mono text-muted-foreground/90 mt-2 leading-relaxed">
+                  {state.nearbyStationHint}
+                </p>
               )}
-              <div className="mt-2 inline-flex items-center gap-2">
-                <kbd className="font-mono text-[10px] tracking-widest px-2 py-0.5 rounded border border-primary/60 bg-primary/10 text-primary">
+              {isBossSigil && (
+                <ul className="mt-3 text-left text-[10px] font-mono text-fuchsia-200/80 space-y-1 max-w-xs mx-auto">
+                  <li>· Procedural elemental boss each run</li>
+                  <li>· Telegraph dodge windows + phase bursts</li>
+                  <li>· Spoils feed your session wallet</li>
+                </ul>
+              )}
+              <div className="mt-3 inline-flex items-center gap-2">
+                <kbd
+                  className="font-mono text-[10px] tracking-widest px-2.5 py-1 rounded border"
+                  style={{ borderColor: `${catStyle.accent}99`, color: catStyle.accent, background: catStyle.bg }}
+                >
                   {state?.promptKey ?? "E"}
                 </kbd>
-                <span className="text-[10px] font-serif tracking-widest uppercase text-muted-foreground">Engage</span>
+                <span className="text-[11px] font-serif tracking-widest uppercase text-white/90">
+                  {state?.nearbyStationAction ?? "Engage"}
+                </span>
               </div>
             </div>
           </motion.div>
@@ -482,12 +604,11 @@ function Camp() {
             className="absolute top-14 left-1/2 -translate-x-1/2 z-10 pointer-events-none"
           >
             <div className="bg-black/75 border border-white/10 rounded px-5 py-3 text-center backdrop-blur-sm space-y-1">
-              <p className="text-[10px] font-serif text-primary uppercase tracking-widest mb-1">Training Ground</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">WASD / Arrows — Move</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Click Dummy — Target &amp; Attack</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F — Attack Nearest · 1–5 — Skills</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Space — Jump · Q / Shift — Dodge</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">E — Engage Station · C — Panel</p>
+              <p className="text-[10px] font-serif text-primary uppercase tracking-widest mb-1">Grudge Harbor</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Explore the town — WASD / Arrows</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">SE Yard — spar dummies · F to attack</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">West Sigil — Boss Arena · South — Dungeon</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">E — Engage stations · C — War Panel</p>
             </div>
           </motion.div>
         )}
