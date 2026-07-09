@@ -14,10 +14,15 @@ import {
 } from "@/game/racalvinHero";
 import { getFighterAssetTuning, type FighterAssetTuning } from "@/data/fighterAssetTuning";
 import { collectMeshNames, setupFighterMeshVisibility, syncHiddenMeshesForClip } from "@/game/assetVisibility";
+import { resetSkinnedToBindPose } from "@/game/assets";
 
 export interface FighterPreviewHandle {
   previewClip: (name: string) => void;
   setWeaponPreview: (mode: "sword" | "pistol") => void;
+  /** Stop clips and snap skeleton to bind pose for weapon placement. */
+  freezeToBindPose: () => void;
+  /** Resume idle loop after placement. */
+  resumeAnimation: () => void;
 }
 
 export interface FighterPreviewProps {
@@ -27,8 +32,11 @@ export interface FighterPreviewProps {
   /** Defaults to persisted tuning for `fighterId` when omitted. */
   tuning?: FighterAssetTuning;
   pauseRotation?: boolean;
+  /** When true, animations stop and the rig holds bind pose (T-pose). */
+  freezePose?: boolean;
   onMeshesReady?: (names: string[]) => void;
   onClipsReady?: (names: string[]) => void;
+  onHandBoneReady?: (boneName: string | null) => void;
 }
 
 /**
@@ -36,13 +44,23 @@ export interface FighterPreviewProps {
  * mesh visibility rules from the cog Asset Tuner panel.
  */
 export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewProps>(function FighterPreview(
-  { skinId, fighterId: fighterIdProp, tuning: tuningProp, pauseRotation = false, onMeshesReady, onClipsReady },
+  {
+    skinId,
+    fighterId: fighterIdProp,
+    tuning: tuningProp,
+    pauseRotation = false,
+    freezePose = false,
+    onMeshesReady,
+    onClipsReady,
+    onHandBoneReady,
+  },
   ref,
 ) {
   const fighterId = fighterIdProp ?? skinId;
   const tuning = tuningProp ?? getFighterAssetTuning(fighterId);
   const mountRef = useRef<HTMLDivElement>(null);
   const pauseRotationRef = useRef(pauseRotation);
+  const freezePoseRef = useRef(freezePose);
   const sceneRef = useRef<{
     model: THREE.Object3D | null;
     mixer: THREE.AnimationMixer | null;
@@ -55,10 +73,38 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     pauseRotationRef.current = pauseRotation;
   }, [pauseRotation]);
 
+  useEffect(() => {
+    freezePoseRef.current = freezePose;
+  }, [freezePose]);
+
+  const snapBindPose = () => {
+    const s = sceneRef.current;
+    if (!s.model) return;
+    s.mixer?.stopAllAction();
+    s.activeAction = null;
+    resetSkinnedToBindPose(s.model);
+  };
+
+  const playIdle = () => {
+    const s = sceneRef.current;
+    if (!s.mixer || !s.model || !s.clips.length) return;
+    const idle = s.clips.find((c) => c.name === "idle") ?? s.clips[0];
+    if (!idle) return;
+    s.activeAction?.fadeOut(0.15);
+    const action = s.mixer.clipAction(idle).reset().setLoop(THREE.LoopRepeat, Infinity).fadeIn(0.15).play();
+    s.activeAction = action;
+    syncHiddenMeshesForClip(s.model, idle.name);
+  };
+
+  useEffect(() => {
+    if (freezePose) snapBindPose();
+    else playIdle();
+  }, [freezePose]);
+
   useImperativeHandle(ref, () => ({
     previewClip(name: string) {
       const s = sceneRef.current;
-      if (!s.mixer || !s.model) return;
+      if (!s.mixer || !s.model || freezePoseRef.current) return;
       const clip = s.clips.find((c) => c.name === name) ?? s.clips[0];
       if (!clip) return;
       s.activeAction?.fadeOut(0.15);
@@ -71,6 +117,8 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
       const rig = sceneRef.current.model ? getRacalvinWeapons(sceneRef.current.model) : null;
       rig?.setMode(mode);
     },
+    freezeToBindPose: snapBindPose,
+    resumeAnimation: playIdle,
   }));
 
   // Live tuning updates without reloading the GLB.
@@ -224,12 +272,19 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
 
           if (skinId === RACALVIN_ID) {
             attachRacalvinWeapons(m, loader, { tuning, isDisposed: () => disposed });
+            onHandBoneReady?.(
+              (m.userData.racalvinHandBone as string | undefined) ?? null,
+            );
             mixer = new THREE.AnimationMixer(m);
             loadRacalvinClips(loader).then((loaded) => {
               if (disposed || !mixer) return;
               clips = loaded;
               sceneRef.current.clips = loaded;
               onClipsReady?.([...RACALVIN_ANIMS]);
+              if (freezePoseRef.current) {
+                resetSkinnedToBindPose(m);
+                return;
+              }
               const idle = loaded.find((c) => c.name === "idle") ?? loaded[0];
               if (idle) {
                 activeAction = mixer.clipAction(idle).reset().play();
@@ -269,7 +324,7 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     const render = () => {
       raf = requestAnimationFrame(render);
       const d = clock.getDelta();
-      mixer?.update(d);
+      if (!freezePoseRef.current) mixer?.update(d);
       if (model && !pauseRotationRef.current) model.rotation.y += d * 0.5;
       renderer.render(scene, camera);
     };

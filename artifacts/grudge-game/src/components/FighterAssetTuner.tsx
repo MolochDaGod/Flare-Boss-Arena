@@ -35,6 +35,7 @@ export interface FighterAssetTunerProps {
   onOpenChange?: (open: boolean) => void;
   previewSpin: boolean;
   onPreviewSpinChange: (spin: boolean) => void;
+  handBoneName?: string | null;
 }
 
 function clampNum(v: number, min: number, max: number) {
@@ -281,6 +282,7 @@ export function FighterAssetTuner({
   onOpenChange,
   previewSpin,
   onPreviewSpinChange,
+  handBoneName,
 }: FighterAssetTunerProps) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -354,18 +356,25 @@ export function FighterAssetTuner({
             Weapon Editor
           </SheetTitle>
           <SheetDescription>
-            Move, rotate, and scale {fighterName}&apos;s props. Changes save automatically.
+            Rig freezes in bind pose (T-pose) so weapons stay on the hand bone while you
+            move, rotate, and scale. Changes save automatically.
           </SheetDescription>
         </SheetHeader>
 
         <div className="mt-5 space-y-4">
+          {showWeapons && handBoneName && (
+            <p className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 font-mono text-[10px] text-emerald-200">
+              Parent bone: <span className="text-emerald-100">{handBoneName}</span>
+            </p>
+          )}
+
           <div className="flex items-center justify-between rounded border border-white/10 bg-black/30 px-3 py-2">
             <div>
               <p className="font-serif text-[10px] uppercase tracking-widest text-[#c5a059]/90">
                 Preview spin
               </p>
               <p className="text-[9px] text-muted-foreground">
-                Stop spin to drag the view and place weapons precisely.
+                Pausing spin also freezes T-pose. Drag the canvas to orbit the hand.
               </p>
             </div>
             <Button
@@ -449,7 +458,7 @@ export function FighterAssetTuner({
 
           <div className="space-y-2 border-t border-white/10 pt-4">
             <p className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground">
-              Preview clip
+              Preview clip (resume spin first)
             </p>
             <div className="flex flex-wrap gap-1">
               {clipNames.map((clip) => (

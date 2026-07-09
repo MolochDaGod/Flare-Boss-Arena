@@ -138,6 +138,7 @@ export default function Select() {
   const [weaponPreview, setWeaponPreview] = useState<"sword" | "pistol">("sword");
   const [tunerOpen, setTunerOpen] = useState(false);
   const [previewSpin, setPreviewSpin] = useState(true);
+  const [handBoneName, setHandBoneName] = useState<string | null>(null);
 
   const { evolutionGroups, standalone } = useMemo(() => {
     const inFamily = new Set<string>();
@@ -162,6 +163,7 @@ export default function Select() {
     setMeshNames([]);
     setClipNames(id === RACALVIN_ID ? [...RACALVIN_ANIMS] : []);
     setWeaponPreview("sword");
+    setHandBoneName(null);
   };
 
   const confirm = () => {
@@ -199,8 +201,10 @@ export default function Select() {
               fighterId={selected.id}
               tuning={assetTuning}
               pauseRotation={!previewSpin}
+              freezePose={tunerOpen || !previewSpin}
               onMeshesReady={setMeshNames}
               onClipsReady={(clips) => setClipNames(clips.length ? clips : [...RACALVIN_ANIMS])}
+              onHandBoneReady={setHandBoneName}
             />
             <button
               type="button"
@@ -227,6 +231,7 @@ export default function Select() {
               onOpenChange={setTunerOpen}
               previewSpin={previewSpin}
               onPreviewSpinChange={setPreviewSpin}
+              handBoneName={handBoneName}
             />
             {selected.featured && (
               <span className="absolute left-4 top-4 rounded-full border border-[#c5a059]/50 bg-black/50 px-3 py-1 font-serif text-[10px] uppercase tracking-widest text-[#c5a059]">

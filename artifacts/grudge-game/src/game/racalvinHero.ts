@@ -13,6 +13,7 @@ import type { FighterAssetTuning, WeaponMountTuning } from "../data/fighterAsset
 import { DEFAULT_RACALVIN_TUNING, getFighterAssetTuning } from "../data/fighterAssetTuning";
 import { RACALVIN_ID } from "../data/fighters";
 import { applyHiddenMeshRules } from "./assetVisibility";
+import { findHandBone } from "./assets";
 
 export const RACALVIN_DIR = "models/racalvin";
 export const RACALVIN_PSYCHIC_COLOR = 0x44ff88;
@@ -172,14 +173,16 @@ function fitWrapper(model: THREE.Object3D, targetHeight: number): THREE.Group {
   return wrapper;
 }
 
-function findRightHand(root: THREE.Object3D): THREE.Object3D | null {
-  let hand: THREE.Object3D | null = null;
-  root.traverse((o) => {
-    if (hand) return;
-    const n = o.name;
-    if (n === "RightHand" || n === "mixamorigRightHand" || n.endsWith("RightHand")) hand = o;
-  });
-  return hand;
+export function findRacalvinRightHand(root: THREE.Object3D): THREE.Bone | null {
+  return findHandBone(root, true);
+}
+
+function ensureMountsOnHand(rig: RacalvinWeapons, hand: THREE.Bone) {
+  for (const mount of [rig.swordMount, rig.pistolMount]) {
+    if (mount.parent !== hand) {
+      hand.add(mount);
+    }
+  }
 }
 
 function disposeProp(obj: THREE.Object3D) {
@@ -286,8 +289,12 @@ export function attachRacalvinWeapons(
     typeof opts === "function" ? { isDisposed: opts } : (opts ?? {});
   const tuning = options.tuning ?? DEFAULT_RACALVIN_TUNING;
   const isDisposed = options.isDisposed;
-  const hand = findRightHand(root);
-  if (!hand) return null;
+  root.updateMatrixWorld(true);
+  const hand = findRacalvinRightHand(root);
+  if (!hand) {
+    console.warn("[racalvin] RightHand bone not found — weapons cannot attach.");
+    return null;
+  }
 
   const comp = handCompensation(hand);
   const swordMount = new THREE.Group();
@@ -302,6 +309,8 @@ export function attachRacalvinWeapons(
 
   const rig = new RacalvinWeapons(swordMount, pistolMount);
   root.userData[USERDATA_KEY] = rig;
+  root.userData.racalvinHandBone = hand.name;
+  ensureMountsOnHand(rig, hand);
   rig.applyMountTuning(tuning.weapons);
   applyHiddenMeshRules(root, tuning.hiddenMeshes);
 
@@ -311,6 +320,7 @@ export function attachRacalvinWeapons(
       return;
     }
     steelMaterial(gltf.scene);
+    ensureMountsOnHand(rig, hand);
     swordMount.clear();
     swordMount.add(buildPropHolder(gltf.scene, weaponToProp(tuning.weapons.sword)));
     swordMount.userData.bakedLength = tuning.weapons.sword.targetLength;
@@ -323,6 +333,7 @@ export function attachRacalvinWeapons(
       return;
     }
     pistolMaterial(gltf.scene);
+    ensureMountsOnHand(rig, hand);
     pistolMount.clear();
     pistolMount.add(buildPropHolder(gltf.scene, weaponToProp(tuning.weapons.pistol)));
     pistolMount.userData.bakedLength = tuning.weapons.pistol.targetLength;

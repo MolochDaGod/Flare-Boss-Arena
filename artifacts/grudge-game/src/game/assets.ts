@@ -32,18 +32,36 @@ function cloneSkinned(src: THREE.Group): THREE.Group {
   return clone;
 }
 
-const HAND_NAME_PATTERNS = [
-  /^hand[_.]?r/i, /right[_.]?hand/i, /\.R$/, /_R$/,
-  /weapon[_.]?r/i, /grip[_.]?r/i, /palm[_.]?r/i,
-  /^hand[_.]?l/i, /left[_.]?hand/i, /\.L$/, /_L$/,
+const RIGHT_HAND_EXACT = [
+  "RightHand",
+  "mixamorigRightHand",
+  "mixamorig:RightHand",
+  "Bip001_R_Hand",
+  "Bip001 R Hand",
+];
+const LEFT_HAND_EXACT = [
+  "LeftHand",
+  "mixamorigLeftHand",
+  "mixamorig:LeftHand",
+  "Bip001_L_Hand",
+  "Bip001 L Hand",
 ];
 
-export function findHandBone(root: THREE.Object3D, preferRight = true): THREE.Bone | null {
-  const bones: THREE.Bone[] = [];
-  root.traverse((o) => { if ((o as THREE.Bone).isBone) bones.push(o as THREE.Bone); });
+const HAND_NAME_PATTERNS = [
+  /^hand[_.]?r/i, /right[_.]?hand/i, /[_\s]R[_\s]Hand$/i, /\.R$/, /_R$/,
+  /weapon[_.]?r/i, /grip[_.]?r/i, /palm[_.]?r/i,
+  /^hand[_.]?l/i, /left[_.]?hand/i, /[_\s]L[_\s]Hand$/i, /\.L$/, /_L$/,
+];
 
-  const rightPatterns = HAND_NAME_PATTERNS.slice(0, 6);
-  const leftPatterns = HAND_NAME_PATTERNS.slice(6);
+function pickHandBone(bones: THREE.Bone[], preferRight: boolean): THREE.Bone | null {
+  const exact = preferRight ? RIGHT_HAND_EXACT : LEFT_HAND_EXACT;
+  for (const name of exact) {
+    const b = bones.find((bn) => bn.name === name);
+    if (b) return b;
+  }
+
+  const rightPatterns = HAND_NAME_PATTERNS.slice(0, 7);
+  const leftPatterns = HAND_NAME_PATTERNS.slice(7);
   const primary = preferRight ? rightPatterns : leftPatterns;
   const secondary = preferRight ? leftPatterns : rightPatterns;
 
@@ -55,8 +73,48 @@ export function findHandBone(root: THREE.Object3D, preferRight = true): THREE.Bo
     const b = bones.find((bn) => re.test(bn.name));
     if (b) return b;
   }
-  // Fallback: any bone with "hand" in the name
-  return bones.find((b) => /hand/i.test(b.name)) ?? null;
+  const side = preferRight ? /(^|[_\s])r[_\s]?hand|right.*hand/i : /(^|[_\s])l[_\s]?hand|left.*hand/i;
+  return bones.find((b) => side.test(b.name)) ?? null;
+}
+
+/** Prefer skinned-mesh skeleton joints (animated) over stray scene nodes. */
+export function findHandBone(root: THREE.Object3D, preferRight = true): THREE.Bone | null {
+  const skeletonBones: THREE.Bone[] = [];
+  root.traverse((o) => {
+    const sk = o as THREE.SkinnedMesh;
+    if (!sk.isSkinnedMesh || !sk.skeleton) return;
+    for (const b of sk.skeleton.bones) {
+      if (!skeletonBones.includes(b)) skeletonBones.push(b);
+    }
+  });
+  const fromSkeleton = pickHandBone(skeletonBones, preferRight);
+  if (fromSkeleton) return fromSkeleton;
+
+  const sceneBones: THREE.Bone[] = [];
+  root.traverse((o) => {
+    if ((o as THREE.Bone).isBone) sceneBones.push(o as THREE.Bone);
+  });
+  return pickHandBone(sceneBones, preferRight);
+}
+
+/** Reset every skinned skeleton under `root` to its bind pose (T-pose / A-pose). */
+export function resetSkinnedToBindPose(root: THREE.Object3D) {
+  const skeletons = new Set<THREE.Skeleton>();
+  root.traverse((o) => {
+    const sk = o as THREE.SkinnedMesh;
+    if (sk.isSkinnedMesh && sk.skeleton) skeletons.add(sk.skeleton);
+  });
+  for (const skeleton of skeletons) {
+    const { bones, boneInverses } = skeleton;
+    for (let i = 0; i < bones.length; i++) {
+      const inv = boneInverses[i];
+      if (!inv) continue;
+      const bind = inv.clone().invert();
+      bind.decompose(bones[i].position, bones[i].quaternion, bones[i].scale);
+    }
+    skeleton.update();
+  }
+  root.updateMatrixWorld(true);
 }
 
 export function attachWeaponToBone(

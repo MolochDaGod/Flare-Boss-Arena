@@ -26,6 +26,9 @@ const moveSection = await page.getByText("Move", { exact: true }).first().isVisi
 const rotateSection = await page.getByText("Rotate", { exact: true }).first().isVisible();
 const scaleSection = await page.getByText("Scale", { exact: true }).first().isVisible();
 const positionLabel = await page.getByText("Position (hand local)").isVisible();
+const spinToggle = await page.getByText("Preview spin").isVisible();
+const stopSpinBtn = page.locator('button[aria-label="Stop preview spin"]');
+const stopSpinVisible = await stopSpinBtn.isVisible();
 
 // Drag a move slider
 const sliders = page.locator('[role="slider"]');
@@ -47,6 +50,8 @@ const pass =
   rotateSection &&
   scaleSection &&
   positionLabel &&
+  spinToggle &&
+  stopSpinVisible &&
   sliderCount >= 8 &&
   errors.length === 0;
 
@@ -61,6 +66,8 @@ console.log(
       rotateSection,
       scaleSection,
       positionLabel,
+      spinToggle,
+      stopSpinVisible,
       sliderCount,
       sliderMoved,
       pageErrors: errors.slice(0, 5),
