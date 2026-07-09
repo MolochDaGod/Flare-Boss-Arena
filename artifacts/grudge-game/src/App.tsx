@@ -26,6 +26,7 @@ const Account = lazy(() => import("@/pages/account"));
 const Content = lazy(() => import("@/pages/content"));
 const Game = lazy(() => import("@/pages/game"));
 const Camp = lazy(() => import("@/pages/camp"));
+const Party = lazy(() => import("@/pages/party"));
 
 const queryClient = new QueryClient();
 
@@ -55,6 +56,7 @@ function Router() {
             <Route path="/skills" component={Skills} />
             <Route path="/perks" component={Perks} />
             <Route path="/units" component={Units} />
+            <Route path="/party" component={Party} />
             <Route path="/rewards" component={Rewards} />
             <Route path="/account" component={Account} />
             <Route path="/content" component={Content} />

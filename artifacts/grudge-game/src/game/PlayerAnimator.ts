@@ -313,9 +313,16 @@ interface BoneRef {
 }
 
 function findBone(root: THREE.Object3D, name: string): BoneRef | null {
+  const candidates = [
+    name,
+    name.replace(/ /g, "_"),
+    name.replace(/_/g, " "),
+  ];
   let found: THREE.Object3D | null = null;
   root.traverse((o) => {
-    if (!found && o.name === name) found = o;
+    if (found || !o.name) return;
+    const n = o.name;
+    if (candidates.includes(n)) found = o;
   });
   if (!found) return null;
   const node = found as THREE.Object3D;

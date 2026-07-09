@@ -1,0 +1,569 @@
+{
+  "version": 1,
+  "count": 30,
+  "heroes": [
+    {
+      "id": "g6_00_human_unarmed",
+      "index": 0,
+      "rootIndex": 26,
+      "race": "human",
+      "faction": "WK",
+      "role": "unarmed",
+      "displayName": "Kingdom Unarmed",
+      "weaponMesh": null,
+      "meshSample": [
+        "WK_Units_Arms_A",
+        "WK_Units_head_A",
+        "WK_Units_Body_B",
+        "WK_Units_Legs_A"
+      ],
+      "meshCount": 4
+    },
+    {
+      "id": "g6_01_human_healer",
+      "index": 1,
+      "rootIndex": 55,
+      "race": "human",
+      "faction": "WK",
+      "role": "healer",
+      "displayName": "Kingdom Healer",
+      "weaponMesh": "WK_weapon_staff_C",
+      "meshSample": [
+        "WK_weapon_staff_C",
+        "WK_Units_Body_A",
+        "WK_Units_Arms_A",
+        "WK_Units_head_A",
+        "WK_Units_Legs_A"
+      ],
+      "meshCount": 5
+    },
+    {
+      "id": "g6_02_human_tank",
+      "index": 2,
+      "rootIndex": 87,
+      "race": "human",
+      "faction": "WK",
+      "role": "tank",
+      "displayName": "Kingdom Tank",
+      "weaponMesh": "WK_Shield_B",
+      "meshSample": [
+        "WK_Shield_B",
+        "WK_weapon_sword_B",
+        "WK_Units_Legs_C",
+        "WK_Units_Body_E",
+        "WK_Units_head_F",
+        "WK_Units_shoulderpads_B",
+        "WK_Units_Arms_D"
+      ],
+      "meshCount": 7
+    },
+    {
+      "id": "g6_03_human_ranger",
+      "index": 3,
+      "rootIndex": 118,
+      "race": "human",
+      "faction": "WK",
+      "role": "ranger",
+      "displayName": "Kingdom Ranger",
+      "weaponMesh": "WK_weapon_Bow",
+      "meshSample": [
+        "WK_Xtra_quiver",
+        "WK_weapon_Bow",
+        "WK_Units_head_C",
+        "WK_Units_Body_B",
+        "WK_Units_Legs_B",
+        "WK_Units_Arms_B"
+      ],
+      "meshCount": 6
+    },
+    {
+      "id": "g6_04_human_bruiser",
+      "index": 4,
+      "rootIndex": 148,
+      "race": "human",
+      "faction": "WK",
+      "role": "bruiser",
+      "displayName": "Kingdom Bruiser",
+      "weaponMesh": "WK_weapon_axe_B",
+      "meshSample": [
+        "WK_weapon_axe_B",
+        "WK_Units_Body_C",
+        "WK_Units_shoulderpads_A",
+        "WK_Units_Legs_B",
+        "WK_Units_Arms_B",
+        "WK_Units_head_D"
+      ],
+      "meshCount": 6
+    },
+    {
+      "id": "g6_05_dwarf_bruiser",
+      "index": 5,
+      "rootIndex": 178,
+      "race": "dwarf",
+      "faction": "DWF",
+      "role": "bruiser",
+      "displayName": "Dwarf Bruiser",
+      "weaponMesh": "DWF_Weapon_axe_C",
+      "meshSample": [
+        "DWF_Weapon_axe_C",
+        "DWF_Units_Head_G",
+        "DWF_Units_Arms_B",
+        "DWF_Units_Shoulderpads_B",
+        "DWF_Units_Legs_B",
+        "DWF_Units_Body_C"
+      ],
+      "meshCount": 6
+    },
+    {
+      "id": "g6_06_barbarian_bruiser",
+      "index": 6,
+      "rootIndex": 208,
+      "race": "barbarian",
+      "faction": "BRB",
+      "role": "bruiser",
+      "displayName": "Barbarian Bruiser",
+      "weaponMesh": "BRB_weapon_axe_C",
+      "meshSample": [
+        "BRB_weapon_axe_C",
+        "BRB_shoulderpads_B",
+        "BRB_head_B",
+        "BRB_legs_B",
+        "BRB_body_C",
+        "BRB_arms_B"
+      ],
+      "meshCount": 6
+    },
+    {
+      "id": "g6_07_dwarf_tank",
+      "index": 7,
+      "rootIndex": 240,
+      "race": "dwarf",
+      "faction": "DWF",
+      "role": "tank",
+      "displayName": "Dwarf Tank",
+      "weaponMesh": "DWF_Weapon_sword_B",
+      "meshSample": [
+        "DWF_Weapon_sword_B",
+        "DWF_Shield_B",
+        "DWF_Units_Head_F",
+        "DWF_Units_Arms_C",
+        "DWF_Units_Legs_C",
+        "DWF_Units_Body_D",
+        "DWF_Units_Shoulderpads_C"
+      ],
+      "meshCount": 7
+    },
+    {
+      "id": "g6_08_undead_healer",
+      "index": 8,
+      "rootIndex": 269,
+      "race": "undead",
+      "faction": "UD",
+      "role": "healer",
+      "displayName": "Undead Healer",
+      "weaponMesh": "UD_weapon_staff_D",
+      "meshSample": [
+        "UD_weapon_staff_D",
+        "UD_Units_head_A",
+        "UD_Units_arms_B",
+        "UD_Units_legs_B",
+        "UD_Units_body_G"
+      ],
+      "meshCount": 5
+    },
+    {
+      "id": "g6_09_barbarian_ranger",
+      "index": 9,
+      "rootIndex": 301,
+      "race": "barbarian",
+      "faction": "BRB",
+      "role": "ranger",
+      "displayName": "Barbarian Ranger",
+      "weaponMesh": "BRB_weapon_Bow",
+      "meshSample": [
+        "BRB_weapon_Bow",
+        "BRB_Xtra_quiver",
+        "BRB_head_C",
+        "BRB_body_B",
+        "BRB_legs_B",
+        "BRB_shoulderpads_A",
+        "BRB_arms_B"
+      ],
+      "meshCount": 7
+    },
+    {
+      "id": "g6_10_barbarian_tank",
+      "index": 10,
+      "rootIndex": 333,
+      "race": "barbarian",
+      "faction": "BRB",
+      "role": "tank",
+      "displayName": "Barbarian Tank",
+      "weaponMesh": "BRB_Shield_B",
+      "meshSample": [
+        "BRB_Shield_B",
+        "BRB_weapon_sword_B",
+        "BRB_body_F",
+        "BRB_head_F",
+        "BRB_shoulderpads_C",
+        "BRB_arms_C",
+        "BRB_legs_C"
+      ],
+      "meshCount": 7
+    },
+    {
+      "id": "g6_11_barbarian_unarmed",
+      "index": 11,
+      "rootIndex": 360,
+      "race": "barbarian",
+      "faction": "BRB",
+      "role": "unarmed",
+      "displayName": "Barbarian Unarmed",
+      "weaponMesh": null,
+      "meshSample": [
+        "BRB_body_B",
+        "BRB_head_A",
+        "BRB_legs_A",
+        "BRB_arms_A"
+      ],
+      "meshCount": 4
+    },
+    {
+      "id": "g6_12_undead_bruiser",
+      "index": 12,
+      "rootIndex": 390,
+      "race": "undead",
+      "faction": "UD",
+      "role": "bruiser",
+      "displayName": "Undead Bruiser",
+      "weaponMesh": "UD_weapon_Axe_B",
+      "meshSample": [
+        "UD_weapon_Axe_B",
+        "UD_Units_legs_C",
+        "UD_Units_shoulderpads_B",
+        "UD_Units_arms_C",
+        "UD_Units_head_G",
+        "UD_Units_body_D"
+      ],
+      "meshCount": 6
+    },
+    {
+      "id": "g6_13_orc_ranger",
+      "index": 13,
+      "rootIndex": 422,
+      "race": "orc",
+      "faction": "ORC",
+      "role": "ranger",
+      "displayName": "Orc Ranger",
+      "weaponMesh": "ORC_weapon_Bow",
+      "meshSample": [
+        "ORC_weapon_Bow",
+        "ORC_Xtra_quiver",
+        "ORC_Units_Shoulderpads_A",
+        "ORC_Units_Body_B",
+        "ORC_Units_Legs_B",
+        "ORC_Units_Head_B",
+        "ORC_Units_Arms_B"
+      ],
+      "meshCount": 7
+    },
+    {
+      "id": "g6_14_elf_skirmisher",
+      "index": 14,
+      "rootIndex": 452,
+      "race": "elf",
+      "faction": "ELF",
+      "role": "skirmisher",
+      "displayName": "Elf Skirmisher",
+      "weaponMesh": "ELF_weapon_spear",
+      "meshSample": [
+        "ELF_Units_Head_D",
+        "ELF_weapon_spear",
+        "ELF_Units_Body_C",
+        "ELF_Units_Shoulderpads_B",
+        "ELF_Units_Arms_B",
+        "ELF_Units_Legs_B"
+      ],
+      "meshCount": 6
+    },
+    {
+      "id": "g6_15_dwarf_ranger",
+      "index": 15,
+      "rootIndex": 484,
+      "race": "dwarf",
+      "faction": "DWF",
+      "role": "ranger",
+      "displayName": "Dwarf Ranger",
+      "weaponMesh": "DWF_Weapon_bow",
+      "meshSample": [
+        "DWF_Weapon_bow",
+        "DWF_Xtra_quiver",
+        "DWF_Units_Head_C",
+        "DWF_Units_Arms_B",
+        "DWF_Units_Shoulderpads_A",
+        "DWF_Units_Body_B",
+        "DWF_Units_Legs_B"
+      ],
+      "meshCount": 7
+    },
+    {
+      "id": "g6_16_undead_unarmed",
+      "index": 16,
+      "rootIndex": 511,
+      "race": "undead",
+      "faction": "UD",
+      "role": "unarmed",
+      "displayName": "Undead Unarmed",
+      "weaponMesh": null,
+      "meshSample": [
+        "UD_Units_head_A",
+        "UD_Units_legs_A",
+        "UD_Units_arms_A",
+        "UD_Units_body_B"
+      ],
+      "meshCount": 4
+    },
+    {
+      "id": "g6_17_barbarian_healer",
+      "index": 17,
+      "rootIndex": 540,
+      "race": "barbarian",
+      "faction": "BRB",
+      "role": "healer",
+      "displayName": "Barbarian Healer",
+      "weaponMesh": "BRB_weapon_staff_C",
+      "meshSample": [
+        "BRB_weapon_staff_C",
+        "BRB_body_A",
+        "BRB_head_A",
+        "BRB_legs_A",
+        "BRB_arms_A"
+      ],
+      "meshCount": 5
+    },
+    {
+      "id": "g6_18_orc_healer",
+      "index": 18,
+      "rootIndex": 569,
+      "race": "orc",
+      "faction": "ORC",
+      "role": "healer",
+      "displayName": "Orc Healer",
+      "weaponMesh": "ORC_weapon_staff_C",
+      "meshSample": [
+        "ORC_weapon_staff_C",
+        "ORC_Units_Legs_A",
+        "ORC_Units_Body_A",
+        "ORC_Units_Arms_A",
+        "ORC_Units_Head_A"
+      ],
+      "meshCount": 5
+    },
+    {
+      "id": "g6_19_undead_tank",
+      "index": 19,
+      "rootIndex": 601,
+      "race": "undead",
+      "faction": "UD",
+      "role": "tank",
+      "displayName": "Undead Tank",
+      "weaponMesh": "UD_weapon_Sword_B",
+      "meshSample": [
+        "UD_weapon_Sword_B",
+        "UD_Shield_C",
+        "UD_Units_legs_D",
+        "UD_Units_arms_D",
+        "UD_Units_head_F",
+        "UD_Units_shoulderpads_C",
+        "UD_Units_body_F"
+      ],
+      "meshCount": 7
+    },
+    {
+      "id": "g6_20_dwarf_unarmed",
+      "index": 20,
+      "rootIndex": 628,
+      "race": "dwarf",
+      "faction": "DWF",
+      "role": "unarmed",
+      "displayName": "Dwarf Unarmed",
+      "weaponMesh": null,
+      "meshSample": [
+        "DWF_Units_Arms_A",
+        "DWF_Units_Body_B",
+        "DWF_Units_Legs_A",
+        "DWF_Units_Head_A"
+      ],
+      "meshCount": 4
+    },
+    {
+      "id": "g6_21_dwarf_healer",
+      "index": 21,
+      "rootIndex": 657,
+      "race": "dwarf",
+      "faction": "DWF",
+      "role": "healer",
+      "displayName": "Dwarf Healer",
+      "weaponMesh": "DWF_Weapon_staff_B",
+      "meshSample": [
+        "DWF_Weapon_staff_B",
+        "DWF_Units_Arms_A",
+        "DWF_Units_Body_A",
+        "DWF_Units_Legs_A",
+        "DWF_Units_Head_A"
+      ],
+      "meshCount": 5
+    },
+    {
+      "id": "g6_22_orc_tank",
+      "index": 22,
+      "rootIndex": 689,
+      "race": "orc",
+      "faction": "ORC",
+      "role": "tank",
+      "displayName": "Orc Tank",
+      "weaponMesh": "ORC_Shield_C",
+      "meshSample": [
+        "ORC_Shield_C",
+        "ORC_weapon_Axe_C",
+        "ORC_Units_Body_F",
+        "ORC_Units_Arms_C",
+        "ORC_Units_Head_G",
+        "ORC_Units_Legs_C",
+        "ORC_Units_Shoulderpads_F"
+      ],
+      "meshCount": 7
+    },
+    {
+      "id": "g6_23_orc_unarmed",
+      "index": 23,
+      "rootIndex": 716,
+      "race": "orc",
+      "faction": "ORC",
+      "role": "unarmed",
+      "displayName": "Orc Unarmed",
+      "weaponMesh": null,
+      "meshSample": [
+        "ORC_Units_Legs_A",
+        "ORC_Units_Body_A",
+        "ORC_Units_Arms_A",
+        "ORC_Units_Head_A"
+      ],
+      "meshCount": 4
+    },
+    {
+      "id": "g6_24_elf_tank",
+      "index": 24,
+      "rootIndex": 748,
+      "race": "elf",
+      "faction": "ELF",
+      "role": "tank",
+      "displayName": "Elf Tank",
+      "weaponMesh": "ELF_weapon_sword_B",
+      "meshSample": [
+        "ELF_Units_Shoulderpads_C",
+        "ELF_Units_Head_G",
+        "ELF_weapon_sword_B",
+        "ELF_shield_B",
+        "ELF_Units_Body_E",
+        "ELF_Units_Arms_C",
+        "ELF_Units_Legs_C"
+      ],
+      "meshCount": 7
+    },
+    {
+      "id": "g6_25_orc_bruiser",
+      "index": 25,
+      "rootIndex": 778,
+      "race": "orc",
+      "faction": "ORC",
+      "role": "bruiser",
+      "displayName": "Orc Bruiser",
+      "weaponMesh": "ORC_weapon_Axe_B",
+      "meshSample": [
+        "ORC_weapon_Axe_B",
+        "ORC_Units_Body_C",
+        "ORC_Units_Shoulderpads_C",
+        "ORC_Units_Legs_B",
+        "ORC_Units_Arms_B",
+        "ORC_Units_Head_E"
+      ],
+      "meshCount": 6
+    },
+    {
+      "id": "g6_26_elf_healer",
+      "index": 26,
+      "rootIndex": 807,
+      "race": "elf",
+      "faction": "ELF",
+      "role": "healer",
+      "displayName": "Elf Healer",
+      "weaponMesh": "ELF_weapon_staff_C",
+      "meshSample": [
+        "ELF_Units_Head_B",
+        "ELF_weapon_staff_C",
+        "ELF_Units_Arms_A",
+        "ELF_Units_Legs_A",
+        "ELF_Units_Body_A"
+      ],
+      "meshCount": 5
+    },
+    {
+      "id": "g6_27_undead_ranger",
+      "index": 27,
+      "rootIndex": 839,
+      "race": "undead",
+      "faction": "UD",
+      "role": "ranger",
+      "displayName": "Undead Ranger",
+      "weaponMesh": "UD_weapon_Bow",
+      "meshSample": [
+        "UD_weapon_Bow",
+        "UD_Xtra_Quiver",
+        "UD_Units_head_C",
+        "UD_Units_arms_B",
+        "UD_Units_legs_B",
+        "UD_Units_shoulderpads_A",
+        "UD_Units_body_B"
+      ],
+      "meshCount": 7
+    },
+    {
+      "id": "g6_28_elf_ranger",
+      "index": 28,
+      "rootIndex": 871,
+      "race": "elf",
+      "faction": "ELF",
+      "role": "ranger",
+      "displayName": "Elf Ranger",
+      "weaponMesh": "ELF_weapon_bow",
+      "meshSample": [
+        "ELF_Units_Shoulderpads_A",
+        "ELF_weapon_bow",
+        "ELF_Xtra_quiver",
+        "ELF_Units_Head_C",
+        "ELF_Units_Arms_B",
+        "ELF_Units_Body_B",
+        "ELF_Units_Legs_B"
+      ],
+      "meshCount": 7
+    },
+    {
+      "id": "g6_29_elf_unarmed",
+      "index": 29,
+      "rootIndex": 898,
+      "race": "elf",
+      "faction": "ELF",
+      "role": "unarmed",
+      "displayName": "Elf Unarmed",
+      "weaponMesh": null,
+      "meshSample": [
+        "ELF_Units_Arms_A",
+        "ELF_Units_Legs_A",
+        "ELF_Units_Head_A",
+        "ELF_Units_Body_B"
+      ],
+      "meshCount": 4
+    }
+  ]
+}

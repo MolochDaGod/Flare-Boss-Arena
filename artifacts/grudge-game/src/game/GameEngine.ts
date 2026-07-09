@@ -64,6 +64,14 @@ import {
   isBlurActive,
 } from "../data/procs";
 import { getGameLoadout } from "../data/gameCombat";
+import { getPartyAllyIds, getGrudge6Hero, MAX_PARTY_ALLIES } from "../data/grudge6Roster";
+import { Grudge6Factory } from "./grudge6/Grudge6Character";
+import {
+  createAllyAgent,
+  thinkAlly,
+  stepAllyMovement,
+  type AllyAgent,
+} from "./grudge6/AllyBrain";
 import { FX2D } from "./FX2D";
 import { DUNGEON_COLLECTABLES } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
@@ -314,6 +322,10 @@ export class GameEngine {
   /** fighterId → brain for hero-rival enemies. */
   private enemyBrains = new Map<string, BrainArchetype>();
   private playerAuraElement = getActiveCombatProfile().auraElement;
+  /** Party allies (max 2) — Grudge6 units with AI brains. */
+  private allies: AllyAgent[] = [];
+  private grudge6Factory = new Grudge6Factory();
+  private partySpawned = false;
   /** -1 = none; 0-4 = skill awaiting ground placement. */
   private pendingSkillIdx = -1;
   private skillCdUntil = [0, 0, 0, 0, 0];
@@ -2249,9 +2261,16 @@ export class GameEngine {
       return;
     }
 
+    // Spawn party once the world is ready (async race models).
+    if (!this.partySpawned) {
+      this.partySpawned = true;
+      void this.spawnPartyAllies();
+    }
+
     if (this.playerAttackCooldown > 0) this.playerAttackCooldown -= delta;
 
     this.updateWorldCollectables(delta, elapsed);
+    this.updateAllies(delta);
 
     // Keyboard movement
     const raw = new THREE.Vector2();
@@ -2566,6 +2585,135 @@ export class GameEngine {
     updateEnemyAnimation(en.model, en.anim, delta, elapsed);
   }
 
+  /** Load up to 2 Grudge6 allies from party selection. */
+  private async spawnPartyAllies() {
+    const ids = getPartyAllyIds().slice(0, MAX_PARTY_ALLIES);
+    if (!ids.length) {
+      this.log("No party allies selected — visit Party.");
+      return;
+    }
+    let slot = 0;
+    for (const id of ids) {
+      const def = getGrudge6Hero(id);
+      if (!def) continue;
+      try {
+        const inst = await this.grudge6Factory.create(def, 1.85);
+        if (this.disposed) {
+          inst.dispose();
+          return;
+        }
+        const agent = createAllyAgent(inst, slot);
+        agent.pos.set(
+          this.playerPos.x + (slot === 0 ? -2.2 : 2.2),
+          0,
+          this.playerPos.z + 1.8,
+        );
+        inst.group.position.copy(agent.pos);
+        this.scene.add(inst.group);
+        this.allies.push(agent);
+        this.log(`${def.displayName} joins the party (${def.brain}).`);
+        slot++;
+      } catch (e) {
+        console.warn("[party] failed to load ally", id, e);
+        this.log(`Could not summon ${def.displayName}.`);
+      }
+    }
+  }
+
+  private updateAllies(delta: number) {
+    if (!this.allies.length) return;
+    const now = performance.now() / 1000;
+    const enemies = this.enemies
+      .filter((e) => e.state !== "dead" && e.state !== "death")
+      .map((e) => ({
+        id: e.id,
+        pos: e.position.clone(),
+        hp: e.hp,
+        maxHp: e.maxHp,
+      }));
+    const harvest: Array<{ id: string; pos: THREE.Vector3; kind: "wood" | "stone" }> = [];
+    if (this.harvestField) {
+      for (const n of this.harvestField.nodes) {
+        if (n.hp <= 0) continue;
+        harvest.push({
+          id: n.id,
+          pos: new THREE.Vector3(n.position.x, 0, n.position.z),
+          kind: n.kind === "wood" ? "wood" : "stone",
+        });
+      }
+    }
+    const focusEnemy =
+      this.targetEnemy && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death"
+        ? this.targetEnemy
+        : this.attackHeld
+          ? this.nearestEnemy(14)
+          : null;
+
+    const world = {
+      playerPos: this.playerPos.clone(),
+      playerHp: this.playerHp,
+      playerMaxHp: this.playerMaxHp,
+      focusTarget: focusEnemy ? focusEnemy.position.clone() : null,
+      focusEnemyId: focusEnemy?.id ?? null,
+      enemies,
+      harvest,
+      dt: delta,
+      now,
+    };
+
+    for (const agent of this.allies) {
+      if (agent.hp <= 0) continue;
+      const brain = agent.instance.def.brain;
+      const action = thinkAlly(agent, brain, world, this.playerFacing);
+      const speed = 5.2 + (brain === "skirmish" || brain === "assassin" ? 0.8 : 0);
+      stepAllyMovement(agent, action, speed, delta, (p) => this.clampToArena(p));
+
+      // Apply action results
+      if (action.type === "attack" && action.enemyId) {
+        const en = this.enemies.find((e) => e.id === action.enemyId);
+        if (en && en.state !== "dead" && en.state !== "death") {
+          const dmg = Math.max(
+            1,
+            Math.floor(agent.instance.def.kit.damage * agent.instance.def.kit.skillMult * (0.85 + Math.random() * 0.3)),
+          );
+          this.damageEnemy(en, dmg, Math.random() < 0.12);
+        }
+      } else if (action.type === "heal") {
+        const amt = agent.instance.def.kit.healAmount;
+        if (action.healTarget === "player" || !action.healTarget) {
+          this.playerHp = Math.min(this.playerMaxHp, this.playerHp + amt);
+          this.log(`${agent.instance.def.displayName} heals you +${amt}`);
+          this.auras?.pulse("arcane", this.playerPos.clone(), 2.0, 0.45);
+        } else {
+          agent.hp = Math.min(agent.maxHp, agent.hp + amt);
+          this.log(`${agent.instance.def.displayName} mends wounds +${amt}`);
+        }
+      } else if (action.type === "harvest" && action.harvestId && this.harvestField) {
+        const node = this.harvestField.nodes.find((n) => n.id === action.harvestId);
+        if (node && node.hp > 0) {
+          node.hp -= 12 + agent.instance.def.kit.damage * 0.4;
+          if (node.hp <= 0) {
+            const amount = node.yieldMin + Math.floor(Math.random() * (node.yieldMax - node.yieldMin + 1));
+            const res = resourceForKind(node.kind);
+            addResource(res, amount);
+            hideHarvestNode(this.harvestField, node);
+            node.respawnAt = now + 50;
+            this.log(`${agent.instance.def.displayName} gathered ${amount} ${res}`);
+          }
+        }
+      }
+
+      // Sync mesh
+      agent.instance.group.position.x = agent.pos.x;
+      agent.instance.group.position.z = agent.pos.z;
+      let dy = agent.facing - agent.instance.group.rotation.y;
+      while (dy > Math.PI) dy -= Math.PI * 2;
+      while (dy < -Math.PI) dy += Math.PI * 2;
+      agent.instance.group.rotation.y += dy * 0.2;
+      agent.instance.animator?.update(delta);
+    }
+  }
+
   worldToScreen(worldPos: THREE.Vector3): { x: number; y: number } {
     if (!this.container) return { x: -9999, y: -9999 };
     const pos = worldPos.clone().project(this.camera);
@@ -2670,6 +2818,11 @@ export class GameEngine {
     this.slashField = null;
     this.auras?.dispose();
     this.auras = null;
+    for (const a of this.allies) {
+      this.scene.remove(a.instance.group);
+      a.instance.dispose();
+    }
+    this.allies = [];
     if (this.skillCursor) {
       this.scene.remove(this.skillCursor);
       this.skillCursor.geometry.dispose();

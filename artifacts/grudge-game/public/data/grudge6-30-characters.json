@@ -1,0 +1,508 @@
+{
+  "source": "30grudge6characters.glb",
+  "characters": [
+    {
+      "rootIndex": 26,
+      "name": "AuxScene",
+      "meshCount": 4,
+      "boneCount": 21,
+      "prefixes": {
+        "WK": 4
+      },
+      "sampleMeshes": [
+        "WK_Units_Arms_A",
+        "WK_Units_head_A",
+        "WK_Units_Body_B",
+        "WK_Units_Legs_A"
+      ]
+    },
+    {
+      "rootIndex": 55,
+      "name": "AuxScene",
+      "meshCount": 5,
+      "boneCount": 21,
+      "prefixes": {
+        "WK": 5
+      },
+      "sampleMeshes": [
+        "WK_weapon_staff_C",
+        "WK_Units_Body_A",
+        "WK_Units_Arms_A",
+        "WK_Units_head_A",
+        "WK_Units_Legs_A"
+      ]
+    },
+    {
+      "rootIndex": 87,
+      "name": "AuxScene",
+      "meshCount": 7,
+      "boneCount": 21,
+      "prefixes": {
+        "WK": 7
+      },
+      "sampleMeshes": [
+        "WK_Shield_B",
+        "WK_weapon_sword_B",
+        "WK_Units_Legs_C",
+        "WK_Units_Body_E",
+        "WK_Units_head_F",
+        "WK_Units_shoulderpads_B",
+        "WK_Units_Arms_D"
+      ]
+    },
+    {
+      "rootIndex": 118,
+      "name": "AuxScene",
+      "meshCount": 6,
+      "boneCount": 21,
+      "prefixes": {
+        "WK": 6
+      },
+      "sampleMeshes": [
+        "WK_Xtra_quiver",
+        "WK_weapon_Bow",
+        "WK_Units_head_C",
+        "WK_Units_Body_B",
+        "WK_Units_Legs_B",
+        "WK_Units_Arms_B"
+      ]
+    },
+    {
+      "rootIndex": 148,
+      "name": "AuxScene",
+      "meshCount": 6,
+      "boneCount": 21,
+      "prefixes": {
+        "WK": 6
+      },
+      "sampleMeshes": [
+        "WK_weapon_axe_B",
+        "WK_Units_Body_C",
+        "WK_Units_shoulderpads_A",
+        "WK_Units_Legs_B",
+        "WK_Units_Arms_B",
+        "WK_Units_head_D"
+      ]
+    },
+    {
+      "rootIndex": 178,
+      "name": "AuxScene",
+      "meshCount": 6,
+      "boneCount": 21,
+      "prefixes": {
+        "DWF": 6
+      },
+      "sampleMeshes": [
+        "DWF_Weapon_axe_C",
+        "DWF_Units_Head_G",
+        "DWF_Units_Arms_B",
+        "DWF_Units_Shoulderpads_B",
+        "DWF_Units_Legs_B",
+        "DWF_Units_Body_C"
+      ]
+    },
+    {
+      "rootIndex": 208,
+      "name": "AuxScene",
+      "meshCount": 6,
+      "boneCount": 21,
+      "prefixes": {
+        "BRB": 6
+      },
+      "sampleMeshes": [
+        "BRB_weapon_axe_C",
+        "BRB_shoulderpads_B",
+        "BRB_head_B",
+        "BRB_legs_B",
+        "BRB_body_C",
+        "BRB_arms_B"
+      ]
+    },
+    {
+      "rootIndex": 240,
+      "name": "AuxScene",
+      "meshCount": 7,
+      "boneCount": 21,
+      "prefixes": {
+        "DWF": 7
+      },
+      "sampleMeshes": [
+        "DWF_Weapon_sword_B",
+        "DWF_Shield_B",
+        "DWF_Units_Head_F",
+        "DWF_Units_Arms_C",
+        "DWF_Units_Legs_C",
+        "DWF_Units_Body_D",
+        "DWF_Units_Shoulderpads_C"
+      ]
+    },
+    {
+      "rootIndex": 269,
+      "name": "AuxScene",
+      "meshCount": 5,
+      "boneCount": 21,
+      "prefixes": {
+        "UD": 5
+      },
+      "sampleMeshes": [
+        "UD_weapon_staff_D",
+        "UD_Units_head_A",
+        "UD_Units_arms_B",
+        "UD_Units_legs_B",
+        "UD_Units_body_G"
+      ]
+    },
+    {
+      "rootIndex": 301,
+      "name": "AuxScene",
+      "meshCount": 7,
+      "boneCount": 21,
+      "prefixes": {
+        "BRB": 7
+      },
+      "sampleMeshes": [
+        "BRB_weapon_Bow",
+        "BRB_Xtra_quiver",
+        "BRB_head_C",
+        "BRB_body_B",
+        "BRB_legs_B",
+        "BRB_shoulderpads_A",
+        "BRB_arms_B"
+      ]
+    },
+    {
+      "rootIndex": 333,
+      "name": "AuxScene",
+      "meshCount": 7,
+      "boneCount": 21,
+      "prefixes": {
+        "BRB": 7
+      },
+      "sampleMeshes": [
+        "BRB_Shield_B",
+        "BRB_weapon_sword_B",
+        "BRB_body_F",
+        "BRB_head_F",
+        "BRB_shoulderpads_C",
+        "BRB_arms_C",
+        "BRB_legs_C"
+      ]
+    },
+    {
+      "rootIndex": 360,
+      "name": "AuxScene",
+      "meshCount": 4,
+      "boneCount": 21,
+      "prefixes": {
+        "BRB": 4
+      },
+      "sampleMeshes": [
+        "BRB_body_B",
+        "BRB_head_A",
+        "BRB_legs_A",
+        "BRB_arms_A"
+      ]
+    },
+    {
+      "rootIndex": 390,
+      "name": "AuxScene",
+      "meshCount": 6,
+      "boneCount": 21,
+      "prefixes": {
+        "UD": 6
+      },
+      "sampleMeshes": [
+        "UD_weapon_Axe_B",
+        "UD_Units_legs_C",
+        "UD_Units_shoulderpads_B",
+        "UD_Units_arms_C",
+        "UD_Units_head_G",
+        "UD_Units_body_D"
+      ]
+    },
+    {
+      "rootIndex": 422,
+      "name": "AuxScene",
+      "meshCount": 7,
+      "boneCount": 21,
+      "prefixes": {
+        "ORC": 7
+      },
+      "sampleMeshes": [
+        "ORC_weapon_Bow",
+        "ORC_Xtra_quiver",
+        "ORC_Units_Shoulderpads_A",
+        "ORC_Units_Body_B",
+        "ORC_Units_Legs_B",
+        "ORC_Units_Head_B",
+        "ORC_Units_Arms_B"
+      ]
+    },
+    {
+      "rootIndex": 452,
+      "name": "AuxScene",
+      "meshCount": 6,
+      "boneCount": 21,
+      "prefixes": {
+        "ELF": 6
+      },
+      "sampleMeshes": [
+        "ELF_Units_Head_D",
+        "ELF_weapon_spear",
+        "ELF_Units_Body_C",
+        "ELF_Units_Shoulderpads_B",
+        "ELF_Units_Arms_B",
+        "ELF_Units_Legs_B"
+      ]
+    },
+    {
+      "rootIndex": 484,
+      "name": "AuxScene",
+      "meshCount": 7,
+      "boneCount": 21,
+      "prefixes": {
+        "DWF": 7
+      },
+      "sampleMeshes": [
+        "DWF_Weapon_bow",
+        "DWF_Xtra_quiver",
+        "DWF_Units_Head_C",
+        "DWF_Units_Arms_B",
+        "DWF_Units_Shoulderpads_A",
+        "DWF_Units_Body_B",
+        "DWF_Units_Legs_B"
+      ]
+    },
+    {
+      "rootIndex": 511,
+      "name": "AuxScene",
+      "meshCount": 4,
+      "boneCount": 21,
+      "prefixes": {
+        "UD": 4
+      },
+      "sampleMeshes": [
+        "UD_Units_head_A",
+        "UD_Units_legs_A",
+        "UD_Units_arms_A",
+        "UD_Units_body_B"
+      ]
+    },
+    {
+      "rootIndex": 540,
+      "name": "AuxScene",
+      "meshCount": 5,
+      "boneCount": 21,
+      "prefixes": {
+        "BRB": 5
+      },
+      "sampleMeshes": [
+        "BRB_weapon_staff_C",
+        "BRB_body_A",
+        "BRB_head_A",
+        "BRB_legs_A",
+        "BRB_arms_A"
+      ]
+    },
+    {
+      "rootIndex": 569,
+      "name": "AuxScene",
+      "meshCount": 5,
+      "boneCount": 21,
+      "prefixes": {
+        "ORC": 5
+      },
+      "sampleMeshes": [
+        "ORC_weapon_staff_C",
+        "ORC_Units_Legs_A",
+        "ORC_Units_Body_A",
+        "ORC_Units_Arms_A",
+        "ORC_Units_Head_A"
+      ]
+    },
+    {
+      "rootIndex": 601,
+      "name": "AuxScene",
+      "meshCount": 7,
+      "boneCount": 21,
+      "prefixes": {
+        "UD": 7
+      },
+      "sampleMeshes": [
+        "UD_weapon_Sword_B",
+        "UD_Shield_C",
+        "UD_Units_legs_D",
+        "UD_Units_arms_D",
+        "UD_Units_head_F",
+        "UD_Units_shoulderpads_C",
+        "UD_Units_body_F"
+      ]
+    },
+    {
+      "rootIndex": 628,
+      "name": "AuxScene",
+      "meshCount": 4,
+      "boneCount": 21,
+      "prefixes": {
+        "DWF": 4
+      },
+      "sampleMeshes": [
+        "DWF_Units_Arms_A",
+        "DWF_Units_Body_B",
+        "DWF_Units_Legs_A",
+        "DWF_Units_Head_A"
+      ]
+    },
+    {
+      "rootIndex": 657,
+      "name": "AuxScene",
+      "meshCount": 5,
+      "boneCount": 21,
+      "prefixes": {
+        "DWF": 5
+      },
+      "sampleMeshes": [
+        "DWF_Weapon_staff_B",
+        "DWF_Units_Arms_A",
+        "DWF_Units_Body_A",
+        "DWF_Units_Legs_A",
+        "DWF_Units_Head_A"
+      ]
+    },
+    {
+      "rootIndex": 689,
+      "name": "AuxScene",
+      "meshCount": 7,
+      "boneCount": 21,
+      "prefixes": {
+        "ORC": 7
+      },
+      "sampleMeshes": [
+        "ORC_Shield_C",
+        "ORC_weapon_Axe_C",
+        "ORC_Units_Body_F",
+        "ORC_Units_Arms_C",
+        "ORC_Units_Head_G",
+        "ORC_Units_Legs_C",
+        "ORC_Units_Shoulderpads_F"
+      ]
+    },
+    {
+      "rootIndex": 716,
+      "name": "AuxScene",
+      "meshCount": 4,
+      "boneCount": 21,
+      "prefixes": {
+        "ORC": 4
+      },
+      "sampleMeshes": [
+        "ORC_Units_Legs_A",
+        "ORC_Units_Body_A",
+        "ORC_Units_Arms_A",
+        "ORC_Units_Head_A"
+      ]
+    },
+    {
+      "rootIndex": 748,
+      "name": "AuxScene",
+      "meshCount": 7,
+      "boneCount": 21,
+      "prefixes": {
+        "ELF": 7
+      },
+      "sampleMeshes": [
+        "ELF_Units_Shoulderpads_C",
+        "ELF_Units_Head_G",
+        "ELF_weapon_sword_B",
+        "ELF_shield_B",
+        "ELF_Units_Body_E",
+        "ELF_Units_Arms_C",
+        "ELF_Units_Legs_C"
+      ]
+    },
+    {
+      "rootIndex": 778,
+      "name": "AuxScene",
+      "meshCount": 6,
+      "boneCount": 21,
+      "prefixes": {
+        "ORC": 6
+      },
+      "sampleMeshes": [
+        "ORC_weapon_Axe_B",
+        "ORC_Units_Body_C",
+        "ORC_Units_Shoulderpads_C",
+        "ORC_Units_Legs_B",
+        "ORC_Units_Arms_B",
+        "ORC_Units_Head_E"
+      ]
+    },
+    {
+      "rootIndex": 807,
+      "name": "AuxScene",
+      "meshCount": 5,
+      "boneCount": 21,
+      "prefixes": {
+        "ELF": 5
+      },
+      "sampleMeshes": [
+        "ELF_Units_Head_B",
+        "ELF_weapon_staff_C",
+        "ELF_Units_Arms_A",
+        "ELF_Units_Legs_A",
+        "ELF_Units_Body_A"
+      ]
+    },
+    {
+      "rootIndex": 839,
+      "name": "AuxScene",
+      "meshCount": 7,
+      "boneCount": 21,
+      "prefixes": {
+        "UD": 7
+      },
+      "sampleMeshes": [
+        "UD_weapon_Bow",
+        "UD_Xtra_Quiver",
+        "UD_Units_head_C",
+        "UD_Units_arms_B",
+        "UD_Units_legs_B",
+        "UD_Units_shoulderpads_A",
+        "UD_Units_body_B"
+      ]
+    },
+    {
+      "rootIndex": 871,
+      "name": "AuxScene",
+      "meshCount": 7,
+      "boneCount": 21,
+      "prefixes": {
+        "ELF": 7
+      },
+      "sampleMeshes": [
+        "ELF_Units_Shoulderpads_A",
+        "ELF_weapon_bow",
+        "ELF_Xtra_quiver",
+        "ELF_Units_Head_C",
+        "ELF_Units_Arms_B",
+        "ELF_Units_Body_B",
+        "ELF_Units_Legs_B"
+      ]
+    },
+    {
+      "rootIndex": 898,
+      "name": "AuxScene",
+      "meshCount": 4,
+      "boneCount": 21,
+      "prefixes": {
+        "ELF": 4
+      },
+      "sampleMeshes": [
+        "ELF_Units_Arms_A",
+        "ELF_Units_Legs_A",
+        "ELF_Units_Head_A",
+        "ELF_Units_Body_B"
+      ]
+    }
+  ]
+}
