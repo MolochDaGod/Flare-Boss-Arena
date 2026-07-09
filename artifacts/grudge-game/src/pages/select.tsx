@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { Flame, Check, ArrowRight, Sparkles } from "lucide-react";
+import { Flame, Check, ArrowRight, Sparkles, Pause, Play } from "lucide-react";
 import {
   FIGHTERS,
   ATTR_ORDER,
@@ -137,6 +137,7 @@ export default function Select() {
   const [clipNames, setClipNames] = useState<string[]>([...RACALVIN_ANIMS]);
   const [weaponPreview, setWeaponPreview] = useState<"sword" | "pistol">("sword");
   const [tunerOpen, setTunerOpen] = useState(false);
+  const [previewSpin, setPreviewSpin] = useState(true);
 
   const { evolutionGroups, standalone } = useMemo(() => {
     const inFamily = new Set<string>();
@@ -197,10 +198,19 @@ export default function Select() {
               skinId={selected.skinId}
               fighterId={selected.id}
               tuning={assetTuning}
-              pauseRotation={tunerOpen}
+              pauseRotation={!previewSpin}
               onMeshesReady={setMeshNames}
               onClipsReady={(clips) => setClipNames(clips.length ? clips : [...RACALVIN_ANIMS])}
             />
+            <button
+              type="button"
+              title={previewSpin ? "Stop preview spin" : "Resume preview spin"}
+              aria-label={previewSpin ? "Stop preview spin" : "Resume preview spin"}
+              onClick={() => setPreviewSpin((s) => !s)}
+              className="absolute right-14 top-3 z-30 flex h-9 w-9 items-center justify-center rounded-full border border-[#c5a059]/50 bg-black/80 text-[#c5a059] shadow-lg backdrop-blur-sm transition hover:scale-105 hover:bg-[#c5a059]/20 hover:text-[#e8c87a]"
+            >
+              {previewSpin ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            </button>
             <FighterAssetTuner
               fighterId={selected.id}
               fighterName={selected.name}
@@ -215,6 +225,8 @@ export default function Select() {
               }}
               onPreviewClip={(clip) => previewRef.current?.previewClip(clip)}
               onOpenChange={setTunerOpen}
+              previewSpin={previewSpin}
+              onPreviewSpinChange={setPreviewSpin}
             />
             {selected.featured && (
               <span className="absolute left-4 top-4 rounded-full border border-[#c5a059]/50 bg-black/50 px-3 py-1 font-serif text-[10px] uppercase tracking-widest text-[#c5a059]">

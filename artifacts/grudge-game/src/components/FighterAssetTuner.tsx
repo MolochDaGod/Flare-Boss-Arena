@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Copy, Move3d, RotateCw, RotateCcw, Scaling, Settings2 } from "lucide-react";
+import { Copy, Move3d, Pause, Play, RotateCw, RotateCcw, Scaling, Settings2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import {
   Sheet,
   SheetContent,
@@ -32,6 +33,12 @@ export interface FighterAssetTunerProps {
   onWeaponPreviewChange: (mode: "sword" | "pistol") => void;
   onPreviewClip: (clip: string) => void;
   onOpenChange?: (open: boolean) => void;
+  previewSpin: boolean;
+  onPreviewSpinChange: (spin: boolean) => void;
+}
+
+function clampNum(v: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, v));
 }
 
 function AxisSliders({
@@ -43,6 +50,7 @@ function AxisSliders({
   labels,
   onChange,
   fmt = (v: number) => String(v),
+  parse = (raw: string) => Number(raw),
 }: {
   title: string;
   values: [number, number, number];
@@ -52,21 +60,36 @@ function AxisSliders({
   labels: [string, string, string];
   onChange: (next: [number, number, number]) => void;
   fmt?: (v: number) => string;
+  parse?: (raw: string) => number;
 }) {
+  const setAxis = (i: number, raw: string) => {
+    const n = parse(raw);
+    if (!Number.isFinite(n)) return;
+    const next = [...values] as [number, number, number];
+    next[i] = clampNum(n, min, max);
+    onChange(next);
+  };
+
   return (
     <div className="space-y-2 rounded border border-white/10 bg-black/30 p-3">
       <p className="font-serif text-[10px] uppercase tracking-widest text-[#c5a059]/90">{title}</p>
       {values.map((v, i) => (
         <div key={labels[i]} className="space-y-1">
-          <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
-            <span>{labels[i]}</span>
-            <span>{fmt(v)}</span>
+          <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-muted-foreground">
+            <span className="shrink-0">{labels[i]}</span>
+            <Input
+              type="number"
+              step={step}
+              value={Number.isFinite(v) ? String(v) : "0"}
+              onChange={(e) => setAxis(i, e.target.value)}
+              className="h-7 w-[5.5rem] border-white/15 bg-black/50 px-2 py-0 text-right text-[10px] font-mono"
+            />
           </div>
           <Slider
             min={min}
             max={max}
             step={step}
-            value={[v]}
+            value={[clampNum(v, min, max)]}
             onValueChange={([nv]) => {
               const next = [...values] as [number, number, number];
               next[i] = nv;
@@ -75,6 +98,52 @@ function AxisSliders({
           />
         </div>
       ))}
+    </div>
+  );
+}
+
+function ScalarControl({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  fmt = (v: number) => v.toFixed(3),
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+  fmt?: (v: number) => string;
+}) {
+  const setValue = (raw: string) => {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return;
+    onChange(clampNum(n, min, max));
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-muted-foreground">
+        <span>{label}</span>
+        <Input
+          type="number"
+          step={step}
+          value={Number.isFinite(value) ? String(value) : "0"}
+          onChange={(e) => setValue(e.target.value)}
+          className="h-7 w-[5.5rem] border-white/15 bg-black/50 px-2 py-0 text-right text-[10px] font-mono"
+        />
+      </div>
+      <Slider
+        min={min}
+        max={max}
+        step={step}
+        value={[clampNum(value, min, max)]}
+        onValueChange={([nv]) => onChange(nv)}
+      />
     </div>
   );
 }
@@ -99,12 +168,11 @@ function WeaponEditor({
       <AxisSliders
         title="Position (hand local)"
         values={weapon.position}
-        min={-0.35}
-        max={0.35}
-        step={0.005}
+        min={-2}
+        max={2}
+        step={0.002}
         labels={["X", "Y", "Z"]}
         onChange={(position) => onChange({ ...weapon, position })}
-        fmt={(v) => v.toFixed(3)}
       />
 
       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
@@ -114,12 +182,11 @@ function WeaponEditor({
       <AxisSliders
         title="Rotation (degrees)"
         values={weapon.rotation}
-        min={-180}
-        max={180}
-        step={0.5}
+        min={-360}
+        max={360}
+        step={0.25}
         labels={["Pitch X", "Yaw Y", "Roll Z"]}
         onChange={(rotation) => onChange({ ...weapon, rotation })}
-        fmt={(v) => `${v.toFixed(1)}°`}
       />
 
       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
@@ -127,32 +194,23 @@ function WeaponEditor({
         <span className="font-serif uppercase tracking-widest">Scale</span>
       </div>
       <div className="space-y-2 rounded border border-white/10 bg-black/30 p-3">
-        <div className="space-y-1">
-          <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
-            <span>Weapon length</span>
-            <span>{weapon.targetLength.toFixed(2)}</span>
-          </div>
-          <Slider
-            min={0.08}
-            max={2.5}
-            step={0.01}
-            value={[weapon.targetLength]}
-            onValueChange={([targetLength]) => onChange({ ...weapon, targetLength })}
-          />
-        </div>
-        <div className="space-y-1">
-          <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
-            <span>Grip offset Y</span>
-            <span>{weapon.gripYOffset.toFixed(3)}</span>
-          </div>
-          <Slider
-            min={-0.2}
-            max={0.2}
-            step={0.005}
-            value={[weapon.gripYOffset]}
-            onValueChange={([gripYOffset]) => onChange({ ...weapon, gripYOffset })}
-          />
-        </div>
+        <ScalarControl
+          label="Weapon length"
+          value={weapon.targetLength}
+          min={0.02}
+          max={5}
+          step={0.01}
+          onChange={(targetLength) => onChange({ ...weapon, targetLength })}
+          fmt={(v) => v.toFixed(2)}
+        />
+        <ScalarControl
+          label="Grip offset Y"
+          value={weapon.gripYOffset}
+          min={-1}
+          max={1}
+          step={0.002}
+          onChange={(gripYOffset) => onChange({ ...weapon, gripYOffset })}
+        />
       </div>
     </div>
   );
@@ -221,12 +279,15 @@ export function FighterAssetTuner({
   onWeaponPreviewChange,
   onPreviewClip,
   onOpenChange,
+  previewSpin,
+  onPreviewSpinChange,
 }: FighterAssetTunerProps) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const setSheetOpen = (v: boolean) => {
     setOpen(v);
     onOpenChange?.(v);
+    if (v) onPreviewSpinChange(false);
   };
   const [tab, setTab] = useState<"sword" | "pistol" | "meshes">("sword");
 
@@ -298,6 +359,26 @@ export function FighterAssetTuner({
         </SheetHeader>
 
         <div className="mt-5 space-y-4">
+          <div className="flex items-center justify-between rounded border border-white/10 bg-black/30 px-3 py-2">
+            <div>
+              <p className="font-serif text-[10px] uppercase tracking-widest text-[#c5a059]/90">
+                Preview spin
+              </p>
+              <p className="text-[9px] text-muted-foreground">
+                Stop spin to drag the view and place weapons precisely.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant={previewSpin ? "default" : "outline"}
+              className="gap-1 text-[10px]"
+              onClick={() => onPreviewSpinChange(!previewSpin)}
+            >
+              {previewSpin ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+              {previewSpin ? "Spinning" : "Stopped"}
+            </Button>
+          </div>
+
           {showWeapons && (
             <div className="flex gap-1">
               {(["sword", "pistol", "meshes"] as const).map((t) => (

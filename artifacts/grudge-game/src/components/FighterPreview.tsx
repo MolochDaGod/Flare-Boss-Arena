@@ -42,6 +42,7 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
   const fighterId = fighterIdProp ?? skinId;
   const tuning = tuningProp ?? getFighterAssetTuning(fighterId);
   const mountRef = useRef<HTMLDivElement>(null);
+  const pauseRotationRef = useRef(pauseRotation);
   const sceneRef = useRef<{
     model: THREE.Object3D | null;
     mixer: THREE.AnimationMixer | null;
@@ -49,6 +50,10 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     activeAction: THREE.AnimationAction | null;
   }>({ model: null, mixer: null, clips: [], activeAction: null });
   const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    pauseRotationRef.current = pauseRotation;
+  }, [pauseRotation]);
 
   useImperativeHandle(ref, () => ({
     previewClip(name: string) {
@@ -105,19 +110,71 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(32, w / h, 0.1, 100);
+    const lookAt = new THREE.Vector3(0, 1.0, 0);
+    let orbitRadius = 4.8;
+    let orbitYaw = 0;
+    let orbitPitch = 0.12;
+
+    const applyOrbit = () => {
+      const cp = Math.cos(orbitPitch);
+      camera.position.set(
+        Math.sin(orbitYaw) * cp * orbitRadius,
+        lookAt.y + Math.sin(orbitPitch) * orbitRadius,
+        Math.cos(orbitYaw) * cp * orbitRadius,
+      );
+      camera.lookAt(lookAt);
+    };
+
     const fitCamera = (nw: number, nh: number) => {
       const aspect = nw / nh;
       camera.aspect = aspect;
       camera.updateProjectionMatrix();
       if (aspect > 1.15) {
-        camera.position.set(0, 1.05, 5.4);
-        camera.lookAt(0, 0.92, 0);
+        orbitRadius = 5.4;
+        lookAt.set(0, 0.92, 0);
+        orbitPitch = 0.08;
       } else {
-        camera.position.set(0, 1.25, 4.6);
-        camera.lookAt(0, 1.05, 0);
+        orbitRadius = 4.6;
+        lookAt.set(0, 1.05, 0);
+        orbitPitch = 0.12;
       }
+      applyOrbit();
     };
     fitCamera(w, h);
+
+    let dragging = false;
+    let lastX = 0;
+    let lastY = 0;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!pauseRotationRef.current) return;
+      dragging = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      renderer.domElement.setPointerCapture(e.pointerId);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!dragging || !pauseRotationRef.current) return;
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      orbitYaw -= dx * 0.008;
+      orbitPitch = Math.max(-0.6, Math.min(0.85, orbitPitch + dy * 0.006));
+      applyOrbit();
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      dragging = false;
+      try {
+        renderer.domElement.releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
+    };
+    renderer.domElement.style.touchAction = "none";
+    renderer.domElement.addEventListener("pointerdown", onPointerDown);
+    renderer.domElement.addEventListener("pointermove", onPointerMove);
+    renderer.domElement.addEventListener("pointerup", onPointerUp);
+    renderer.domElement.addEventListener("pointercancel", onPointerUp);
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.85));
     const key = new THREE.DirectionalLight(0xfff1d6, 1.5);
@@ -213,7 +270,7 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
       raf = requestAnimationFrame(render);
       const d = clock.getDelta();
       mixer?.update(d);
-      if (model && !pauseRotation) model.rotation.y += d * 0.5;
+      if (model && !pauseRotationRef.current) model.rotation.y += d * 0.5;
       renderer.render(scene, camera);
     };
     render();
@@ -234,6 +291,10 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
       cancelAnimationFrame(raf);
       resizeObserver.disconnect();
       window.removeEventListener("resize", onResize);
+      renderer.domElement.removeEventListener("pointerdown", onPointerDown);
+      renderer.domElement.removeEventListener("pointermove", onPointerMove);
+      renderer.domElement.removeEventListener("pointerup", onPointerUp);
+      renderer.domElement.removeEventListener("pointercancel", onPointerUp);
       mixer?.stopAllAction();
       if (model) {
         scene.remove(model);

@@ -68,10 +68,15 @@ function propToMount(mount: THREE.Object3D, w: WeaponMountTuning) {
   const d2r = Math.PI / 180;
   mount.rotation.set(w.rotation[0] * d2r, w.rotation[1] * d2r, w.rotation[2] * d2r);
   const baked = mount.userData.bakedLength as number | undefined;
-  const holder = mount.children[0];
+  const holder = mount.children[0] as THREE.Object3D | undefined;
   if (holder && baked && baked > 1e-6) {
     const ratio = w.targetLength / baked;
     holder.scale.setScalar(ratio);
+  }
+  const baseMinY = holder?.userData.baseMinY as number | undefined;
+  const prop = holder?.children[0];
+  if (prop && baseMinY !== undefined) {
+    prop.position.y = -baseMinY - (w.gripYOffset ?? 0);
   }
 }
 
@@ -242,12 +247,11 @@ function buildPropHolder(prop: THREE.Object3D, tuning: PropTuning): THREE.Group 
   box2.getCenter(center);
   prop.position.x -= center.x;
   prop.position.z -= center.z;
-  prop.position.y -= box2.min.y + (tuning.gripYOffset ?? 0);
+  prop.position.y = -box2.min.y - (tuning.gripYOffset ?? 0);
 
   const holder = new THREE.Group();
+  holder.userData.baseMinY = box2.min.y;
   holder.add(prop);
-  holder.position.copy(tuning.position);
-  holder.rotation.copy(tuning.rotation);
   return holder;
 }
 
