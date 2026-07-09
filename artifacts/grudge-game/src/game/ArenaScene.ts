@@ -352,6 +352,9 @@ export class ArenaScene {
     this.buildBraziers();
     this.loadPlayer();
     this.loadBoss();
+    // Arena is interactive as soon as the pit exists — player/boss models stream in.
+    // Keeps HUD usable even if a skin GLB is slow (was stuck on "Entering…" forever).
+    this.loaded = true;
     this.emitState();
 
     window.addEventListener("resize", this.onResize);

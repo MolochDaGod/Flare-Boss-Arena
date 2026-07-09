@@ -412,31 +412,35 @@ export function loadActiveFighterModel(
   loader.load(
     skinUrl(skin),
     (gltf) => {
-      const model = gltf.scene;
-      model.traverse((c) => {
-        const m = c as THREE.Mesh & { isSkinnedMesh?: boolean };
-        if (m.isMesh) {
-          m.castShadow = true;
-          m.receiveShadow = true;
-          m.frustumCulled = false;
-        }
-      });
-      const wrapper = new THREE.Group();
-      model.updateWorldMatrix(true, true);
-      const box = new THREE.Box3().setFromObject(model);
-      const size = new THREE.Vector3();
-      box.getSize(size);
-      if (size.y > 0.001) model.scale.setScalar(targetHeight / size.y);
-      model.updateWorldMatrix(true, true);
-      const box2 = new THREE.Box3().setFromObject(model);
-      const center = new THREE.Vector3();
-      box2.getCenter(center);
-      model.position.x -= center.x;
-      model.position.z -= center.z;
-      model.position.y -= box2.min.y;
-      wrapper.add(model);
-      const { actions, pool, attackBlend } = buildSkinAnim(gltf.animations, skin.scheme);
-      onReady(wrapper, new SkinHeroAdapter(new PlayerAnimator(model, actions, pool, { attackBlend })));
+      try {
+        const model = gltf.scene;
+        model.traverse((c) => {
+          const m = c as THREE.Mesh & { isSkinnedMesh?: boolean };
+          if (m.isMesh) {
+            m.castShadow = true;
+            m.receiveShadow = true;
+            m.frustumCulled = false;
+          }
+        });
+        const wrapper = new THREE.Group();
+        model.updateWorldMatrix(true, true);
+        const box = new THREE.Box3().setFromObject(model);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        if (size.y > 0.001) model.scale.setScalar(targetHeight / size.y);
+        model.updateWorldMatrix(true, true);
+        const box2 = new THREE.Box3().setFromObject(model);
+        const center = new THREE.Vector3();
+        box2.getCenter(center);
+        model.position.x -= center.x;
+        model.position.z -= center.z;
+        model.position.y -= box2.min.y;
+        wrapper.add(model);
+        const { actions, pool, attackBlend } = buildSkinAnim(gltf.animations, skin.scheme);
+        onReady(wrapper, new SkinHeroAdapter(new PlayerAnimator(model, actions, pool, { attackBlend })));
+      } catch {
+        onMiss();
+      }
     },
     undefined,
     () => onMiss(),

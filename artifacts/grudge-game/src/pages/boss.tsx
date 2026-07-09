@@ -592,11 +592,11 @@ function BossArena() {
             })}
           </div>
 
-          {/* Loading overlay until models stream in */}
+          {/* Soft load cue only — never blocks input (models stream under the HUD). */}
           {!hud.loaded && (
-            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black/50">
-              <Loader2 className="w-10 h-10 animate-spin" style={{ color: GOLD }} />
-              <p className="font-serif tracking-widest uppercase text-sm" style={{ color: GOLD }}>Entering the arena...</p>
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1.5 rounded pointer-events-none" style={{ ...stonePanel, opacity: 0.9 }}>
+              <Loader2 className="w-4 h-4 animate-spin" style={{ color: GOLD }} />
+              <p className="font-serif tracking-widest uppercase text-[10px]" style={{ color: GOLD }}>Streaming models…</p>
             </div>
           )}
 
