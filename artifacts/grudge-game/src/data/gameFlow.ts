@@ -102,8 +102,8 @@ export const PLAY_LOOP: { step: number; label: string; route: NavHref; note: str
   { step: 2, label: "Form a party", route: "/party", note: "Up to 2 Grudge6 allies" },
   { step: 3, label: "Socket stones", route: "/equipment", note: "Attribute stones & procs" },
   { step: 4, label: "Rank skills & perks", route: "/skills", note: "Grimoire + perk machines" },
-  { step: 5, label: "Enter world", route: "/game", note: "Islands, harvest, progressive rounds" },
-  { step: 6, label: "Boss & rewards", route: "/boss", note: "Arena fights · claim rewards" },
+  { step: 5, label: "Enter world", route: "/game", note: "Cull hostiles → Island Colossus → sail onward" },
+  { step: 6, label: "Boss & rewards", route: "/boss", note: "Standalone arena · claim rewards" },
 ];
 
 /** Keyboard: open systems hub (also used by Escape in fullscreen modes). */

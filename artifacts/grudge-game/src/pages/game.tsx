@@ -13,6 +13,7 @@ import { useResolvedSkills } from "@/data/skillsResolver";
 import { SkillIcon } from "@/components/SkillIcon";
 import { BarGauge, OrbGauge, Separator, WarningBanner } from "@/components/CraftpixUI";
 import loadingSpinner from "@assets/grudgestudio_1782639192041.gif";
+import { bootArmadaEngine } from "@/data/armadaEngine";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
 class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -322,8 +323,29 @@ function Game() {
           War Panel
         </button>
 
-        <div className="text-center">
+        <div className="text-center pointer-events-none max-w-md">
           <p className="text-[10px] font-serif uppercase tracking-[0.2em] text-muted-foreground/60">{gameState?.zone ?? ""}</p>
+          {gameState && gameState.missionGoal > 0 && (
+            <div className="mt-2 px-3 py-2 rounded border border-primary/30 bg-black/55 backdrop-blur-sm">
+              <p className="text-[10px] font-serif uppercase tracking-widest text-primary">{gameState.missionTitle}</p>
+              <div className="mt-1.5 h-1.5 bg-black/60 border border-white/10 rounded-sm overflow-hidden">
+                <div
+                  className="h-full rounded-sm transition-all duration-300"
+                  style={{
+                    width: `${Math.min(100, (gameState.missionProgress / gameState.missionGoal) * 100)}%`,
+                    background: gameState.runPhase === "victory" ? "#22c55e" : "#c5a059",
+                  }}
+                />
+              </div>
+              <p className="text-[9px] font-mono text-muted-foreground mt-1">
+                {gameState.runPhase === "victory"
+                  ? "Island secured — sail from Pirate Cove (E)"
+                  : gameState.runPhase === "boss_fight" || gameState.runPhase === "boss_alert"
+                  ? "Island Colossus active"
+                  : `${gameState.missionProgress} / ${gameState.missionGoal} hostiles`}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Mini stats top-right */}
@@ -502,6 +524,16 @@ function Game() {
         </div>
       )}
 
+      {/* Cove interact prompt */}
+      {gameState?.nearbyInteract && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+          <div className="px-4 py-2 rounded border border-[#c5a059]/50 bg-black/75 backdrop-blur-sm text-center">
+            <p className="text-[10px] font-serif uppercase tracking-widest text-[#c5a059]">{gameState.nearbyInteract}</p>
+            <p className="text-[9px] font-mono text-muted-foreground mt-0.5">Press E to engage</p>
+          </div>
+        </div>
+      )}
+
       {/* Action buttons — bottom centre */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex gap-3 px-4 py-2.5" style={stonePanel}>
         <Rivets />
@@ -571,6 +603,7 @@ function Game() {
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F / Space — Attack Nearest</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Q / Shift — Dodge</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">1–5 — Skills</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">E — Cove interact (vendor / sail)</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Left Click Ground — Move To</p>
             </div>
           </motion.div>

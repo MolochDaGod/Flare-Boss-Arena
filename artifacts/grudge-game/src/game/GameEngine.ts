@@ -6,6 +6,8 @@ import { isKitMonsterId, loadKitMonster, disposeKitModel, KIT_TEMPLATES } from "
 import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
 import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle } from "./PirateNPC";
+import { RunDirector } from "./RunDirector";
+import { BOSS_MONSTER_TEMPLATES } from "../data/bossMonsters";
 import { Townsperson } from "./Townsfolk";
 import { PlayerAnimator, buildAuthoredClips } from "./PlayerAnimator";
 import {
@@ -112,6 +114,14 @@ export interface GameState {
   loaded: boolean;
   /** True once the dungeon GLB + collision BVH are built (or load failed). */
   mapReady: boolean;
+  /** Island run — progressive rounds & missions */
+  runRound: number;
+  runPhase: string;
+  missionTitle: string;
+  missionProgress: number;
+  missionGoal: number;
+  nearbyInteract: string | null;
+  canSail: boolean;
 }
 
 export interface PlayerInitStats {
@@ -214,6 +224,9 @@ export class GameEngine {
   private collectedPropIds = new Set<string>();
   private coveLabel: THREE.Sprite | null = null;
   private coveCenter = new THREE.Vector3(70, 0, -14);
+  private runDirector = new RunDirector();
+  private nearbyInteract: string | null = null;
+  private bossSpawnTimer = 0;
   private disposed = false;
   private hoveredEnemy: EnemyInstance | null = null;
   private hoverEmissive = new Map<THREE.MeshStandardMaterial, { hex: number; intensity: number }>();
@@ -399,19 +412,21 @@ export class GameEngine {
     this.loadCoveProp("world/Prop_Barrel.gltf", new THREE.Vector3(c.x - 3.5, 0, c.z + 1), 1.1, 0);
     this.loadCoveProp("world/Prop_Anchor.gltf", new THREE.Vector3(c.x - 1.5, 0, c.z + 3.5), 1.4, -0.4);
 
-    // Three neutral pirate allies standing around the cove.
-    const trio = PIRATE_DEFS.slice(0, 3);
-    trio.forEach((def, i) => {
-      const angle = (i / trio.length) * Math.PI * 0.8 - Math.PI * 0.4;
-      const px = c.x - 2 + Math.cos(angle) * 3.2;
-      const pz = c.z + 2 + Math.sin(angle) * 3.2;
-      const handle = loadPirate(def, this.loader);
-      handle.group.position.set(px, 0, pz);
-      handle.group.rotation.y = Math.atan2(-px, -pz); // face the map centre
+    // Cove NPCs — vendor + captain (re-sail) + crew.
+    const coveNpcs = [
+      { def: PIRATE_DEFS.find((p) => p.role === "vendor") ?? PIRATE_DEFS[0], x: c.x - 4, z: c.z + 3 },
+      { def: PIRATE_DEFS.find((p) => p.role === "captain") ?? PIRATE_DEFS[1], x: c.x + 2, z: c.z + 4 },
+      { def: PIRATE_DEFS[2], x: c.x - 1, z: c.z + 1.5 },
+    ];
+    for (const npc of coveNpcs) {
+      if (!npc.def) continue;
+      const handle = loadPirate(npc.def, this.loader);
+      handle.group.position.set(npc.x, 0, npc.z);
+      handle.group.rotation.y = Math.atan2(c.x - npc.x, c.z - npc.z);
       handle.group.userData.waveTimer = 1.5 + Math.random() * 4;
       this.scene.add(handle.group);
       this.pirates.push(handle);
-    });
+    }
 
     this.addCoveLabel(new THREE.Vector3(c.x + 1, 4.6, c.z));
 
@@ -745,6 +760,12 @@ export class GameEngine {
     // Spawn the KayKit skeleton minions (real shared-library skeletal animation).
     for (const m of KIT_TEMPLATES) configs.push({ template: m, count: m.tier === 1 ? 3 : 2 });
 
+    const bonus = this.runDirector.extraSpawnPacks();
+    if (bonus > 0 && configs.length > 0) {
+      const extra = configs[Math.floor(Math.random() * configs.length)]!;
+      configs.push({ template: extra.template, count: bonus });
+    }
+
     for (const { template, count } of configs) {
       for (let i = 0; i < count; i++) {
         const D = this.DUNGEON - 3;
@@ -802,19 +823,20 @@ export class GameEngine {
     return chosen;
   }
 
-  private createEnemy(template: EnemyTemplate, pos: THREE.Vector3): EnemyInstance {
+  private createEnemy(template: EnemyTemplate, pos: THREE.Vector3, opts?: { skipScale?: boolean }): EnemyInstance {
+    const scaled = opts?.skipScale ? template : this.runDirector.scaledTemplate(template);
     const id = `e${this.enemyIdCounter++}`;
     const retag = (m: EnemyModel) => {
       // Re-tag children once the GLB has streamed in so raycast targeting
       // works on the real meshes.
       m.group.traverse((c) => { c.userData.enemyId = id; });
     };
-    const modelId = this.resolveAnimatedModelId(template);
+    const modelId = this.resolveAnimatedModelId(scaled);
     const model = isKitMonsterId(modelId)
       ? loadKitMonster(modelId, this.loader, retag)
       : isMonsterId(modelId)
         ? loadMonsterModel(modelId, this.loader, retag)
-        : createEnemyModel(template.name, template.type, template.tier);
+        : createEnemyModel(scaled.name, scaled.type, scaled.tier);
     model.group.position.set(pos.x, model.baseY, pos.z);
     model.group.userData.baseY = model.baseY;
     model.group.userData.enemyId = id;
@@ -822,11 +844,11 @@ export class GameEngine {
 
     const enemy: EnemyInstance = {
       id,
-      template,
+      template: scaled,
       model,
       anim: makeAnimState(),
-      hp: template.hp,
-      maxHp: template.hp,
+      hp: scaled.hp,
+      maxHp: scaled.hp,
       state: "idle",
       position: pos.clone(),
       patrolTarget: pos.clone(),
@@ -835,9 +857,9 @@ export class GameEngine {
       attackCooldown: Math.random() * 1.5,
       attackWindup: 0,
       hurtTimer: 0,
-      aggroRange: 6.5 + template.tier * 0.6,
-      attackRange: 1.8 + template.tier * 0.2 + (model.archetype === "dragon" || model.archetype === "golem" ? 1.2 : 0),
-      speed: model.archetype === "flying" ? 3.5 : model.archetype === "golem" ? 1.6 : model.archetype === "dragon" ? 2.4 : 2.4 + template.tier * 0.35,
+      aggroRange: 6.5 + scaled.tier * 0.6,
+      attackRange: 1.8 + scaled.tier * 0.2 + (model.archetype === "dragon" || model.archetype === "golem" ? 1.2 : 0),
+      speed: model.archetype === "flying" ? 3.5 : model.archetype === "golem" ? 1.6 : model.archetype === "dragon" ? 2.4 : 2.4 + scaled.tier * 0.35,
     };
 
     // Make every mesh under the enemy carry the enemyId for raycast hits
@@ -861,6 +883,10 @@ export class GameEngine {
       if (e.code === "KeyQ" || e.code === "ShiftLeft" || e.code === "ShiftRight") {
         e.preventDefault();
         this.doDodge();
+      }
+      if (e.code === "KeyE") {
+        e.preventDefault();
+        this.engageNearbyPirate();
       }
       const n = Number(e.key);
       if (n >= 1 && n <= 5) {
@@ -1256,9 +1282,14 @@ export class GameEngine {
       this.hoveredEnemy = null;
     }
 
-    const xp = enemy.template.tier * 50 + 25;
+    const isBoss = enemy.template.id.startsWith("boss_");
+    const xp = enemy.template.tier * 50 + 25 + (isBoss ? 200 : 0);
     this.playerXp += xp;
     this.log(`${enemy.template.name} defeated! +${xp} XP`);
+
+    for (const ev of this.runDirector.onKill(isBoss)) {
+      this.handleRunEvent(ev);
+    }
 
     setTimeout(() => {
       enemy.state = "dead";
@@ -1267,8 +1298,6 @@ export class GameEngine {
       if (enemy.model.kit) {
         disposeKitModel(enemy.model);
       } else if (enemy.model.isGLB) {
-        // Thorough GLB cleanup (mixer + geometry + materials + textures), and
-        // releases resources even if the GLB is still streaming in.
         disposeMonsterModel(enemy.model);
       } else {
         enemy.model.group.traverse((c) => {
@@ -1279,14 +1308,110 @@ export class GameEngine {
       }
     }, 1400);
 
-    setTimeout(() => {
-      const idx = this.enemies.indexOf(enemy);
-      if (idx !== -1) this.enemies.splice(idx, 1);
-      const spawnPos = enemy.spawnPos.clone();
-      spawnPos.x += (Math.random() - 0.5) * 4;
-      spawnPos.z += (Math.random() - 0.5) * 4;
-      this.createEnemy(enemy.template, spawnPos);
-    }, 14000);
+    const phase = this.runDirector.phase;
+    const shouldRespawn = !isBoss && phase !== "boss_alert" && phase !== "boss_fight" && phase !== "victory";
+    if (shouldRespawn) {
+      setTimeout(() => {
+        const idx = this.enemies.indexOf(enemy);
+        if (idx !== -1) this.enemies.splice(idx, 1);
+        const spawnPos = enemy.spawnPos.clone();
+        spawnPos.x += (Math.random() - 0.5) * 4;
+        spawnPos.z += (Math.random() - 0.5) * 4;
+        this.createEnemy(enemy.template, spawnPos);
+      }, 14000);
+    } else {
+      setTimeout(() => {
+        const idx = this.enemies.indexOf(enemy);
+        if (idx !== -1) this.enemies.splice(idx, 1);
+      }, 1400);
+    }
+  }
+
+  private handleRunEvent(ev: import("./RunDirector").RunEvent) {
+    if (ev.type === "mission_progress") {
+      this.log(`Mission: ${ev.kills}/${ev.goal} hostiles culled`);
+    } else if (ev.type === "boss_alert") {
+      this.log("The Island Colossus stirs — brace yourself!");
+      this.bossSpawnTimer = 2.2;
+    } else if (ev.type === "boss_defeated") {
+      this.log("Island secured! Speak with Capt. Barbarossa at the cove (E) to sail onward.");
+    } else if (ev.type === "sail") {
+      this.log(`Sailing to Island Round ${ev.round}…`);
+    }
+    this.notifyState();
+  }
+
+  private spawnIslandBoss(bossId: string) {
+    const template = BOSS_MONSTER_TEMPLATES.find((t) => t.id === bossId);
+    if (!template) return;
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 22 + Math.random() * 8;
+    const pos = new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+    this.runDirector.beginBossFight();
+    this.createEnemy(template, pos);
+    this.log(`${template.name} has landed!`);
+    this.notifyState();
+  }
+
+  private clearHostileEnemies() {
+    for (const en of [...this.enemies]) {
+      en.state = "dead";
+      this.scene.remove(en.model.group);
+      en.model.group.userData.disposed = true;
+      if (en.model.kit) disposeKitModel(en.model);
+      else if (en.model.isGLB) disposeMonsterModel(en.model);
+    }
+    this.enemies = [];
+    this.targetEnemy = null;
+    this.hoveredEnemy = null;
+  }
+
+  private reSailToNextIsland() {
+    const ev = this.runDirector.sailToNextIsland();
+    this.handleRunEvent(ev);
+    this.clearHostileEnemies();
+    this.bossSpawnTimer = 0;
+    this.spawnInitialEnemies();
+    this.playerHp = Math.min(this.playerMaxHp, this.playerHp + this.playerMaxHp * 0.35);
+    this.playerMana = this.playerMaxMana;
+    this.log(this.runDirector.zone);
+  }
+
+  private engageNearbyPirate() {
+    if (!this.nearbyInteract) return;
+    const captain = this.pirates.find((p) => p.def.role === "captain");
+    if (captain && this.runDirector.canSail() && this.nearbyInteract.includes("Sail")) {
+      captain.animator?.wave();
+      this.reSailToNextIsland();
+      return;
+    }
+    if (this.nearbyInteract.includes("Trade")) {
+      this.log("Anne Bonny: vendor trades coming soon — bring wood & stone from harvest nodes.");
+      return;
+    }
+    this.log(this.nearbyInteract);
+  }
+
+  private updatePirateProximity() {
+    const radius = 5.5;
+    let closest: PirateHandle | null = null;
+    let closestD = Infinity;
+    for (const p of this.pirates) {
+      const d = p.group.position.distanceTo(this.playerPos);
+      if (d < radius && d < closestD) {
+        closestD = d;
+        closest = p;
+      }
+    }
+    if (!closest?.def.prompt) {
+      this.nearbyInteract = null;
+      return;
+    }
+    if (closest.def.role === "captain" && this.runDirector.canSail()) {
+      this.nearbyInteract = `Sail to Round ${this.runDirector.run.round + 1} — ${closest.def.prompt}`;
+    } else {
+      this.nearbyInteract = closest.def.prompt;
+    }
   }
 
   private takeDamage(amount: number, source: string) {
@@ -1334,6 +1459,15 @@ export class GameEngine {
     }
 
     if (this.playerAttackCooldown > 0) this.playerAttackCooldown -= delta;
+
+    this.updatePirateProximity();
+
+    if (this.bossSpawnTimer > 0) {
+      this.bossSpawnTimer -= delta;
+      if (this.bossSpawnTimer <= 0 && this.runDirector.run.bossId) {
+        this.spawnIslandBoss(this.runDirector.run.bossId);
+      }
+    }
 
     this.updateWorldCollectables(delta, elapsed);
 
@@ -1622,9 +1756,16 @@ export class GameEngine {
       enemies: enemyUI,
       damageNumbers: dmgUI,
       combatLog: [...this.combatLog],
-      zone: "Grudge Dungeon — Starter Island",
+      zone: this.runDirector.zone,
       loaded: this.loaded,
       mapReady: this.mapReady,
+      runRound: this.runDirector.run.round,
+      runPhase: this.runDirector.phase,
+      missionTitle: this.runDirector.mission.title,
+      missionProgress: this.runDirector.run.killsThisRound,
+      missionGoal: this.runDirector.mission.killGoal,
+      nearbyInteract: this.nearbyInteract,
+      canSail: this.runDirector.canSail(),
     });
   }
 
