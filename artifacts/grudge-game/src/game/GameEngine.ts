@@ -59,6 +59,7 @@ import { AuraField } from "./combat/auras";
 import { getActiveCombatProfile, brainTuning, type BrainArchetype } from "../data/characterCombatProfiles";
 import { pickHeroEnemies, heroEnemyAsTemplate } from "../data/heroEnemyLibrary";
 import { CDN_MONSTER_TEMPLATES } from "../data/cdnMonsters";
+import { BOSS_MONSTER_BY_ID, pickDungeonBossId } from "../data/bossMonsters";
 import { getStoneCombatMods, addStone, rollStoneDrop, STONE_META } from "../data/stones";
 import { resolveSkillBoost } from "../data/abilityUpgrades";
 import {
@@ -1064,21 +1065,29 @@ export class GameEngine {
   private spawnDungeonBoss() {
     const bossPos = new THREE.Vector3(-52, 0, 38);
     const m = this.difficultyMult();
+    const bossId = pickDungeonBossId(this.mapSeed, this.islandRound);
+    const def = BOSS_MONSTER_BY_ID.get(bossId);
     const template: EnemyTemplate = {
-      id: "mon_big_scary_t3",
-      name: this.islandRound > 1 ? `R${this.islandRound} Island Colossus` : "Island Colossus",
-      type: "titan",
-      tier: 5,
-      hp: Math.round(1400 * m * 1.1),
-      damage: Math.round(38 * (1 + (this.islandRound - 1) * 0.15)),
+      id: bossId,
+      name: def
+        ? this.islandRound > 1
+          ? `R${this.islandRound} ${def.name}`
+          : def.name
+        : this.islandRound > 1
+          ? `R${this.islandRound} Island Colossus`
+          : "Island Colossus",
+      type: def?.type ?? "titan",
+      tier: def?.tier ?? 5,
+      hp: Math.round((def?.hp ?? 1400) * m * 1.1),
+      damage: Math.round((def?.damage ?? 38) * (1 + (this.islandRound - 1) * 0.15)),
     };
-    // Prefer animated medusa/dante if t3 fails resolution — createEnemy maps mon_*.
     const boss = this.createEnemy(template, bossPos);
     boss.aggroRange = 14;
-    boss.attackRange = 4.2;
-    boss.speed = 1.7;
-    boss.model.group.scale.multiplyScalar(1.35);
-    boss.model.height *= 1.35;
+    boss.attackRange = def?.archetype === "dragon" ? 5.2 : 4.2;
+    boss.speed = def?.archetype === "dragon" ? 1.9 : 1.7;
+    const scaleMul = (def?.bossScale ?? 1.35);
+    boss.model.group.scale.multiplyScalar(scaleMul);
+    boss.model.height *= scaleMul;
     this.bossEnemyId = boss.id;
     boss.model.group.userData.isBoss = true;
     this.log(`${template.name} stirs in the western ruins…`);
@@ -1107,7 +1116,9 @@ export class GameEngine {
     switch (archetypeFor(template.type)) {
       case "arachnid": pool = ["mon_pincher"]; break;
       case "quadruped": pool = ["mon_dante_beast", "mon_pincher"]; break;
-      case "dragon": pool = ["mon_dante_beast"]; break;
+      case "dragon":
+        pool = ["boss_fireworm", "boss_noble_dragon", "boss_tarisland_dragon", "mon_dante_beast"];
+        break;
       case "golem": pool = ["mon_dante_beast", "mon_medusa"]; break;
       case "flying": pool = ["kit_skel_mage"]; break;
       case "humanoid":

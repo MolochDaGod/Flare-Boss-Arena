@@ -49,12 +49,15 @@ interface PropTuning {
   gripYOffset?: number;
 }
 
-/** Greatsword — bbox-normalized (PCA fails on near-cubic blade mesh). */
+/**
+ * Greatsword rest pose — blade hangs straight down along the right thigh
+ * (matches roster back-view reference). Mesh long axis is ~Z; rotate to -Y.
+ */
 const SWORD_TUNING: PropTuning = {
-  targetLength: 1.42,
-  position: new THREE.Vector3(0.03, 0.05, -0.04),
-  rotation: new THREE.Euler(-1.52, 0.08, 1.58),
-  gripYOffset: 0,
+  targetLength: 1.36,
+  position: new THREE.Vector3(0.04, 0.04, -0.02),
+  rotation: new THREE.Euler(Math.PI / 2, 0.06, Math.PI / 2),
+  gripYOffset: 0.03,
 };
 
 const PISTOL_TUNING: PropTuning = {

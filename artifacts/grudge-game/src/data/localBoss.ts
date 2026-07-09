@@ -15,6 +15,14 @@ export interface LocalBossRequest {
 }
 
 const NAME_POOL: Array<{ name: string; title: string; pack: string }> = [
+  // Imported boss GLBs (dragons + ML in-game bosses)
+  { name: "Noble Dragon", title: "Wyrm of the Western Reach", pack: "boss_noble_dragon" },
+  { name: "Tarisland Drake", title: "Sky Terror of the Ruins", pack: "boss_tarisland_dragon" },
+  { name: "Cinder Wyrmling", title: "Fireworm of the Depths", pack: "boss_fireworm" },
+  { name: "Framis", title: "Dark Necromancer", pack: "boss_framis_necro" },
+  { name: "Sora", title: "Shifting Cloud", pack: "boss_sora_cloud" },
+  { name: "Sun Monkey King", title: "Heaven's Challenger", pack: "boss_sun_monkey_king" },
+  // Legacy procedural boss names (fallback bodies)
   { name: "Ashen Pincher", title: "Chitin of the Dunes", pack: "Boss_Character_Pincher_Chitin" },
   { name: "Briar Matriarch", title: "Queen of Thorns", pack: "Boss_Character_Thornguard_Medusa" },
   { name: "Dante's Shadow", title: "Beast of the Pit", pack: "Boss_Character_Beast_Hunter" },

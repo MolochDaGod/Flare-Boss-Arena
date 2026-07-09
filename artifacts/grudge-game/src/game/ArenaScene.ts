@@ -14,6 +14,7 @@ import { ParticleVfx } from "./combat/particles";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import type { ClassSkill } from "../data/classSkills";
 import { loadMonsterModel, disposeMonsterModel, isMonsterId } from "./MonsterModels";
+import { BOSS_MONSTER_BY_ID } from "../data/bossMonsters";
 import type { EnemyModel } from "./EnemyFactory";
 import { makeGroundMaterial } from "./proceduralTextures";
 
@@ -172,10 +173,20 @@ function resolveBossModelId(assetPack: string | undefined, tier: number): string
   const pack = (assetPack ?? "").toLowerCase();
   if (!pack.trim() || pack === "boss_character_default") return bossMonsterId(tier);
 
+  // Direct boss GLB id from localBoss NAME_POOL (boss_noble_dragon, etc.)
+  if (pack.startsWith("boss_") && isMonsterId(pack)) return pack;
+
   // Only animated (rigged, non-null clip) monsters are eligible — the boss must
   // visibly idle/move/attack, so the static `mon_big_scary_*` GLBs are excluded.
   const keywordMap: Array<[RegExp, string]> = [
-    [/colossus|titan|giant|golem|wrath|dread|hulk|behemoth|leviathan/, "mon_dante_beast"],
+    [/tarisland|qishilong/, "boss_tarisland_dragon"],
+    [/noble.*dragon|wyrm.*western/, "boss_noble_dragon"],
+    [/fireworm|wyrmling|cinder/, "boss_fireworm"],
+    [/dragon|drake|wyrm|leviathan/, "boss_noble_dragon"],
+    [/monkey.*king|wukong|sun.*monkey/, "boss_sun_monkey_king"],
+    [/shifting.*cloud|sora/, "boss_sora_cloud"],
+    [/framis|necromancer|dark.*necro/, "boss_framis_necro"],
+    [/colossus|titan|giant|golem|wrath|dread|hulk|behemoth/, "mon_dante_beast"],
     [/gloom|brute|ogre|troll|abomination/, "mon_medusa"],
     [/thorn|queen|briar|medusa|serpent|gorgon|witch|matriarch|naga/, "mon_medusa"],
     [/hunter|predator|beast|wolf|hound|stalker|fang|claw/, "mon_dante_beast"],
@@ -186,8 +197,19 @@ function resolveBossModelId(assetPack: string | undefined, tier: number): string
     if (re.test(pack)) return id;
   }
 
-  // No thematic match — hash the pack for a stable, varied body (animated only).
-  const pool = ["mon_dante_beast", "mon_medusa", "mon_cultist", "mon_pincher"];
+  // No thematic match — prefer imported boss GLBs, then legacy monsters.
+  const pool = [
+    "boss_noble_dragon",
+    "boss_tarisland_dragon",
+    "boss_fireworm",
+    "boss_framis_necro",
+    "boss_sora_cloud",
+    "boss_sun_monkey_king",
+    "mon_dante_beast",
+    "mon_medusa",
+    "mon_cultist",
+    "mon_pincher",
+  ];
   return pool[hashString(pack) % pool.length]!;
 }
 
@@ -587,7 +609,8 @@ export class ArenaScene {
     if (!isMonsterId(monsterId)) monsterId = bossMonsterId(this.boss.tier);
     if (!isMonsterId(monsterId)) return;
 
-    const tierScale = 1.5 + Math.max(0, Math.min(5, this.boss.tier)) * 0.16;
+    const bossDef = BOSS_MONSTER_BY_ID.get(monsterId);
+    const tierScale = (1.5 + Math.max(0, Math.min(5, this.boss.tier)) * 0.16) * (bossDef?.bossScale ?? 1);
     const model = loadMonsterModel(monsterId, loader, (m) => {
       if (this.disposed) return;
       // Scale the whole boss up for menace; feet stay grounded (origin scale).
