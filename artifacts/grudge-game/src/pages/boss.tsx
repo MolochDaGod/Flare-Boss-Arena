@@ -9,21 +9,17 @@ import {
   type ErrorInfo,
 } from "react";
 import { useLocation } from "wouter";
-import {
-  useGenerateBoss,
-  useGetClasses,
-  useGetWeapons,
-} from "@workspace/api-client-react";
+import { useGetClasses, useGetWeapons } from "@workspace/api-client-react";
 import {
   ArenaScene,
   type ArenaStateUpdate,
   type ArenaBossInput,
 } from "@/game/ArenaScene";
-import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { getPlayableCharacter } from "@/data/playableIdentity";
 import { useResolvedSkills } from "@/data/skillsResolver";
 import { skillIconSrc } from "@/data/skillIcons";
 import { generateLocalBoss } from "@/data/localBoss";
+import { getActiveFighterId } from "@/data/fighters";
 import {
   Loader2,
   Skull,
@@ -33,8 +29,7 @@ import {
   Crosshair,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BarGauge, OrbGauge, Separator, ParchmentPanel, WarningBanner } from "@/components/CraftpixUI";
-import { toast } from "sonner";
+import { BarGauge, OrbGauge, Separator, WarningBanner } from "@/components/CraftpixUI";
 
 // ─── Error boundary (WebGL may be unavailable in headless/screenshot) ───────────
 class ArenaErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -171,17 +166,21 @@ function BossArena() {
   const mountRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<ArenaScene | null>(null);
   const autoSummonRef = useRef(false);
+  /** Stable key so the 3D scene is not disposed/recreated every React render. */
+  const sceneKeyRef = useRef<string | null>(null);
 
   const { data: classesData } = useGetClasses();
   const { data: weaponsData } = useGetWeapons();
-  const char = getPlayableCharacter();
+  // Freeze identity for this visit — getPlayableCharacter() returns a new object
+  // every call, which used to thrash useMemo + remount ArenaScene every frame.
+  const fighterId = getActiveFighterId();
+  const char = useMemo(() => getPlayableCharacter(), [fighterId]);
 
   const [boss, setBoss] = useState<ArenaBossInput | null>(null);
   const [hud, setHud] = useState<ArenaStateUpdate | null>(null);
-  const [tier, setTier] = useState(1);
+  const [tier] = useState(1);
   const [reward, setReward] = useState<string | null>(null);
-
-  const generateBoss = useGenerateBoss();
+  const [summoning, setSummoning] = useState(false);
 
   const stats = useMemo(() => {
     return computeArenaStats(
@@ -189,35 +188,46 @@ function BossArena() {
       classesData,
       weaponsData,
     );
-  }, [char, classesData, weaponsData]);
+  }, [
+    char.id,
+    char.level,
+    char.class,
+    char.race,
+    char.attributes,
+    char.equipment,
+    classesData,
+    weaponsData,
+  ]);
 
-  const hudClass = String(char.class ?? "warrior").toLowerCase();
-  const hudMainCategory = hudClass ? CLASS_STARTER_WEAPON[hudClass]?.category : null;
-  const { classSkills: hudClassSkills, weaponSlots: hudWeaponSlots } = useResolvedSkills(hudClass, hudMainCategory);
+  // Stable primitive fingerprint for scene lifecycle (ignore object identity).
+  const statsKey = `${stats.level}|${stats.maxHp}|${stats.maxMana}|${stats.baseDamage}|${stats.critChance.toFixed(4)}|${stats.className}|${stats.raceKey}`;
 
-  // Unified 5-slot skill bar: 2 class skills + 3 weapon-slot primaries.
+  const { classSkills: hudClassSkills } = useResolvedSkills(String(char.class ?? "warrior"));
+
+  // 5 fighter skills for the arena bar.
   const skillSlots = useMemo<{ name: string; glyph?: string; icon?: string }[]>(() => {
-    const classPart = (hudClassSkills?.skills ?? []).slice(0, 2).map((s) => ({
+    return (hudClassSkills?.skills ?? []).slice(0, 5).map((s) => ({
       name: s.name,
       glyph: s.glyph as string | undefined,
       icon: skillIconSrc(s.icon) ?? undefined,
     }));
-    const weaponPart = hudWeaponSlots.slice(0, 3).map((slot) => {
-      const sk = slot.skills[0];
-      return {
-        name: sk?.name ?? slot.label,
-        glyph: undefined as string | undefined,
-        icon: skillIconSrc(sk?.icon) ?? undefined,
-      };
-    });
-    return [...classPart, ...weaponPart].slice(0, 5);
-  }, [hudClassSkills, hudWeaponSlots]);
+  }, [hudClassSkills]);
 
   const handleState = useCallback((s: ArenaStateUpdate) => setHud(s), []);
 
-  // Spin up the arena once a boss is generated + stats are ready.
+  // Spin up the arena once — only when boss id or stats fingerprint changes.
   useEffect(() => {
-    if (!mountRef.current || !boss || !stats) return;
+    if (!mountRef.current || !boss) return;
+    const key = `${boss.id}|${statsKey}`;
+    if (sceneKeyRef.current === key && sceneRef.current) return;
+
+    // Tear down any previous instance before building a new one.
+    if (sceneRef.current) {
+      sceneRef.current.dispose();
+      sceneRef.current = null;
+    }
+    sceneKeyRef.current = key;
+
     const scene = new ArenaScene({
       className: stats.className,
       raceKey: stats.raceKey,
@@ -229,23 +239,24 @@ function BossArena() {
       boss,
       onStateUpdate: handleState,
       onVictory: () => {
-        const bossId = boss.id;
-        if (bossId != null) {
-          setReward("Victory — spoils added to your session wallet.");
-        }
+        setReward("Victory — spoils added to your session wallet.");
       },
     });
     scene.init(mountRef.current);
     scene.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
     sceneRef.current = scene;
     return () => {
-      scene.dispose();
-      sceneRef.current = null;
+      // Only dispose if this effect's scene is still the active one.
+      if (sceneRef.current === scene) {
+        scene.dispose();
+        sceneRef.current = null;
+        sceneKeyRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boss, stats]);
+  }, [boss?.id, statsKey]);
 
-  // Keep the scene's archetype mapping in sync with resolved class skills.
+  // Keep skill archetypes in sync without remounting the WebGL scene.
   useEffect(() => {
     sceneRef.current?.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
   }, [hudClassSkills]);
@@ -270,79 +281,54 @@ function BossArena() {
         description: a.description ? String(a.description) : undefined,
       })),
     });
+    setSummoning(false);
   }, []);
 
-  /** Offline / static-host fallback when POST /api/bosses/generate is unavailable. */
-  const summonLocalBoss = useCallback(
-    (reason?: string) => {
-      const local = generateLocalBoss({
-        tier,
-        playerClass: String((char as unknown as Record<string, unknown>).class ?? "warrior"),
-        playerLevel: Number((char as unknown as Record<string, unknown>).level ?? 1),
-      });
-      applyBossPayload(local as unknown as Record<string, unknown>, tier);
-      if (reason) {
-        toast.message("Arena conjured locally", {
-          description: reason,
-        });
-      }
-    },
-    [applyBossPayload, char, tier],
-  );
+  /**
+   * Conjure a playable boss immediately.
+   * Production Vercel is static SPA-only — POST /api/bosses/generate is 404 —
+   * so we always use the client generator (no spinner stuck on network).
+   */
+  const summonLocalBoss = useCallback(() => {
+    setSummoning(true);
+    const local = generateLocalBoss({
+      tier,
+      playerClass: String(char.class ?? "warrior"),
+      playerLevel: Number(char.level ?? 1),
+    });
+    applyBossPayload(local as unknown as Record<string, unknown>, tier);
+  }, [applyBossPayload, char.class, char.level, tier]);
 
-  const handleSummon = () => {
+  const handleSummon = useCallback(() => {
     setReward(null);
-    // Prefer the AI API when it exists; static Vercel has no Express backend
-    // (POST /api/bosses/generate → 405), so fall back to a local boss after a
-    // short timeout or on error. Never swap the boss once the arena has started.
-    let settled = false;
-    const finishLocal = () => {
-      if (settled) return;
-      settled = true;
-      summonLocalBoss();
-    };
-    const timer = window.setTimeout(finishLocal, 1400);
-    generateBoss.mutate(
-      {
-        data: {
-          tier,
-          playerClass: (char as unknown as Record<string, unknown>).class as string,
-          playerLevel: Number((char as unknown as Record<string, unknown>).level ?? 1),
-        },
-      },
-      {
-        onSuccess: (b: unknown) => {
-          if (settled) return;
-          settled = true;
-          window.clearTimeout(timer);
-          applyBossPayload(b as Record<string, unknown>, tier);
-        },
-        onError: () => {
-          window.clearTimeout(timer);
-          finishLocal();
-        },
-      },
-    );
-  };
+    setHud(null);
+    sceneKeyRef.current = null;
+    if (sceneRef.current) {
+      sceneRef.current.dispose();
+      sceneRef.current = null;
+    }
+    summonLocalBoss();
+  }, [summonLocalBoss]);
 
   const handleRematch = () => {
     setBoss(null);
     setHud(null);
     setReward(null);
     autoSummonRef.current = false;
+    sceneKeyRef.current = null;
+    if (sceneRef.current) {
+      sceneRef.current.dispose();
+      sceneRef.current = null;
+    }
   };
 
-  // Auto-conjure a boss the moment the arena is entered (and after a rematch).
-  // API success preferred; on failure the mutation's onError summons a local boss
-  // so the 3D arena always gets a body (monster GLB + fighter) on static hosts.
+  // Auto-conjure once when the arena is entered (and again after rematch).
   useEffect(() => {
-    if (!stats) return;
-    if (boss || generateBoss.isPending) return;
+    if (boss) return;
     if (autoSummonRef.current) return;
     autoSummonRef.current = true;
     handleSummon();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [char, stats, boss, generateBoss.isPending]);
+  }, [boss, handleSummon]);
 
   const charName = char.name;
 
@@ -361,23 +347,20 @@ function BossArena() {
         <ArrowLeft className="w-4 h-4" /> War Panel
       </button>
 
-      {/* ── Loading until a boss payload exists (API or local fallback) ── */}
+      {/* ── Loading until a boss payload exists ── */}
       {!boss && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-black/60">
           <Loader2 className="w-12 h-12 animate-spin" style={{ color: GOLD }} />
           <p className="font-serif tracking-widest uppercase animate-pulse" style={{ color: GOLD }}>
-            Forging Adversary...
+            {summoning ? "Forging Adversary..." : "Preparing Arena..."}
           </p>
-          {/* Manual retry if auto-summon somehow stalls without setting a boss */}
-          {!generateBoss.isPending && (
-            <button
-              onClick={handleSummon}
-              className="mt-2 font-serif text-xs tracking-widest uppercase px-5 py-2 rounded border"
-              style={{ borderColor: GOLD, color: GOLD }}
-            >
-              Conjure Manually
-            </button>
-          )}
+          <button
+            onClick={handleSummon}
+            className="mt-2 font-serif text-xs tracking-widest uppercase px-5 py-2 rounded border"
+            style={{ borderColor: GOLD, color: GOLD }}
+          >
+            Conjure Manually
+          </button>
         </div>
       )}
 
@@ -564,10 +547,10 @@ function BossArena() {
                 color: hud.iframeActive ? "#cfe9ff" : GOLD,
                 boxShadow: hud.iframeActive ? "0 0 14px rgba(120,190,255,0.55)" : undefined,
               }}
-              title="Dodge projectiles & circles [Space/Q] — grants brief invulnerability"
+              title="Dodge projectiles & circles [Shift] — brief invulnerability"
             >
               <Crosshair className="w-5 h-5" />
-              <span className="text-[7px]">SPC</span>
+              <span className="text-[7px]">SHF</span>
               {(hud.dodgeReadyPct ?? 1) < 1 && !hud.iframeActive && (
                 <div
                   className="absolute inset-0 bg-black/70"

@@ -524,24 +524,36 @@ export class ArenaScene {
   // ── Player ────────────────────────────────────────────────────────────────
   private loadPlayer() {
     const loader = new GLTFLoader();
-    // Prefer the globally-selected fighter skin; fall back to the KayKit hero.
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled || this.disposed) return;
+      settled = true;
+      fn();
+    };
+    // Prefer the globally-selected fighter skin; fall back to a capsule.
     loadActiveFighterModel(
       loader,
       2.6,
       (root, anim) => {
-        if (this.disposed) {
-          disposeObject3D(root);
-          return;
-        }
-        root.position.copy(this.playerPos);
-        this.scene.add(root);
-        this.playerGroup = root;
-        this.heroAnim = anim;
-        this.loaded = true;
-        this.emitState();
+        finish(() => {
+          if (this.disposed) {
+            disposeObject3D(root);
+            return;
+          }
+          root.position.copy(this.playerPos);
+          this.scene.add(root);
+          this.playerGroup = root;
+          this.heroAnim = anim;
+          this.loaded = true;
+          this.emitState();
+        });
       },
-      () => this.loadFallbackPlayer(),
+      () => finish(() => this.loadFallbackPlayer()),
     );
+    // Don't leave "Entering the arena..." forever if the skin GLB hangs.
+    window.setTimeout(() => {
+      finish(() => this.loadFallbackPlayer());
+    }, 10000);
   }
 
   /** Honest fallback when the fighter skin GLB fails to load: a plain capsule.
@@ -593,12 +605,16 @@ export class ArenaScene {
   // ── Input ─────────────────────────────────────────────────────────────────
   private _keyDown = (e: KeyboardEvent) => {
     this.keys.add(e.code);
-    // F attack · Space jump · Q block (visual only here) · Shift dodge · R special-as-skill0
+    // F attack · Space jump · Q block (i-frame parry) · Shift dodge · R special
     if (e.code === "KeyF") this.attackNearest();
     if (e.code === "Space") {
       e.preventDefault();
       this.heroAnim?.trigger("jump");
-      // short hop via dodge-style dash upward is not available; use dodge clip as fallback
+    }
+    // Q = block/parry — short invulnerability so circle strikes can still be avoided.
+    if (e.code === "KeyQ") {
+      e.preventDefault();
+      this.doBlock();
     }
     if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
       e.preventDefault();
@@ -606,7 +622,7 @@ export class ArenaScene {
     }
     if (e.code === "KeyR") {
       e.preventDefault();
-      this.useSkill(0); // special mapped to strongest slot in arena
+      this.useSkill(0); // special mapped to first skill slot in arena
     }
     if (e.code.startsWith("Digit")) {
       const n = Number(e.code.slice(5));
@@ -694,6 +710,18 @@ export class ArenaScene {
       0xc5e8ff,
       0.55,
     );
+  }
+
+  /** Q block — shorter i-frames than dodge, no dash (parry circles / bolts). */
+  doBlock() {
+    if (this.outcome !== "fighting") return;
+    const now = performance.now();
+    // Share dodge cooldown so block/dodge can't chain-spam invuln.
+    if (now < this.dodgeCdUntil) return;
+    this.dodgeCdUntil = now + this.dodgeCdSec * 0.55 * 1000;
+    this.iframeUntil = now + Math.min(0.45, this.dodgeIframeSec) * 1000;
+    this.heroAnim?.trigger("cast");
+    this.particles?.impact(this.playerPos.clone().setY(1.0), 0xffe9a0, 0.4);
   }
 
   /** True while the player cannot take damage (dodge i-frames). */
