@@ -259,6 +259,12 @@ export const CAMP_FIGHTER_NPCS: CampFighterNpcLayout[] = [
   { fighterId: "smoker", skinId: "smoker", name: "Smoker", x: 4, z: 44, wanderRadius: 5 },
   { fighterId: "ryuma", skinId: "ryuma", name: "Ryuma", x: -36, z: -10, wanderRadius: 4 },
   { fighterId: "koby", skinId: "koby", name: "Koby", x: 18, z: 20, wanderRadius: 6 },
+  { fighterId: "mihawk", skinId: "mihawk", name: "Mihawk", x: -72, z: 38, wanderRadius: 5, faceY: 0.6 },
+  { fighterId: "kizaru", skinId: "kizaru", name: "Kizaru", x: 62, z: -42, wanderRadius: 6 },
+  { fighterId: "fujitora_marijoa", skinId: "fujitora_marijoa", name: "Fujitora", x: -58, z: -52, wanderRadius: 4.5 },
+  { fighterId: "vista", skinId: "vista", name: "Vista", x: -14, z: -58, wanderRadius: 5 },
+  { fighterId: "charlotte_oven", skinId: "charlotte_oven", name: "Oven", x: 72, z: 12, wanderRadius: 4 },
+  { fighterId: "hybrid_kaido", skinId: "hybrid_kaido", name: "Kaido", x: -38, z: 72, wanderRadius: 7, faceY: -1.2 },
 ];
 
 /** KayKit ambient NPCs fill out the crowd. */

@@ -41,6 +41,12 @@ export const SKINS: SkinDef[] = [
   { id: "ace_sabo_luffy", name: "Ace · Sabo · Luffy", file: "ace_sabo_luffy", scheme: "bountyrush" },
   { id: "shanks",         name: "Shanks",            file: "shanks",         scheme: "bountyrush" },
   { id: "koby",           name: "Koby",              file: "koby",           scheme: "koby" },
+  { id: "mihawk",         name: "Dracule Mihawk",    file: "mihawk",         scheme: "bountyrush" },
+  { id: "kizaru",         name: "Kizaru",            file: "kizaru",         scheme: "bountyrush" },
+  { id: "fujitora_marijoa", name: "Issho",           file: "fujitora_marijoa", scheme: "bountyrush" },
+  { id: "vista",          name: "Vista",             file: "vista",          scheme: "bountyrush" },
+  { id: "charlotte_oven", name: "Charlotte Oven",    file: "charlotte_oven", scheme: "bountyrush" },
+  { id: "hybrid_kaido",   name: "Kaido",             file: "hybrid_kaido",   scheme: "bountyrush", height: 2.35 },
 ];
 
 /**
