@@ -263,6 +263,7 @@ function Game() {
     const charId = c.id as string | number;
     const skinId =
       getActiveFighter()?.skinId ?? (charId != null ? getSelectedSkin(charId) : null);
+    const testBossId = new URLSearchParams(window.location.search).get("boss");
 
     const engine = new GameEngine();
     engine.onStateUpdate = handleStateUpdate;
@@ -279,6 +280,7 @@ function Game() {
         ...combatStats,
         skinId,
         equipMainCategory: loadout.weapon.style,
+        testBossId,
       },
       enemyTemplates,
     );

@@ -59,7 +59,7 @@ import { AuraField } from "./combat/auras";
 import { getActiveCombatProfile, brainTuning, type BrainArchetype } from "../data/characterCombatProfiles";
 import { pickHeroEnemies, heroEnemyAsTemplate } from "../data/heroEnemyLibrary";
 import { CDN_MONSTER_TEMPLATES } from "../data/cdnMonsters";
-import { BOSS_MONSTER_BY_ID, pickDungeonBossId } from "../data/bossMonsters";
+import { BOSS_MONSTER_BY_ID, isBossMonsterId, pickDungeonBossId } from "../data/bossMonsters";
 import { getStoneCombatMods, addStone, rollStoneDrop, STONE_META } from "../data/stones";
 import { resolveSkillBoost } from "../data/abilityUpgrades";
 import {
@@ -228,6 +228,8 @@ export interface PlayerInitStats {
   equipMainCategory?: string;
   equipHasOffhand?: boolean;
   equipHasShoulder?: boolean;
+  /** QA override — `?boss=boss_noble_dragon` forces dungeon boss GLB. */
+  testBossId?: string | null;
 }
 
 export class GameEngine {
@@ -314,6 +316,8 @@ export class GameEngine {
   private disposed = false;
   private harvestField: HarvestField | null = null;
   private mapSeed = (Math.random() * 0xffffffff) >>> 0;
+  /** Optional QA boss override from URL `?boss=`. */
+  private bossOverrideId: string | null = null;
   /** Round 1 = first island; captain re-sail increments. */
   private islandRound = 1;
   private bossEnemyId: string | null = null;
@@ -389,6 +393,8 @@ export class GameEngine {
     this.playerMaxAttackCooldown = stats.attackSpeed;
     this.enemyTemplates = enemyTemplates;
     this.initStats = stats;
+    this.bossOverrideId =
+      stats.testBossId && isBossMonsterId(stats.testBossId) ? stats.testBossId : null;
     // Attribute stones + fighter loadout → speed / defense baseline
     try {
       const lo = getGameLoadout();
@@ -1065,7 +1071,7 @@ export class GameEngine {
   private spawnDungeonBoss() {
     const bossPos = new THREE.Vector3(-52, 0, 38);
     const m = this.difficultyMult();
-    const bossId = pickDungeonBossId(this.mapSeed, this.islandRound);
+    const bossId = this.bossOverrideId ?? pickDungeonBossId(this.mapSeed, this.islandRound);
     const def = BOSS_MONSTER_BY_ID.get(bossId);
     const template: EnemyTemplate = {
       id: bossId,
