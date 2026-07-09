@@ -2,27 +2,17 @@ import { useEffect, useRef, useState, useCallback, Component, useMemo, type Reac
 import { useLocation } from "wouter";
 import { useGetEnemies, useGetClasses, useGetWeapons } from "@workspace/api-client-react";
 import { GameEngine, type GameState, type EnemyTemplate, type PlayerInitStats } from "@/game/GameEngine";
-import { MONSTER_TEMPLATES } from "@/game/MonsterModels";
 import { Loader2, ArrowLeft, Swords, Zap, Shield, Crosshair, LayoutGrid } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type PanelKey } from "@/components/MainPanel";
 import { getSelectedSkin } from "@/data/skins";
 import { getActiveFighter } from "@/data/fighters";
 import { getPlayableCharacter } from "@/data/playableIdentity";
+import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
+import { useResolvedSkills } from "@/data/skillsResolver";
 import { SkillIcon } from "@/components/SkillIcon";
 import { BarGauge, OrbGauge, Separator, WarningBanner } from "@/components/CraftpixUI";
-import { getWallet, saveWallet } from "@/data/wallet";
-import {
-  VENDOR_GOODS,
-  getResources,
-  addResource,
-  spendResource,
-  spendResources,
-} from "@/data/resources";
-import { getGameLoadout, loadoutSkillBar } from "@/data/gameCombat";
-import { toast } from "sonner";
-import { useSystemsHotkey } from "@/hooks/useSystemsHotkey";
-import { GameEscapeMenu, SystemHub } from "@/components/SystemHub";
+import loadingSpinner from "@assets/grudgestudio_1782639192041.gif";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
 class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -202,8 +192,6 @@ function Game() {
   const [showControls, setShowControls] = useState(true);
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<PanelKey>("equipment");
-  const [vendorOpen, setVendorOpen] = useState(false);
-  const [bagTick, setBagTick] = useState(0);
   useMainPanelHotkeys(
     () => setPanelOpen((v) => !v),
     () => setPanelOpen(false),
@@ -221,11 +209,8 @@ function Game() {
     setGameState(state);
   }, []);
 
-  // Build enemy templates from R2 API; fall back to built-in monster roster if API is empty/invalid
-  const enemyTemplates = useMemo(() => {
-    const fromApi = buildEnemyTemplates(enemiesData);
-    return fromApi.length > 0 ? fromApi : MONSTER_TEMPLATES;
-  }, [enemiesData]);
+  // Build enemy templates from real R2 data
+  const enemyTemplates = useMemo(() => buildEnemyTemplates(enemiesData), [enemiesData]);
 
   // Compute player stats from real class/weapon data
   const playerStats = useMemo(() => {
@@ -236,54 +221,28 @@ function Game() {
     );
   }, [char, classesData, weaponsData]);
 
-  // Fighter + stones + skill ranks (re-read each visit so socketed stones apply).
-  const loadout = useMemo(() => getGameLoadout(getActiveFighter().id), [bagTick]);
-  const skillBar = useMemo(() => loadoutSkillBar(loadout), [loadout]);
+  // Resolve class + weapon skills for the in-game HUD skill bar.
+  const hudClass = String(char.class ?? "warrior").toLowerCase();
+  const hudMainCategory = hudClass ? CLASS_STARTER_WEAPON[hudClass]?.category : null;
+  const { classSkills: hudClassSkills, weaponSlots: hudWeaponSlots } = useResolvedSkills(hudClass, hudMainCategory);
 
-  const combatStats = useMemo((): PlayerInitStats | null => {
-    if (!playerStats) return null;
-    return {
-      ...playerStats,
-      hp: loadout.combat.maxHp,
-      mana: loadout.combat.maxMana,
-      baseDamage: loadout.combat.baseDamage,
-      critChance: loadout.combat.critChance,
-      defense: Math.round(playerStats.defense + loadout.combat.defense * 40),
-      // Engine treats this as seconds between basic attacks.
-      attackSpeed: loadout.combat.attackInterval,
-    };
-  }, [playerStats, loadout]);
-
-  const ready = enemyTemplates.length > 0 && !!combatStats;
+  // Only start the engine once we have enemies + stats
+  const ready = enemyTemplates.length > 0 && !!playerStats;
 
   useEffect(() => {
-    if (!mountRef.current || !ready || !combatStats) return;
+    if (!mountRef.current || !ready || !playerStats) return;
 
     const c = char as unknown as Record<string, unknown>;
     const charId = c.id as string | number;
+    const charClass = String(c.class ?? "warrior").toLowerCase();
+    const equipMainCategory = CLASS_STARTER_WEAPON[charClass]?.category;
     const skinId =
       getActiveFighter()?.skinId ?? (charId != null ? getSelectedSkin(charId) : null);
-    const testBossId = new URLSearchParams(window.location.search).get("boss");
 
     const engine = new GameEngine();
     engine.onStateUpdate = handleStateUpdate;
-    engine.onOpenVendor = () => setVendorOpen(true);
-    engine.onMapReseed = (seed) => {
-      toast.message("Next island — tougher round", {
-        description: `Seed #${seed.toString(16)}. Enemies scale up each sail. Equip perks on /perks.`,
-      });
-      setBagTick((t) => t + 1);
-    };
-    engine.init(
-      mountRef.current,
-      {
-        ...combatStats,
-        skinId,
-        equipMainCategory: loadout.weapon.style,
-        testBossId,
-      },
-      enemyTemplates,
-    );
+    engine.init(mountRef.current, { ...playerStats, skinId, equipMainCategory }, enemyTemplates);
+    engine.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
     engineRef.current = engine;
 
     return () => {
@@ -292,6 +251,11 @@ function Game() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
+
+  // Keep the engine's archetype mapping in sync with resolved class skills.
+  useEffect(() => {
+    engineRef.current?.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
+  }, [hudClassSkills]);
 
   useEffect(() => {
     const t = setTimeout(() => setShowControls(false), 6000);
@@ -302,15 +266,11 @@ function Game() {
   const manaPct = gameState ? (gameState.playerMana / gameState.playerMaxMana) * 100 : 100;
   const atkPct  = gameState ? (1 - gameState.playerAttackCooldown) * 100 : 100;
   const hpColor = hpPct > 50 ? "#22c55e" : hpPct > 25 ? "#f59e0b" : "#ef4444";
-  const [menuOpen, setMenuOpen] = useSystemsHotkey({ alsoEscape: true });
-  const [hubOpen, setHubOpen] = useState(false);
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col" style={{ zIndex: 50 }}>
       {/* 3D canvas */}
       <div ref={mountRef} className="absolute inset-0" style={{ cursor: "crosshair" }} />
-      <GameEscapeMenu open={menuOpen} onOpenChange={setMenuOpen} />
-      <SystemHub open={hubOpen} onOpenChange={setHubOpen} />
 
       {/* Loading overlay — held until the dungeon GLB + collision BVH are built */}
       <AnimatePresence>
@@ -323,9 +283,10 @@ function Game() {
             transition={{ duration: 0.6, ease: "easeOut" }}
             className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center gap-4 z-20"
           >
-            <Loader2
-              className="w-16 h-16 animate-spin text-primary drop-shadow-[0_0_18px_rgba(197,160,89,0.35)]"
-              aria-label="Loading"
+            <img
+              src={loadingSpinner}
+              alt="Loading"
+              className="w-36 h-36 object-contain drop-shadow-[0_0_18px_rgba(197,160,89,0.35)]"
             />
             <p className="font-serif text-primary uppercase tracking-widest text-sm animate-pulse">
               {!ready
@@ -353,46 +314,19 @@ function Game() {
 
       {/* Top — zone + back */}
       <div className="absolute top-0 left-0 right-0 flex items-start justify-between px-4 pt-3 z-10 pointer-events-none">
-        <div className="pointer-events-auto flex items-center gap-2">
-          <button
-            className="flex items-center gap-2 px-3 py-1.5 bg-black/60 border border-white/10 rounded text-xs font-serif tracking-widest uppercase text-muted-foreground hover:text-white hover:border-white/30 transition-colors backdrop-blur-sm"
-            onClick={() => setLocation("/")}
-          >
-            <ArrowLeft className="w-3 h-3" />
-            War Panel
-          </button>
-          <button
-            className="flex items-center gap-2 px-3 py-1.5 bg-black/60 border border-primary/30 rounded text-xs font-serif tracking-widest uppercase text-primary hover:bg-primary/10 transition-colors backdrop-blur-sm"
-            onClick={() => setHubOpen(true)}
-            title="All systems (M)"
-          >
-            <LayoutGrid className="w-3 h-3" />
-            Systems
-          </button>
-        </div>
+        <button
+          className="pointer-events-auto flex items-center gap-2 px-3 py-1.5 bg-black/60 border border-white/10 rounded text-xs font-serif tracking-widest uppercase text-muted-foreground hover:text-white hover:border-white/30 transition-colors backdrop-blur-sm"
+          onClick={() => setLocation("/")}
+        >
+          <ArrowLeft className="w-3 h-3" />
+          War Panel
+        </button>
 
         <div className="text-center">
           <p className="text-[10px] font-serif uppercase tracking-[0.2em] text-muted-foreground/60">{gameState?.zone ?? ""}</p>
-          {gameState && (
-            <p className="text-[10px] font-mono text-amber-200/80 mt-0.5">
-              Round {gameState.islandRound ?? 1}
-              {gameState.difficultyMult != null ? ` · ×${gameState.difficultyMult.toFixed(2)} foes` : ""}
-              {gameState.activePerks?.length ? ` · Perks: ${gameState.activePerks.join(", ")}` : ""}
-            </p>
-          )}
-          {gameState?.bossAlive && gameState.bossName && (
-            <div className="mt-1 min-w-[220px] mx-auto">
-              <p className="text-[10px] font-serif uppercase tracking-widest text-destructive">{gameState.bossName}</p>
-              <BarGauge
-                pct={(gameState.bossHp / Math.max(1, gameState.bossMaxHp)) * 100}
-                color="#e23b3b"
-                height={10}
-              />
-            </div>
-          )}
         </div>
 
-        {/* Mini stats top-right + resources */}
+        {/* Mini stats top-right */}
         {playerStats && gameState && (
           <div className="pointer-events-auto bg-black/60 border border-white/10 backdrop-blur-sm rounded px-3 py-1.5 text-right">
             <p className="text-[10px] font-serif uppercase tracking-widest text-primary">{playerStats.charName}</p>
@@ -400,34 +334,11 @@ function Game() {
               Lv {gameState.playerLevel} · {playerStats.charRace} {playerStats.charClass}
             </p>
             <p className="text-[9px] font-mono text-muted-foreground/70">
-              🪙 {gameState.gold} · 🪵 {gameState.resources?.wood ?? 0} · 🪨 {gameState.resources?.stone ?? 0}
+              DMG {playerStats.baseDamage} · DEF {playerStats.defense} · CRIT {Math.round(playerStats.critChance * 100)}%
             </p>
           </div>
         )}
       </div>
-
-      {/* Interact prompts (pirate / harvest) */}
-      {gameState?.nearbyPirate && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 z-20 pointer-events-none" style={{ marginTop: 80 }}>
-          <div className="px-4 py-2 rounded text-center" style={{ ...stonePanel, minWidth: 260 }}>
-            <p className="font-serif text-sm tracking-widest uppercase" style={{ color: GOLD }}>
-              {gameState.nearbyPirate.name}
-            </p>
-            <p className="text-[10px] text-muted-foreground">{gameState.nearbyPirate.title}</p>
-            <p className="text-[11px] mt-1 text-amber-200/90">{gameState.nearbyPirate.prompt}</p>
-            <p className="text-[10px] font-mono mt-1 tracking-widest uppercase" style={{ color: GOLD }}>
-              Press [E]
-            </p>
-          </div>
-        </div>
-      )}
-      {!gameState?.nearbyPirate && gameState?.nearbyHarvest && (
-        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
-          <p className="text-[11px] font-mono tracking-wide px-3 py-1 rounded bg-black/70 border border-white/10 text-emerald-200/90">
-            {gameState.nearbyHarvest}
-          </p>
-        </div>
-      )}
 
       {/* Player HUD — bottom left */}
       {gameState && (
@@ -543,55 +454,51 @@ function Game() {
         </div>
       ))}
 
-      {/* Independent skill bar — fighter kit only (no Warlords class trees) */}
-      {gameState && skillBar.length > 0 && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 flex items-end gap-3">
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>
-              {loadout.fighter.name} · {loadout.weapon.glyph} {loadout.weapon.name}
-            </span>
-            <div className="flex gap-1.5">
-              {skillBar.map((s) => {
-                const pending = gameState.pendingSkillIdx === s.index;
-                return (
+      {/* Skill bar — class + weapon skills, above the action buttons */}
+      {gameState && (hudClassSkills || hudWeaponSlots.length > 0) && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 flex items-end gap-4">
+          {hudClassSkills && (
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>Class · {hudClassSkills.name}</span>
+              <div className="flex gap-1.5">
+                {hudClassSkills.skills.slice(0, 5).map((s, i) => (
                   <div
                     key={s.id}
-                    onClick={() => engineRef.current?.selectSkill(s.index)}
-                    title={`${s.name}${s.isAoe ? " · key then LMB place" : s.isSlash ? " · slash wave" : ""}\n${s.description}\nMP ${s.manaCost} · CD ${s.cooldown}s`}
-                    className="relative w-11 h-11 rounded flex items-center justify-center text-lg bg-black border-2 hover:scale-105 transition-all overflow-hidden cursor-pointer active:scale-95"
-                    style={{
-                      borderColor: pending ? "#66ccff" : `${GOLD}99`,
-                      boxShadow: pending ? "0 0 12px #66ccff" : "inset 0 0 5px #000",
-                    }}
+                    onClick={() => engineRef.current?.useSkill(i)}
+                    title={`${s.name}${s.cooldown ? ` · CD ${s.cooldown}` : ""}\n${s.description}`}
+                    className="relative w-11 h-11 rounded flex items-center justify-center text-lg bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all overflow-hidden cursor-pointer active:scale-95"
+                    style={{ boxShadow: "inset 0 0 5px #000" }}
                   >
-                    <span className="text-lg leading-none">{s.glyph}</span>
-                    <span className="absolute top-0.5 left-1 text-[9px] font-serif text-neutral-400">{s.index + 1}</span>
-                    {s.isAoe && (
-                      <span className="absolute bottom-0.5 right-0.5 text-[7px] text-cyan-300">AoE</span>
-                    )}
-                    {s.isSlash && !s.isAoe && (
-                      <span className="absolute bottom-0.5 right-0.5 text-[7px] text-amber-300">〜</span>
-                    )}
+                    <SkillIcon icon={s.icon} glyph={s.glyph} size={40} radius={4} />
+                    <span className="absolute top-0.5 left-1 text-[9px] font-serif text-neutral-400">{i + 1}</span>
+                    {s.isSignature && <span className="absolute -bottom-1 -right-1 text-[9px] leading-none" style={{ color: GOLD }}>★</span>}
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
-          <div className="flex flex-col items-center gap-1">
-            <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>Special</span>
-            <button
-              onClick={() => engineRef.current?.useSpecial()}
-              title={`${loadout.special.name}\n${loadout.special.description}`}
-              className="relative w-12 h-12 rounded flex flex-col items-center justify-center bg-black border-2 border-amber-500/70 hover:border-amber-400 transition-all"
-              style={{
-                opacity: 0.55 + 0.45 * (gameState.specialReadyPct ?? 1),
-                boxShadow: "0 0 10px rgba(255,180,60,0.35)",
-              }}
-            >
-              <span className="text-sm font-serif" style={{ color: GOLD }}>R</span>
-              <span className="text-[8px] text-amber-200/90 truncate max-w-[44px]">{loadout.special.name.split(" ")[0]}</span>
-            </button>
-          </div>
+          )}
+          {hudWeaponSlots.length > 0 && (
+            <div className="flex flex-col items-center gap-1">
+              <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>Weapon</span>
+              <div className="flex gap-1.5">
+                {hudWeaponSlots.map((slot, wi) => {
+                  const sk = slot.skills[0];
+                  if (!sk) return null;
+                  return (
+                    <div
+                      key={slot.type}
+                      onClick={() => engineRef.current?.useSkill(wi % 5)}
+                      title={`${slot.label}: ${sk.name}${sk.cooldown ? ` · CD ${sk.cooldown}` : ""}\n${sk.description}`}
+                      className="w-11 h-11 rounded flex items-center justify-center overflow-hidden bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all cursor-pointer active:scale-95"
+                      style={{ boxShadow: "inset 0 0 5px #000" }}
+                    >
+                      <SkillIcon icon={sk.icon} glyph="⚔️" size={28} radius={4} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -604,13 +511,6 @@ function Game() {
         >
           <Swords className="w-4 h-4" />
           <span>Attack [F]</span>
-        </button>
-        <button
-          className="flex flex-col items-center gap-1 px-3 py-2 rounded font-serif text-xs tracking-widest uppercase bg-black/40 border border-amber-500/50 text-amber-300 hover:bg-amber-500/15 transition-all active:scale-95"
-          onClick={() => engineRef.current?.useSpecial()}
-        >
-          <Zap className="w-4 h-4" />
-          <span>Special [R]</span>
         </button>
         <button
           className="flex flex-col items-center gap-1 px-4 py-2 rounded font-serif text-xs tracking-widest uppercase bg-black/40 border border-neutral-700 text-muted-foreground hover:border-[#c5a059]/70 hover:text-[#c5a059] transition-all active:scale-95"
@@ -652,123 +552,6 @@ function Game() {
         } satisfies CharSummary}
       />
 
-      {/* Anne Bonny — Pirate Cove vendor */}
-      <AnimatePresence>
-        {vendorOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-4"
-            onClick={() => setVendorOpen(false)}
-          >
-            <div
-              className="relative max-w-md w-full p-6 space-y-4"
-              style={stonePanel}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Rivets />
-              <div className="text-center">
-                <h2 className="font-serif text-xl tracking-widest uppercase" style={{ color: GOLD }}>
-                  Anne&apos;s Trade Chest
-                </h2>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Sell harvest for gold, or buy with gold / wood / stone.
-                </p>
-                <p className="text-xs mt-1">
-                  <span style={{ color: GOLD }}>🪙 {getWallet().gold}</span>
-                  {" · "}🪵 {getResources().wood} · 🪨 {getResources().stone}
-                </p>
-              </div>
-              <div className="space-y-2 max-h-80 overflow-y-auto">
-                {VENDOR_GOODS.map((g) => {
-                  const priceBits: string[] = [];
-                  if (g.kind === "sell") {
-                    priceBits.push(`+${g.gold}g`);
-                    if (g.resource) priceBits.push(`−${g.amount} ${g.resource}`);
-                  } else {
-                    if (g.gold > 0) priceBits.push(`−${g.gold}g`);
-                    if (g.costWood) priceBits.push(`−${g.costWood} wood`);
-                    if (g.costStone) priceBits.push(`−${g.costStone} stone`);
-                    if (g.grant === "wood") priceBits.push(`+${g.amount} wood`);
-                    if (g.grant === "stone") priceBits.push(`+${g.amount} stone`);
-                    if (g.grant === "gold_bag") priceBits.push("+25g");
-                    if (g.grant === "potion") priceBits.push("+potion");
-                  }
-                  return (
-                  <button
-                    key={g.id + bagTick}
-                    className="w-full text-left px-3 py-2 rounded border border-white/10 hover:border-[#c5a059]/60 bg-black/40 transition-colors"
-                    onClick={() => {
-                      const w = getWallet();
-                      if (g.kind === "sell") {
-                        if (!g.resource) return;
-                        if (!spendResource(g.resource, g.amount)) {
-                          toast.error(`Need ${g.amount} ${g.resource}.`);
-                          return;
-                        }
-                        saveWallet({ ...w, gold: w.gold + g.gold });
-                        toast.success(`Sold ${g.amount} ${g.resource} for ${g.gold} gold.`);
-                        setBagTick((t) => t + 1);
-                        return;
-                      }
-                      // BUY — pay gold and/or wood/stone
-                      if (g.gold > 0 && w.gold < g.gold) {
-                        toast.error("Not enough gold.");
-                        return;
-                      }
-                      if (!spendResources({ wood: g.costWood ?? 0, stone: g.costStone ?? 0 })) {
-                        toast.error(
-                          `Need ${g.costWood ? g.costWood + " wood" : ""}${g.costWood && g.costStone ? " + " : ""}${g.costStone ? g.costStone + " stone" : ""}`.trim() ||
-                            "Not enough resources.",
-                        );
-                        return;
-                      }
-                      if (g.gold > 0) saveWallet({ ...w, gold: w.gold - g.gold });
-                      if (g.grant === "potion") {
-                        toast.success("Healing brew acquired — feel the grit return.");
-                      } else if (g.grant === "wood") {
-                        addResource("wood", g.amount);
-                        toast.success(`Bought ${g.amount} wood.`);
-                      } else if (g.grant === "stone") {
-                        addResource("stone", g.amount);
-                        toast.success(`Bought ${g.amount} stone.`);
-                      } else if (g.grant === "gold_bag") {
-                        const ww = getWallet();
-                        saveWallet({ ...ww, gold: ww.gold + 25 });
-                        toast.success("Anne counts out 25 gold.");
-                      } else if (g.resource && g.amount) {
-                        addResource(g.resource, g.amount);
-                        toast.success(`Bought ${g.amount} ${g.resource}.`);
-                      } else {
-                        toast.success(`Traded: ${g.name}`);
-                      }
-                      setBagTick((t) => t + 1);
-                    }}
-                  >
-                    <div className="flex justify-between items-center gap-2">
-                      <span className="font-serif text-sm tracking-wide">{g.name}</span>
-                      <span className="text-[10px] font-mono shrink-0" style={{ color: GOLD }}>
-                        {priceBits.join(" · ")}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{g.blurb}</p>
-                  </button>
-                  );
-                })}
-              </div>
-              <button
-                className="w-full h-10 font-serif tracking-widest uppercase rounded"
-                style={{ background: GOLD, color: "#1a1208" }}
-                onClick={() => setVendorOpen(false)}
-              >
-                Close
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Controls hint */}
       <AnimatePresence>
         {showControls && (
@@ -783,10 +566,11 @@ function Game() {
                 <Crosshair className="w-3 h-3 text-primary" />
                 <p className="text-[10px] font-serif text-primary uppercase tracking-widest">Controls</p>
               </div>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">WASD — Move · LMB move/target · RMB hold attack</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F Attack · Space Jump · Q Block · Shift Dodge</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">E Interact · R Special · 1-5 Skills (AoE: key then LMB place)</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Chop trees / quarry stone with F · Cove east · Colossus west</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">WASD / Arrow Keys — Move</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Left Click Enemy — Target &amp; Chase</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F / Space — Attack Nearest</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Q / Shift — Dodge</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">1–5 — Skills</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Left Click Ground — Move To</p>
             </div>
           </motion.div>

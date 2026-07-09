@@ -729,10 +729,22 @@ export interface AnimState {
   deathPhase: number;      // 0..1, rises during death
   isWalking: boolean;
   isAttacking: boolean;
+  /** True once the attack clip has been triggered for the current swing. */
+  attackTriggered: boolean;
+  hurtTriggered: boolean;
 }
 
 export function makeAnimState(): AnimState {
-  return { walkPhase: Math.random() * Math.PI * 2, attackPhase: 0, hurtPhase: 0, deathPhase: 0, isWalking: false, isAttacking: false };
+  return {
+    walkPhase: Math.random() * Math.PI * 2,
+    attackPhase: 0,
+    hurtPhase: 0,
+    deathPhase: 0,
+    isWalking: false,
+    isAttacking: false,
+    attackTriggered: false,
+    hurtTriggered: false,
+  };
 }
 
 /** Tint helper — restores base color then applies a hurt flash (0..1). */
@@ -772,12 +784,16 @@ export function updateEnemyAnimation(model: EnemyModel, state: AnimState, delta:
         return;
       }
 
-      if (state.isAttacking) {
-        state.attackPhase = Math.min(1, state.attackPhase + delta * 4);
-        if (state.attackPhase >= 1) { state.attackPhase = 0; state.isAttacking = false; }
+      if (state.isAttacking && !state.attackTriggered) {
+        state.attackTriggered = true;
         kit.attack();
       }
-      if (state.hurtPhase > 0.9) kit.hit();
+      if (!state.isAttacking) state.attackTriggered = false;
+      if (state.hurtPhase > 0 && !state.hurtTriggered) {
+        state.hurtTriggered = true;
+        kit.hit();
+      }
+      if (state.hurtPhase <= 0) state.hurtTriggered = false;
       kit.setMoving(state.isWalking);
       group.position.y = group.userData.baseY ?? 0;
       return;

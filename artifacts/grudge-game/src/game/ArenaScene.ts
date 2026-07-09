@@ -12,9 +12,9 @@ import { pointInShape, type ShapeQuery } from "./combat/damageShapes";
 import { TelegraphField } from "./combat/telegraphs";
 import { ParticleVfx } from "./combat/particles";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
+import { canDodge } from "./combatInput";
 import type { ClassSkill } from "../data/classSkills";
 import { loadMonsterModel, disposeMonsterModel, isMonsterId } from "./MonsterModels";
-import { BOSS_MONSTER_BY_ID } from "../data/bossMonsters";
 import type { EnemyModel } from "./EnemyFactory";
 import { makeGroundMaterial } from "./proceduralTextures";
 
@@ -64,10 +64,6 @@ export interface ArenaStateUpdate {
   playerLevel: number;
   attackCooldownPct: number;
   skillCooldownPct: number[];
-  /** 0..1 ready for next dodge (1 = ready). */
-  dodgeReadyPct: number;
-  /** True while dodge invulnerability frames are active. */
-  iframeActive: boolean;
   bossName: string;
   bossTitle: string;
   bossHp: number;
@@ -78,8 +74,6 @@ export interface ArenaStateUpdate {
   bossScreenY: number;
   bossAlive: boolean;
   bossTelegraph: string | null;
-  /** Brief phase-banner text (e.g. "PHASE 2") while announce timer is live. */
-  phaseAnnounce: string | null;
   damageNumbers: ArenaDamageNumber[];
   combatLog: string[];
 }
@@ -108,18 +102,13 @@ interface Projectile {
   life: number;
   max: number;
   damage: number;
-  /** Hit radius — large enough to feel fair, small enough to dodge through. */
   radius: number;
   homing: boolean;
   color: number;
   trailT: number;
-  /** All boss bolts are dodgeable via i-frames or sidestep. */
-  dodgeable: boolean;
-  /** Optional ground shadow that tracks projected landing for lobbed shots. */
-  groundRing?: THREE.Mesh;
 }
 
-type TelegraphKind = "melee" | "aoe" | "debuff" | "phase";
+type TelegraphKind = "melee" | "aoe" | "debuff";
 
 interface Telegraph {
   kind: TelegraphKind;
@@ -130,19 +119,12 @@ interface Telegraph {
   struck: boolean;
   damage: number;
   label: string;
-  /** Growing ring (phase burst / expanding nova). */
-  expanding?: boolean;
-  radiusEnd?: number;
 }
 
-/**
- * Pick an in-repo (rigged, animated) monster GLB to embody the boss, by tier.
- * Prefer smaller GLBs at low tiers — cultist_armed is ~31 MB and made every
- * tier-1 load feel broken/hung on slow networks.
- */
+/** Pick an in-repo (rigged) monster GLB to embody the boss, by tier. */
 function bossMonsterId(tier: number): string {
   switch (Math.max(1, Math.min(5, Math.round(tier)))) {
-    case 1: return "mon_pincher";
+    case 1: return "mon_cultist";
     case 2: return "mon_medusa";
     case 3: return "mon_dante_beast";
     case 4: return "mon_medusa";
@@ -173,20 +155,10 @@ function resolveBossModelId(assetPack: string | undefined, tier: number): string
   const pack = (assetPack ?? "").toLowerCase();
   if (!pack.trim() || pack === "boss_character_default") return bossMonsterId(tier);
 
-  // Direct boss GLB id from localBoss NAME_POOL (boss_noble_dragon, etc.)
-  if (pack.startsWith("boss_") && isMonsterId(pack)) return pack;
-
   // Only animated (rigged, non-null clip) monsters are eligible — the boss must
   // visibly idle/move/attack, so the static `mon_big_scary_*` GLBs are excluded.
   const keywordMap: Array<[RegExp, string]> = [
-    [/tarisland|qishilong/, "boss_tarisland_dragon"],
-    [/noble.*dragon|wyrm.*western/, "boss_noble_dragon"],
-    [/fireworm|wyrmling|cinder/, "boss_fireworm"],
-    [/dragon|drake|wyrm|leviathan/, "boss_noble_dragon"],
-    [/monkey.*king|wukong|sun.*monkey/, "boss_sun_monkey_king"],
-    [/shifting.*cloud|sora/, "boss_sora_cloud"],
-    [/framis|necromancer|dark.*necro/, "boss_framis_necro"],
-    [/colossus|titan|giant|golem|wrath|dread|hulk|behemoth/, "mon_dante_beast"],
+    [/colossus|titan|giant|golem|wrath|dread|hulk|behemoth|leviathan/, "mon_dante_beast"],
     [/gloom|brute|ogre|troll|abomination/, "mon_medusa"],
     [/thorn|queen|briar|medusa|serpent|gorgon|witch|matriarch|naga/, "mon_medusa"],
     [/hunter|predator|beast|wolf|hound|stalker|fang|claw/, "mon_dante_beast"],
@@ -197,19 +169,8 @@ function resolveBossModelId(assetPack: string | undefined, tier: number): string
     if (re.test(pack)) return id;
   }
 
-  // No thematic match — prefer imported boss GLBs, then legacy monsters.
-  const pool = [
-    "boss_noble_dragon",
-    "boss_tarisland_dragon",
-    "boss_fireworm",
-    "boss_framis_necro",
-    "boss_sora_cloud",
-    "boss_sun_monkey_king",
-    "mon_dante_beast",
-    "mon_medusa",
-    "mon_cultist",
-    "mon_pincher",
-  ];
+  // No thematic match — hash the pack for a stable, varied body (animated only).
+  const pool = ["mon_dante_beast", "mon_medusa", "mon_cultist", "mon_pincher"];
   return pool[hashString(pack) % pool.length]!;
 }
 
@@ -258,15 +219,8 @@ export class ArenaScene {
   private playerFacing = Math.PI;
   private playerTarget: THREE.Vector3 | null = null;
   private attackBoss = false; // auto-approach + basic-attack the boss
-  private playerSpeed = 7.2;
+  private playerSpeed = 7;
   private slowUntil = 0;
-  /** Dodge invulnerability end time (performance.now ms). */
-  private iframeUntil = 0;
-  /** Dodge cooldown end time. */
-  private dodgeCdUntil = 0;
-  private readonly dodgeCdSec = 0.85;
-  private readonly dodgeIframeSec = 0.42;
-  private readonly dodgeDistance = 3.4;
 
   private playerHp: number;
   private playerMaxHp: number;
@@ -278,6 +232,7 @@ export class ArenaScene {
   private readonly attackInterval = 0.8;
   private readonly attackRange = 3.0;
   private attackCdT = 0;
+  private lastDodgeAt = 0;
 
   private skillCdUntil = [0, 0, 0, 0, 0];
   private skillCdLen = [4, 5, 6, 7, 8];
@@ -297,14 +252,9 @@ export class ArenaScene {
   private bossWorldHeight = 3;
   private bossSpeed = 2.4;
   private readonly bossMeleeRange = 4.5;
-  private bossActionT = 2.2;
+  private bossActionT = 2.5;
   private abilityCdUntil = new Map<string, number>();
   private activeTelegraphLabel: string | null = null;
-  /** Seconds remaining for "PHASE N" HUD banner. */
-  private phaseAnnounceT = 0;
-  private phaseAnnounceText: string | null = null;
-  /** Shared ring geometry for projectile ground shadows. */
-  private projRingGeo: THREE.RingGeometry | null = null;
 
   private projectiles: Projectile[] = [];
   private telegraphs: Telegraph[] = [];
@@ -337,8 +287,6 @@ export class ArenaScene {
     this.critChance = options.critChance ?? 0.12;
     this.bossMaxHp = Math.max(1, options.boss.maxHp);
     this.bossHp = this.bossMaxHp;
-    // Normalize phase count so telegraphs / volleys always have room to escalate.
-    this.boss.phases = Math.max(2, Math.min(3, Math.round(this.boss.phases) || 2));
   }
 
   init(container: HTMLElement) {
@@ -374,9 +322,6 @@ export class ArenaScene {
     this.buildBraziers();
     this.loadPlayer();
     this.loadBoss();
-    // Arena is interactive as soon as the pit exists — player/boss models stream in.
-    // Keeps HUD usable even if a skin GLB is slow (was stuck on "Entering…" forever).
-    this.loaded = true;
     this.emitState();
 
     window.addEventListener("resize", this.onResize);
@@ -549,36 +494,24 @@ export class ArenaScene {
   // ── Player ────────────────────────────────────────────────────────────────
   private loadPlayer() {
     const loader = new GLTFLoader();
-    let settled = false;
-    const finish = (fn: () => void) => {
-      if (settled || this.disposed) return;
-      settled = true;
-      fn();
-    };
-    // Prefer the globally-selected fighter skin; fall back to a capsule.
+    // Prefer the globally-selected fighter skin; fall back to the KayKit hero.
     loadActiveFighterModel(
       loader,
       2.6,
       (root, anim) => {
-        finish(() => {
-          if (this.disposed) {
-            disposeObject3D(root);
-            return;
-          }
-          root.position.copy(this.playerPos);
-          this.scene.add(root);
-          this.playerGroup = root;
-          this.heroAnim = anim;
-          this.loaded = true;
-          this.emitState();
-        });
+        if (this.disposed) {
+          disposeObject3D(root);
+          return;
+        }
+        root.position.copy(this.playerPos);
+        this.scene.add(root);
+        this.playerGroup = root;
+        this.heroAnim = anim;
+        this.loaded = true;
+        this.emitState();
       },
-      () => finish(() => this.loadFallbackPlayer()),
+      () => this.loadFallbackPlayer(),
     );
-    // Don't leave "Entering the arena..." forever if the skin GLB hangs.
-    window.setTimeout(() => {
-      finish(() => this.loadFallbackPlayer());
-    }, 10000);
   }
 
   /** Honest fallback when the fighter skin GLB fails to load: a plain capsule.
@@ -609,8 +542,7 @@ export class ArenaScene {
     if (!isMonsterId(monsterId)) monsterId = bossMonsterId(this.boss.tier);
     if (!isMonsterId(monsterId)) return;
 
-    const bossDef = BOSS_MONSTER_BY_ID.get(monsterId);
-    const tierScale = (1.5 + Math.max(0, Math.min(5, this.boss.tier)) * 0.16) * (bossDef?.bossScale ?? 1);
+    const tierScale = 1.5 + Math.max(0, Math.min(5, this.boss.tier)) * 0.16;
     const model = loadMonsterModel(monsterId, loader, (m) => {
       if (this.disposed) return;
       // Scale the whole boss up for menace; feet stay grounded (origin scale).
@@ -624,31 +556,17 @@ export class ArenaScene {
     this.bossWorldHeight = model.height * tierScale;
 
     this.pushLog(`${this.boss.name}${this.boss.title ? ", " + this.boss.title : ""} enters the arena.`);
-    this.pushLog("Tip: red/orange circles detonate — step out or Shift-dodge (i-frames).");
-    this.pushLog("Tip: Space jump · Q block · F attack · R special · 1-5 skills.");
   }
 
   // ── Input ─────────────────────────────────────────────────────────────────
   private _keyDown = (e: KeyboardEvent) => {
     this.keys.add(e.code);
-    // F attack · Space jump · Q block (i-frame parry) · Shift dodge · R special
+    if (e.repeat) return;
     if (e.code === "KeyF") this.attackNearest();
-    if (e.code === "Space") {
-      e.preventDefault();
-      this.heroAnim?.trigger("jump");
-    }
-    // Q = block/parry — short invulnerability so circle strikes can still be avoided.
-    if (e.code === "KeyQ") {
-      e.preventDefault();
-      this.doBlock();
-    }
-    if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+    if (e.code === "Space") { e.preventDefault(); this.doJump(); }
+    if (e.code === "KeyQ" || e.code === "ShiftLeft" || e.code === "ShiftRight") {
       e.preventDefault();
       this.doDodge();
-    }
-    if (e.code === "KeyR") {
-      e.preventDefault();
-      this.useSkill(0); // special mapped to first skill slot in arena
     }
     if (e.code.startsWith("Digit")) {
       const n = Number(e.code.slice(5));
@@ -708,51 +626,38 @@ export class ArenaScene {
     return p;
   }
 
+  doJump() {
+    if (this.outcome !== "fighting") return;
+    if (this.heroAnim?.trigger("jump")) return;
+    if (!this.playerGroup) return;
+    const g = this.playerGroup;
+    const baseY = 0;
+    let t = 0;
+    const dur = 0.5;
+    const step = () => {
+      if (this.disposed) return;
+      t += 0.016;
+      const p = Math.min(1, t / dur);
+      g.position.y = baseY + Math.sin(p * Math.PI) * 1.1;
+      if (p < 1) requestAnimationFrame(step);
+      else g.position.y = baseY;
+    };
+    requestAnimationFrame(step);
+  }
+
   doDodge() {
     if (this.outcome !== "fighting") return;
     const now = performance.now();
-    if (now < this.dodgeCdUntil) return;
-    this.dodgeCdUntil = now + this.dodgeCdSec * 1000;
-    // Invulnerability windows make projectiles and circle strikes dodgeable.
-    this.iframeUntil = now + this.dodgeIframeSec * 1000;
+    if (!canDodge(this.lastDodgeAt, now)) return;
+    this.lastDodgeAt = now;
     this.playerTarget = null;
-    this.attackBoss = false;
-
-    // Prefer the skin/racalvin dodge clip; always apply a logical dash so
-    // sidestep distance is consistent even when the clip has no root motion.
-    this.heroAnim?.trigger("dodge");
+    // Dodge clips carry their own forward lunge via root motion; only dash
+    // manually when the active model has no dodge clip (e.g. fighter skins).
+    if (this.heroAnim?.trigger("dodge")) return;
     const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    // Strafe preference when holding A/D so you can dodge *through* bolts.
-    if (this.keys.has("KeyA") || this.keys.has("ArrowLeft")) {
-      forward.set(-Math.cos(this.playerFacing), 0, Math.sin(this.playerFacing));
-    } else if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) {
-      forward.set(Math.cos(this.playerFacing), 0, -Math.sin(this.playerFacing));
-    }
-    this.playerPos.x += forward.x * this.dodgeDistance;
-    this.playerPos.z += forward.z * this.dodgeDistance;
+    this.playerPos.x += forward.x * 3.0;
+    this.playerPos.z += forward.z * 3.0;
     this.clampToArena(this.playerPos);
-    this.particles?.impact(
-      this.playerPos.clone().setY(0.4),
-      0xc5e8ff,
-      0.55,
-    );
-  }
-
-  /** Q block — shorter i-frames than dodge, no dash (parry circles / bolts). */
-  doBlock() {
-    if (this.outcome !== "fighting") return;
-    const now = performance.now();
-    // Share dodge cooldown so block/dodge can't chain-spam invuln.
-    if (now < this.dodgeCdUntil) return;
-    this.dodgeCdUntil = now + this.dodgeCdSec * 0.55 * 1000;
-    this.iframeUntil = now + Math.min(0.45, this.dodgeIframeSec) * 1000;
-    this.heroAnim?.trigger("cast");
-    this.particles?.impact(this.playerPos.clone().setY(1.0), 0xffe9a0, 0.4);
-  }
-
-  /** True while the player cannot take damage (dodge i-frames). */
-  private isInvulnerable(): boolean {
-    return performance.now() < this.iframeUntil;
   }
 
   useSkill(idx: number) {
@@ -767,21 +672,17 @@ export class ArenaScene {
     // Resolve the skill's archetype shape (idx fallback gives a broad mix).
     const arch = archetypeForSkill(this.hudSkills[idx], idx);
     const isCast = arch.shape === "circle" || arch.shape === "nova" || arch.shape === "deployable";
-    // Auto-aim the boss so shaped skills read as aimed (before travel).
+    if (this.heroAnim) {
+      const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
+      if (!played) this.proceduralLunge();
+    } else {
+      this.proceduralLunge();
+    }
+
+    // Auto-aim the boss so shaped skills read as aimed.
     if (this.bossAlive) {
       this.playerFacing = Math.atan2(this.bossPos.x - this.playerPos.x, this.bossPos.z - this.playerPos.z);
     }
-
-    // Play skill clip; root motion (or committed lunge) carries the body to the
-    // skill's end pose — never snap back to the pre-cast station.
-    if (this.heroAnim) {
-      const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
-      if (!played) this.commitSkillTravel(isCast ? 0.4 : 1.6);
-      else if (!this.heroAnim.isRootMotionActive()) this.commitSkillTravel(isCast ? 0.35 : 1.4);
-    } else {
-      this.commitSkillTravel(isCast ? 0.4 : 1.6);
-    }
-
     const dir = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
     const origin = this.playerPos.clone();
 
@@ -832,53 +733,30 @@ export class ArenaScene {
     this.hudSkills = skills;
   }
 
-  /**
-   * Commit a permanent forward displacement for skill/attack travel when the
-   * active model has no root-motion bone (or no clip). The character ends at
-   * the skill terminus — it does NOT ease back to the cast origin.
-   */
-  private commitSkillTravel(distance: number) {
-    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    const start = this.playerPos.clone();
-    const end = start.clone().add(forward.multiplyScalar(Math.max(0.15, distance)));
-    this.clampToArena(end);
-    // Logical position lands at the skill end immediately so combat ranges match.
-    this.playerPos.copy(end);
-    // Smooth the mesh from the cast origin to the committed end (no return trip).
+  private proceduralLunge() {
     if (!this.playerGroup) return;
     const g = this.playerGroup;
-    g.position.copy(start);
+    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    const start = g.position.clone();
+    const peak = start.clone().add(forward.multiplyScalar(0.5));
     let t = 0;
-    const dur = 0.28;
+    const dur = 0.22;
     const step = () => {
-      if (this.disposed || !this.playerGroup) return;
+      if (this.disposed) return;
       t += 0.016;
       const p = Math.min(1, t / dur);
-      // Ease-out so the last frames settle on the end pose.
-      const e = 1 - (1 - p) * (1 - p);
-      g.position.lerpVectors(start, this.playerPos, e);
+      const e = p < 0.5 ? p * 2 : (1 - p) * 2;
+      g.position.lerpVectors(start, peak, e);
       if (p < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
   }
 
-  /** @deprecated Use commitSkillTravel — kept name alias for attack fallback. */
-  private proceduralLunge() {
-    this.commitSkillTravel(1.1);
-  }
-
   // ── Boss combat ─────────────────────────────────────────────────────────────
   private bossActionInterval(): number {
-    // Faster casts each phase — still telegraphed so circles/bolts stay readable.
-    if (this.bossPhase >= 3) return 1.05;
-    if (this.bossPhase >= 2) return 1.55;
-    return 2.35;
-  }
-
-  private phaseDamageMul(): number {
-    if (this.bossPhase >= 3) return 1.28;
-    if (this.bossPhase >= 2) return 1.12;
-    return 1;
+    if (this.bossPhase >= 3) return 1.25;
+    if (this.bossPhase >= 2) return 1.9;
+    return 2.7;
   }
 
   private chooseAbility(distToPlayer: number): ArenaBossAbility | null {
@@ -887,20 +765,15 @@ export class ArenaScene {
     const pool = ready.length > 0 ? ready : this.boss.abilities;
     if (pool.length === 0) return null;
 
-    // Phase-aware weighting: late phases push multi-circle / projectile patterns.
+    // Bias toward melee when the player is close, ranged/aoe when far.
     const close = distToPlayer < this.bossMeleeRange + 1;
     const scored = pool.map((a) => {
       const t = normalizeAbilityType(a.type);
       let weight = 1;
-      if (close && t === "melee") weight = this.bossPhase >= 2 ? 2.2 : 3.2;
-      if (!close && (t === "ranged" || t === "magic")) weight = 2.8 + this.bossPhase * 0.4;
-      if (t === "aoe") weight = 1.8 + this.bossPhase * 0.7;
-      if (t === "debuff") weight = 1.2 + (this.bossPhase >= 2 ? 0.6 : 0);
-      if (close && (t === "ranged" || t === "magic")) weight = 0.7 + this.bossPhase * 0.25;
-      // Name hints (volley / meteor) get phase boosts even if typed generically.
-      const n = a.name.toLowerCase();
-      if (/volley|barrage|bolt|lance/.test(n)) weight *= 1.25;
-      if (/nova|skyfall|meteor|ruin|circle/.test(n)) weight *= 1.2;
+      if (close && t === "melee") weight = 3;
+      if (!close && (t === "ranged" || t === "magic")) weight = 3;
+      if (!close && (t === "aoe" || t === "debuff")) weight = 2.2;
+      if (close && (t === "ranged" || t === "magic")) weight = 0.5;
       return { a, weight };
     });
     const totalW = scored.reduce((s, x) => s + x.weight, 0);
@@ -914,194 +787,68 @@ export class ArenaScene {
 
   private performAbility(ability: ArenaBossAbility) {
     const now = performance.now();
-    // Phase shortens cooldowns slightly so the arena stays busy.
-    const cdScale = this.bossPhase >= 3 ? 0.72 : this.bossPhase >= 2 ? 0.85 : 1;
-    const cdSec = Math.max(1.8, Math.min(12, (ability.cooldown || 4) * cdScale));
+    const cdSec = Math.max(2.4, Math.min(12, ability.cooldown || 4));
     this.abilityCdUntil.set(ability.id, now + cdSec * 1000);
     const type = normalizeAbilityType(ability.type);
-    const dmg = Math.max(
-      8,
-      Math.round((ability.damage || 30) * this.phaseDamageMul() * (0.85 + Math.random() * 0.3)),
-    );
-    const nameLc = ability.name.toLowerCase();
+    const dmg = Math.max(8, Math.round((ability.damage || 30) * (0.85 + Math.random() * 0.3)));
 
-    if (type === "ranged" || type === "magic" || /volley|barrage/.test(nameLc)) {
-      if (this.bossPhase >= 2 || /volley|barrage|fan/.test(nameLc)) {
-        this.spawnProjectileVolley(ability, dmg, type === "magic", this.bossPhase >= 3 ? 5 : 3);
-      } else {
-        this.spawnProjectile(ability, dmg, type === "magic");
-      }
-      // Phase 3: follow a bolt volley with a small foot-circle under the player.
-      if (this.bossPhase >= 3 && Math.random() < 0.55) {
-        this.spawnTelegraph("aoe", this.playerPos.clone(), 2.6, 0.95, Math.round(dmg * 0.55), `${ability.name} Aftershock`);
-      }
-    } else if (type === "aoe" || /skyfall|meteor|rain|nova/.test(nameLc)) {
-      if (this.bossPhase >= 2 || /skyfall|meteor|rain/.test(nameLc)) {
-        this.spawnMultiCircles(dmg, ability.name, this.bossPhase >= 3 ? 5 : 3);
-      } else {
-        this.spawnTelegraph("aoe", this.playerPos.clone(), 4.4, 1.35, dmg, ability.name, true);
-      }
+    if (type === "ranged" || type === "magic") {
+      this.spawnProjectile(ability, dmg, type === "magic");
+    } else if (type === "aoe") {
+      this.spawnTelegraph("aoe", this.playerPos.clone(), 4.2, 1.25, dmg, ability.name);
     } else if (type === "debuff") {
-      this.spawnTelegraph("debuff", this.playerPos.clone(), 3.4, 1.2, dmg, ability.name, true);
+      this.spawnTelegraph("debuff", this.playerPos.clone(), 3.2, 1.1, dmg, ability.name);
     } else {
-      // Melee — circle in front of the boss toward the player (leave the red zone).
+      // Melee — short wind-up swing anchored in front of the boss toward player.
       const toP = new THREE.Vector3().subVectors(this.playerPos, this.bossPos).setY(0);
       if (toP.lengthSq() > 0.001) toP.normalize();
-      const center = this.bossPos.clone().add(toP.multiplyScalar(this.bossMeleeRange * 0.55));
-      const windup = this.bossPhase >= 3 ? 0.42 : 0.55;
-      this.spawnTelegraph("melee", center, this.bossMeleeRange * 0.95, windup, dmg, ability.name, true);
-      // Phase 2+: extra ring around the boss itself (dodge out).
-      if (this.bossPhase >= 2) {
-        this.spawnTelegraph(
-          "melee",
-          this.bossPos.clone(),
-          3.2 + this.bossPhase * 0.35,
-          windup + 0.15,
-          Math.round(dmg * 0.7),
-          `${ability.name} Shockwave`,
-          true,
-        );
-      }
+      const center = this.bossPos.clone().add(toP.multiplyScalar(this.bossMeleeRange * 0.6));
+      this.spawnTelegraph("melee", center, this.bossMeleeRange, 0.5, dmg, ability.name);
     }
     this.pushLog(`${this.boss.name} uses ${ability.name}.`);
   }
 
-  /**
-   * Fan of dodgeable projectiles. Angular spread grows with count so you can
-   * step between bolts or i-frame through one of them.
-   */
-  private spawnProjectileVolley(ability: ArenaBossAbility, dmg: number, homing: boolean, count: number) {
-    const n = Math.max(2, Math.min(7, count));
-    const spread = (Math.PI / 7) * (n - 1);
-    const base = Math.atan2(this.playerPos.x - this.bossPos.x, this.playerPos.z - this.bossPos.z);
-    for (let i = 0; i < n; i++) {
-      const t = n === 1 ? 0.5 : i / (n - 1);
-      const ang = base - spread / 2 + spread * spread;
-      const dir = new THREE.Vector3(Math.sin(ang), 0, Math.cos(ang));
-      // Only the center bolt homes slightly — side bolts stay linear so they are dodgeable.
-      const isCenter = Math.abs(t - 0.5) < 0.01;
-      this.spawnProjectile(ability, Math.round(dmg * (isCenter ? 1 : 0.72)), homing && isCenter, dir);
-    }
-  }
-
-  /** Scatter danger circles around the player (meteor / skyfall pattern). */
-  private spawnMultiCircles(dmg: number, label: string, count: number) {
-    const n = Math.max(2, Math.min(6, count));
-    // Always one on the player's current feet so standing still is punished.
-    this.spawnTelegraph("aoe", this.playerPos.clone(), 3.1, 1.15, dmg, label, true);
-    for (let i = 1; i < n; i++) {
-      const ang = (i / n) * Math.PI * 2 + Math.random() * 0.4;
-      const dist = 3.2 + Math.random() * 4.5;
-      const c = new THREE.Vector3(
-        this.playerPos.x + Math.cos(ang) * dist,
-        0,
-        this.playerPos.z + Math.sin(ang) * dist,
-      );
-      this.clampToArena(c, 2);
-      const windup = 0.95 + i * 0.12 + Math.random() * 0.2;
-      this.spawnTelegraph("aoe", c, 2.6 + Math.random() * 0.9, windup, Math.round(dmg * 0.75), label, true);
-    }
-  }
-
-  private spawnProjectile(
-    ability: ArenaBossAbility,
-    dmg: number,
-    homing: boolean,
-    forcedDir?: THREE.Vector3,
-  ) {
+  private spawnProjectile(ability: ArenaBossAbility, dmg: number, homing: boolean) {
     const color = homing ? 0xaa44ff : 0xff5522;
     const start = this.bossPos.clone().add(new THREE.Vector3(0, this.bossWorldHeight * 0.55, 0));
-    // Readable size — bright additive orb.
-    const sprite = this.particles.projectileSprite(color, homing ? 1.65 : 1.4);
+    // Glowing additive billboard (shared particle texture) — not a primitive sphere.
+    const sprite = this.particles.projectileSprite(color, homing ? 1.5 : 1.25);
     sprite.position.copy(start);
     this.scene.add(sprite);
-    const light = new THREE.PointLight(color, 2.6, 10, 2);
+    const light = new THREE.PointLight(color, 2.4, 9, 2);
     sprite.add(light);
+    // Muzzle flash where the bolt is born.
     this.particles?.impact(start.clone(), color, 0.7);
 
-    let dir: THREE.Vector3;
-    if (forcedDir) {
-      dir = forcedDir.clone().normalize();
-    } else {
-      const target = this.playerPos.clone().add(new THREE.Vector3(0, 1, 0));
-      dir = new THREE.Vector3().subVectors(target, start).normalize();
-    }
-    // Speeds tuned so a mid-range dodge i-frame window can slip through.
-    const speed = homing ? 9.5 : 13.5;
-
-    // Ground shadow ring that tracks under the bolt (circle indication of path).
-    let groundRing: THREE.Mesh | undefined;
-    if (!this.projRingGeo) this.projRingGeo = new THREE.RingGeometry(0.45, 0.7, 28);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: 0.55,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    groundRing = new THREE.Mesh(this.projRingGeo, ringMat);
-    groundRing.rotation.x = -Math.PI / 2;
-    groundRing.position.set(start.x, 0.05, start.z);
-    groundRing.renderOrder = 3;
-    this.scene.add(groundRing);
-
-    // Lead marker: small danger circle at predicted intercept if linear.
-    if (!homing) {
-      const lead = this.playerPos.clone();
-      const travel = start.distanceTo(lead.setY(start.y)) / speed;
-      const pred = this.playerPos.clone().add(
-        new THREE.Vector3(dir.x, 0, dir.z).multiplyScalar(0), // aim at current feet
-      );
-      this.skillTelegraphs?.showCircle(pred, 1.1, Math.min(1.1, travel * 0.85), color, { ring: true, y: 0.05 });
-    }
-
+    const target = this.playerPos.clone().add(new THREE.Vector3(0, 1, 0));
+    const dir = new THREE.Vector3().subVectors(target, start).normalize();
+    const speed = homing ? 12 : 16;
     this.projectiles.push({
       sprite,
       light,
       pos: start.clone(),
       vel: dir.multiplyScalar(speed),
       life: 0,
-      max: 3.6,
+      max: 3.2,
       damage: dmg,
-      radius: 0.95, // tight hitbox — visual is larger so "dodge" feels generous
+      radius: 1.2,
       homing,
       color,
       trailT: 0,
-      dodgeable: true,
-      groundRing,
     });
   }
 
-  private spawnTelegraph(
-    kind: TelegraphKind,
-    center: THREE.Vector3,
-    radius: number,
-    windup: number,
-    damage: number,
-    label: string,
-    ring = false,
-  ) {
-    const color =
-      kind === "melee" ? 0xff3322
-        : kind === "aoe" ? 0xff8800
-          : kind === "phase" ? 0xff2244
-            : 0xaa33ff;
+  private spawnTelegraph(kind: TelegraphKind, center: THREE.Vector3, radius: number, windup: number, damage: number, label: string) {
+    const color = kind === "melee" ? 0xff3322 : kind === "aoe" ? 0xff8800 : 0xaa33ff;
     center.y = 0;
-    // Filled sweep + hollow outer ring so the danger zone is unmistakable.
-    this.skillTelegraphs?.showCircle(center.clone(), radius, windup, color, { ring: false, y: 0.06 });
-    if (ring) {
-      this.skillTelegraphs?.showCircle(center.clone(), radius, windup, color, { ring: true, y: 0.08 });
-    }
-    this.telegraphs.push({
-      kind,
-      center: center.clone(),
-      radius,
-      t: 0,
+    // Wind-up warning uses the shared native-shader ground telegraph (a circle
+    // that sweeps its fill over the wind-up), not primitive ring/disc meshes.
+    this.skillTelegraphs?.show(
+      { kind: "circle", origin: center.clone(), dir: new THREE.Vector3(1, 0, 0), radius },
       windup,
-      struck: false,
-      damage,
-      label,
-    });
+      color,
+    );
+    this.telegraphs.push({ kind, center: center.clone(), radius, t: 0, windup, struck: false, damage, label });
   }
 
   private damageBoss(amount: number, isCrit: boolean) {
@@ -1113,44 +860,22 @@ export class ArenaScene {
       amount, isCrit, true,
     );
 
-    // Phase transitions: 66% → P2, 33% → P3 (when boss has 3 phases), else 50%.
+    // Phase transitions at 50% / 20%.
     const pct = this.bossHp / this.bossMaxHp;
-    const maxPhases = Math.max(1, this.boss.phases);
-    if (maxPhases >= 3) {
-      if (this.bossPhase < 2 && pct <= 0.66) this.enterPhase(2);
-      else if (this.bossPhase < 3 && pct <= 0.33) this.enterPhase(3);
-    } else if (maxPhases >= 2) {
-      if (this.bossPhase < 2 && pct <= 0.5) this.enterPhase(2);
-    }
+    if (this.bossPhase < 2 && pct <= 0.5) this.enterPhase(2);
+    else if (this.bossPhase < 3 && this.boss.phases >= 3 && pct <= 0.2) this.enterPhase(3);
 
     if (this.bossHp <= 0) this.bossDies();
   }
 
   private enterPhase(phase: number) {
     this.bossPhase = phase;
-    this.bossActionT = 0.35; // nearly immediate follow-up after the burst
-    this.bossSpeed += 0.55;
-    this.phaseAnnounceText = `PHASE ${phase}`;
-    this.phaseAnnounceT = 2.4;
-    this.pushLog(`${this.boss.name} enters Phase ${phase} — leave the crimson circle!`);
-
-    // Phase burst: large ring telegraphed from the boss — must dodge out or i-frame.
-    const burstR = 6.5 + phase * 1.1;
-    const burstDmg = Math.round(40 * this.phaseDamageMul() * (1 + this.boss.tier * 0.08));
-    this.spawnTelegraph("phase", this.bossPos.clone(), burstR, 1.4, burstDmg, `Phase ${phase} Burst`, true);
-    // Secondary outer ring for phase 3.
-    if (phase >= 3) {
-      this.spawnTelegraph("phase", this.bossPos.clone(), burstR + 3.2, 1.7, Math.round(burstDmg * 0.6), "Outer Shockwave", true);
-      this.spawnProjectileVolley(
-        { id: "phase_volley", name: "Phase Volley", damage: Math.round(burstDmg * 0.45), type: "ranged", cooldown: 99 },
-        Math.round(burstDmg * 0.45),
-        false,
-        5,
-      );
-    }
-
-    this.spawnVfx(this.bossPos.clone(), 0xff2200, 8, 0.6);
-    this.bossFlash = 0.55;
+    this.bossActionT = Math.min(this.bossActionT, 0.6);
+    this.bossSpeed += 0.7;
+    this.pushLog(`${this.boss.name} enters Phase ${phase} — the assault intensifies!`);
+    // Shockwave VFX + brief flash.
+    this.spawnVfx(this.bossPos.clone(), 0xff2200, 7, 0.6);
+    this.bossFlash = 0.4;
     this.emitState();
   }
 
@@ -1158,8 +883,6 @@ export class ArenaScene {
     this.bossAlive = false;
     this.bossDeadT = 0;
     this.outcome = "victory";
-    this.phaseAnnounceText = null;
-    this.phaseAnnounceT = 0;
     this.pushLog(`VICTORY — ${this.boss.name} has fallen!`);
     this.spawnVfx(this.bossPos.clone(), 0xffd060, 8, 0.9);
     this.emitState();
@@ -1171,11 +894,6 @@ export class ArenaScene {
 
   private damagePlayer(amount: number, label: string) {
     if (this.outcome !== "fighting") return;
-    if (this.isInvulnerable()) {
-      this.pushLog(`Dodged ${label}!`);
-      this.particles?.impact(this.playerPos.clone().setY(1.2), 0xaadfff, 0.7);
-      return;
-    }
     const mitigated = Math.max(4, Math.round(amount));
     this.playerHp = Math.max(0, this.playerHp - mitigated);
     this.heroAnim?.trigger("hit");
@@ -1281,6 +999,19 @@ export class ArenaScene {
       }
     }
 
+    // Root motion: let lunging/dodge/jump clips carry the logical position so
+    // the mesh moves WITH the character instead of sliding and snapping back.
+    if (this.heroAnim && this.heroAnim.consumeRootMotion(this._rmTmp)) {
+      this.playerPos.x += this._rmTmp.x;
+      this.playerPos.z += this._rmTmp.z;
+      this.clampToArena(this.playerPos);
+    }
+
+    if (this.playerGroup) {
+      this.playerGroup.position.lerp(new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z), 0.3);
+      this.playerGroup.rotation.y += (this.playerFacing - this.playerGroup.rotation.y) * 0.2;
+    }
+
     // ── Player basic attack ──
     this.attackCdT = Math.max(0, this.attackCdT - delta);
     if (!moving && this.attackBoss && this.bossAlive) {
@@ -1289,7 +1020,7 @@ export class ArenaScene {
         this.attackCdT = this.attackInterval;
         if (this.heroAnim) {
           const played = this.heroAnim.trigger("attack");
-          if (!played || !this.heroAnim.isRootMotionActive()) this.proceduralLunge();
+          if (!played) this.proceduralLunge();
         } else { this.proceduralLunge(); }
         const isCrit = Math.random() < this.critChance;
         const dmg = Math.round(this.baseDamage * (isCrit ? 2 : 1) * (0.85 + Math.random() * 0.3));
@@ -1303,25 +1034,9 @@ export class ArenaScene {
       this.playerHp = Math.min(this.playerMaxHp, this.playerHp + 3 * delta);
     }
 
-    // Mixer first, then root-motion sample, then fold travel into world position.
-    // (Consume-before-update dropped the final frame and caused snap-back.)
     if (this.heroAnim) {
       this.heroAnim.setMoving(moving);
       this.heroAnim.update(delta);
-      if (this.heroAnim.consumeRootMotion(this._rmTmp)) {
-        this.playerPos.x += this._rmTmp.x;
-        this.playerPos.z += this._rmTmp.z;
-        this.clampToArena(this.playerPos);
-      }
-    }
-
-    if (this.playerGroup) {
-      const targetPos = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z);
-      // During root-motion skills, stick tightly so the body never rubber-bands
-      // back to a lagging wrapper position when the clip finishes.
-      const blend = this.heroAnim?.isRootMotionActive() ? 0.9 : 0.4;
-      this.playerGroup.position.lerp(targetPos, blend);
-      this.playerGroup.rotation.y += (this.playerFacing - this.playerGroup.rotation.y) * 0.2;
     }
 
     this.skillVfx.update(delta);
@@ -1373,18 +1088,10 @@ export class ArenaScene {
     this.updateProjectiles(delta);
     this.updateTelegraphs(delta);
 
-    if (this.phaseAnnounceT > 0) {
-      this.phaseAnnounceT = Math.max(0, this.phaseAnnounceT - delta);
-      if (this.phaseAnnounceT <= 0) this.phaseAnnounceText = null;
-    }
-
     // Damage numbers age out.
     for (let i = this.damageNumbers.length - 1; i >= 0; i--) {
-      const d = this.damageNumbers[i]!;
-      d.age += delta;
-      // "Dodge" markers use value 0 + isCrit — age them out a bit faster.
-      const maxAge = d.value === 0 ? 0.9 : 1.4;
-      if (d.age > maxAge) this.damageNumbers.splice(i, 1);
+      this.damageNumbers[i]!.age += delta;
+      if (this.damageNumbers[i]!.age > 1.4) this.damageNumbers.splice(i, 1);
     }
 
     // Brazier flicker.
@@ -1413,72 +1120,35 @@ export class ArenaScene {
     }
   }
 
-  private disposeProjectile(p: Projectile) {
-    this.scene.remove(p.sprite);
-    (p.sprite.material as THREE.Material).dispose();
-    if (p.groundRing) {
-      this.scene.remove(p.groundRing);
-      (p.groundRing.material as THREE.Material).dispose();
-      p.groundRing = undefined;
-    }
-  }
-
   private updateProjectiles(delta: number) {
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i]!;
       p.life += delta;
-      // Homing is soft and only for the first half of life so late dodges work.
-      if (p.homing && p.life < p.max * 0.45 && this.outcome === "fighting") {
-        const desired = new THREE.Vector3()
-          .subVectors(this.playerPos.clone().setY(1), p.pos)
-          .normalize()
-          .multiplyScalar(p.vel.length());
-        p.vel.lerp(desired, 0.045);
+      if (p.homing && p.life < p.max * 0.5 && this.outcome === "fighting") {
+        const desired = new THREE.Vector3().subVectors(this.playerPos.clone().setY(1), p.pos).normalize().multiplyScalar(p.vel.length());
+        p.vel.lerp(desired, 0.06);
       }
       p.pos.addScaledVector(p.vel, delta);
       p.sprite.position.copy(p.pos);
-      p.sprite.scale.setScalar((p.homing ? 1.65 : 1.4) * (1 + Math.sin(p.life * 22) * 0.12));
+      // Subtle pulse so the bolt reads as live energy.
+      p.sprite.scale.setScalar((p.homing ? 1.5 : 1.25) * (1 + Math.sin(p.life * 22) * 0.12));
 
-      if (p.groundRing) {
-        p.groundRing.position.set(p.pos.x, 0.05, p.pos.z);
-        const mat = p.groundRing.material as THREE.MeshBasicMaterial;
-        mat.opacity = 0.35 + 0.25 * Math.sin(p.life * 14);
-      }
-
+      // Ember trail via the shared particle system (throttled).
       p.trailT += delta;
       if (p.trailT >= 0.06 && p.life < p.max * 0.9) {
         p.trailT = 0;
         this.particles?.impact(p.pos.clone(), p.color, 0.32);
       }
 
-      const horizDist = Math.hypot(p.pos.x - this.playerPos.x, p.pos.z - this.playerPos.z);
-      const hitPlayer = horizDist <= p.radius && Math.abs(p.pos.y - 1) < 2.2;
-      const outOfBounds = Math.hypot(p.pos.x, p.pos.z) > this.BOUNDS + 2 || p.pos.y < -0.5;
+      const hitPlayer = p.pos.distanceTo(this.playerPos.clone().setY(p.pos.y)) <= p.radius;
+      const outOfBounds = Math.hypot(p.pos.x, p.pos.z) > this.BOUNDS + 2 || p.pos.y < 0;
       if ((hitPlayer && this.outcome === "fighting") || p.life > p.max || outOfBounds) {
         if (hitPlayer && this.outcome === "fighting") {
-          if (p.dodgeable && this.isInvulnerable()) {
-            this.pushLog("Dodged a projectile!");
-            this.particles?.impact(p.pos.clone(), 0xc5e8ff, 0.9);
-            this.spawnDamageNumber(
-              this.playerPos.clone().add(new THREE.Vector3(0, 2.6, 0)),
-              0,
-              false,
-              true,
-            );
-            // Zero shown as dodge cue via log; strip last 0-dmg number if needed.
-            const last = this.damageNumbers[this.damageNumbers.length - 1];
-            if (last && last.value === 0) {
-              last.value = 0;
-              // Reuse as visual "DODGE" by marking crit style gold for visibility.
-              last.isCrit = true;
-              last.isPlayer = true;
-            }
-          } else {
-            this.damagePlayer(p.damage, this.boss.name + "'s bolt");
-            this.spawnVfx(this.playerPos.clone(), p.color, 2, 0.4);
-          }
+          this.damagePlayer(p.damage, this.boss.name + "'s bolt");
+          this.spawnVfx(this.playerPos.clone(), p.color, 2, 0.4);
         }
-        this.disposeProjectile(p);
+        this.scene.remove(p.sprite);
+        (p.sprite.material as THREE.Material).dispose();
         this.projectiles.splice(i, 1);
       }
     }
@@ -1492,45 +1162,25 @@ export class ArenaScene {
       const tg = this.telegraphs[i]!;
       tg.t += delta;
 
-      if (!tg.struck && this.outcome === "fighting") {
-        const remaining = tg.windup - tg.t;
-        // Prefer the soonest detonation as the HUD warning.
-        if (!this.activeTelegraphLabel || remaining < 0.55) {
-          this.activeTelegraphLabel =
-            remaining <= 0.35 ? `DODGE — ${tg.label}` : tg.label;
-        }
-      }
+      if (!tg.struck && this.outcome === "fighting") this.activeTelegraphLabel = tg.label;
 
       if (!tg.struck && tg.t >= tg.windup) {
         tg.struck = true;
-        const color =
-          tg.kind === "melee" || tg.kind === "phase" ? 0xff3322
-            : tg.kind === "aoe" ? 0xff8800
-              : 0xaa33ff;
-        const inside = this.playerPos.distanceTo(tg.center) <= tg.radius + 0.15;
+        const color = tg.kind === "melee" ? 0xff3322 : tg.kind === "aoe" ? 0xff8800 : 0xaa33ff;
+        const inside = this.playerPos.distanceTo(tg.center) <= tg.radius;
+        // Detonation: particle nova + a GLB flourish (cloud burst) on the strike.
         this.spawnVfx(tg.center.clone(), color, tg.radius * 1.4, 0.45);
-        this.skillVfx?.spawn(
-          tg.kind === "debuff" ? "tornado" : "cloud",
-          tg.center.clone(),
-          tg.radius,
-          1.0,
-        );
+        this.skillVfx?.spawn(tg.kind === "debuff" ? "tornado" : "cloud", tg.center.clone(), tg.radius, 1.0);
         if (inside && this.outcome === "fighting") {
-          // Circles are fully avoidable: leave the zone OR dodge i-frame at impact.
-          if (this.isInvulnerable()) {
-            this.pushLog(`Dodged ${tg.label}!`);
-            this.particles?.impact(this.playerPos.clone().setY(1.1), 0xc5e8ff, 0.85);
-          } else {
-            this.damagePlayer(tg.damage, tg.label);
-            if (tg.kind === "debuff") {
-              this.slowUntil = performance.now() + 3000;
-              this.pushLog("You are slowed!");
-            }
+          this.damagePlayer(tg.damage, tg.label);
+          if (tg.kind === "debuff") {
+            this.slowUntil = performance.now() + 3000;
+            this.pushLog("You are slowed!");
           }
         }
       }
 
-      if (tg.t >= tg.windup + 0.28) {
+      if (tg.t >= tg.windup + 0.25) {
         this.telegraphs.splice(i, 1);
       }
     }
@@ -1540,7 +1190,6 @@ export class ArenaScene {
     if (this.disposed || !this.options.onStateUpdate) return;
     const now = performance.now();
     const bossScreen = this.worldToScreen(this.bossPos.clone().add(new THREE.Vector3(0, this.bossWorldHeight + 0.6, 0)));
-    const dodgeRemain = Math.max(0, this.dodgeCdUntil - now);
     this.options.onStateUpdate({
       loaded: this.loaded,
       outcome: this.outcome,
@@ -1555,19 +1204,16 @@ export class ArenaScene {
         const remain = Math.max(0, until - now);
         return 1 - remain / len;
       }),
-      dodgeReadyPct: 1 - dodgeRemain / (this.dodgeCdSec * 1000),
-      iframeActive: this.isInvulnerable(),
       bossName: this.boss.name,
       bossTitle: this.boss.title ?? "",
       bossHp: this.bossHp,
       bossMaxHp: this.bossMaxHp,
       bossPhase: this.bossPhase,
-      bossMaxPhases: Math.max(1, this.boss.phases),
+      bossMaxPhases: this.boss.phases,
       bossScreenX: bossScreen.x,
       bossScreenY: bossScreen.y,
       bossAlive: this.bossAlive,
       bossTelegraph: this.activeTelegraphLabel,
-      phaseAnnounce: this.phaseAnnounceT > 0 ? this.phaseAnnounceText : null,
       damageNumbers: this.damageNumbers.map((d) => ({ ...d })),
       combatLog: this.combatLog.slice(),
     });
@@ -1607,14 +1253,15 @@ export class ArenaScene {
     this.particles?.dispose();
     if (this.bossGroup) this.bossGroup.userData.disposed = true;
     if (this.bossModel) { disposeMonsterModel(this.bossModel); this.bossModel = null; }
-    for (const p of this.projectiles) this.disposeProjectile(p);
+    for (const p of this.projectiles) {
+      this.scene.remove(p.sprite);
+      (p.sprite.material as THREE.Material).dispose();
+    }
     this.projectiles = [];
     this.telegraphs = [];
     this.braziers = [];
     this.playerGroup = null;
     this.bossGroup = null;
-    this.projRingGeo?.dispose();
-    this.projRingGeo = null;
     disposeObject3D(this.scene);
     this.scene.clear();
     this.bloom?.composer.dispose();

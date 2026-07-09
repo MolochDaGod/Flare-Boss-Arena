@@ -5,98 +5,35 @@ import { isMonsterId, loadMonsterModel, disposeMonsterModel, ANIMATED_MONSTER_TE
 import { isKitMonsterId, loadKitMonster, disposeKitModel, KIT_TEMPLATES } from "./KayKitCharacter";
 import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
-import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle, type PirateRole } from "./PirateNPC";
+import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle } from "./PirateNPC";
 import { Townsperson } from "./Townsfolk";
+import { PlayerAnimator, buildAuthoredClips } from "./PlayerAnimator";
 import {
-  buildHarvestField,
-  attachRockFieldNodes,
-  hideHarvestNode,
-  showHarvestNode,
-  nearestHarvestNode,
-  resourceForKind,
-  type HarvestField,
-  type HarvestNode,
-} from "./Harvestables";
-import { addResource, getResources, type ResourceBag } from "../data/resources";
-import { getWallet, saveWallet } from "../data/wallet";
-import {
-  getActiveFighterKit,
-  type FighterKit,
-  type FighterSkillDef,
-  type FighterSpecialDef,
-} from "../data/fighterSkills";
-import { getActiveFighter, RACALVIN_ID } from "../data/fighters";
-import {
-  getActivePerkMods,
-  grantPerk,
-  getActivePerks,
-  PERK_BY_ID,
-  type PerkId,
-  type PerkCombatMods,
-} from "../data/perks";
-import { PlayerAnimator, buildAuthoredClips, buildSkinAnim } from "./PlayerAnimator";
+  loadActiveFighterModel,
+  loadKayKitHeroModel,
+  PlayerHeroAdapter,
+  skillAnimCandidates,
+  type HeroLike,
+} from "./kaykitHero";
+import { canDodge } from "./combatInput";
 import { DungeonMap } from "./DungeonMap";
 import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "../data/characterMeshes";
-import { getSkin, skinUrl, type SkinDef } from "../data/skins";
-import {
-  loadRacalvinForDungeon,
-  type RacalvinWeapons,
-  racalvinWeaponModeForSkill,
-} from "./racalvinHero";
 
-import { skillAnimCandidates } from "./kaykitHero";
+
 import { SkillVfx } from "./skillVfx";
 import type { ClassSkill } from "../data/classSkills";
 import { archetypeForSkill, type SkillShapeKind } from "./combat/skillArchetypes";
 import { targetsInShape, type ShapeQuery } from "./combat/damageShapes";
 import type { CombatTarget } from "./combat/types";
-import { ParticleVfx, elementColor } from "./combat/particles";
+import { ParticleVfx } from "./combat/particles";
 import { TelegraphField } from "./combat/telegraphs";
 import { DeployableManager } from "./combat/deployables";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
-import { SlashWaveField } from "./combat/slashVfx";
-import { AuraField } from "./combat/auras";
-import { getActiveCombatProfile, brainTuning, type BrainArchetype } from "../data/characterCombatProfiles";
-import { pickHeroEnemies, heroEnemyAsTemplate } from "../data/heroEnemyLibrary";
-import { CDN_MONSTER_TEMPLATES } from "../data/cdnMonsters";
-import { BOSS_MONSTER_BY_ID, isBossMonsterId, pickDungeonBossId } from "../data/bossMonsters";
-import { syncHiddenMeshesForClip } from "./assetVisibility";
-import { getStoneCombatMods, addStone, rollStoneDrop, STONE_META } from "../data/stones";
-import { resolveSkillBoost } from "../data/abilityUpgrades";
-import {
-  resolveHitProcs,
-  resolveKillProcs,
-  onslaughtAttackSpeedMult,
-  isOnslaughtActive,
-  tryBlurOnHitTaken,
-  blurDamageMult,
-  isBlurActive,
-} from "../data/procs";
-import { getGameLoadout } from "../data/gameCombat";
-import { getPartyAllyIds, getGrudge6Hero, MAX_PARTY_ALLIES } from "../data/grudge6Roster";
-import { Grudge6Factory } from "./grudge6/Grudge6Character";
-import {
-  createAllyAgent,
-  thinkAlly,
-  stepAllyMovement,
-  type AllyAgent,
-} from "./grudge6/AllyBrain";
 import { FX2D } from "./FX2D";
 import { DUNGEON_COLLECTABLES } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
 
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
-
-function mulberry(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 const CLASS_MODEL: Record<string, string> = {
   warrior: "Knight",
@@ -144,6 +81,7 @@ export interface EnemyInstance {
   spawnPos: THREE.Vector3;
   facing: number;        // yaw angle (radians)
   attackCooldown: number;
+  attackWindup: number;
   hurtTimer: number;
   aggroRange: number;
   attackRange: number;
@@ -159,14 +97,6 @@ export interface DamageNumber {
   isCrit: boolean;
 }
 
-export interface NearbyPirateInfo {
-  id: string;
-  name: string;
-  title: string;
-  role: PirateRole;
-  prompt: string;
-}
-
 export interface GameState {
   playerHp: number;
   playerMaxHp: number;
@@ -175,41 +105,13 @@ export interface GameState {
   playerLevel: number;
   playerXp: number;
   playerAttackCooldown: number;
-  enemies: Array<{ id: string; name: string; hp: number; maxHp: number; screenX: number; screenY: number; tier: number; isBoss?: boolean }>;
+  enemies: Array<{ id: string; name: string; hp: number; maxHp: number; screenX: number; screenY: number; tier: number }>;
   damageNumbers: Array<{ id: string; value: number; x: number; y: number; age: number; isPlayer: boolean; isCrit: boolean }>;
   combatLog: string[];
   zone: string;
   loaded: boolean;
   /** True once the dungeon GLB + collision BVH are built (or load failed). */
   mapReady: boolean;
-  /** Gathered resources (wood / stone). */
-  resources: ResourceBag;
-  gold: number;
-  /** Nearby pirate for E-key interact (vendor / captain / crew). */
-  nearbyPirate: NearbyPirateInfo | null;
-  /** Nearby harvest node label for HUD. */
-  nearbyHarvest: string | null;
-  /** Island generation seed (captain re-sails change this). */
-  mapSeed: number;
-  /** Progressive island / round number (1 = first area). */
-  islandRound: number;
-  /** Difficulty mult shown in HUD (enemy HP/dmg scale). */
-  difficultyMult: number;
-  /** True while a dungeon boss is alive. */
-  bossAlive: boolean;
-  bossName: string | null;
-  bossHp: number;
-  bossMaxHp: number;
-  /** Skill targeting mode: -1 none, 0-4 pending ground AoE skill. */
-  pendingSkillIdx: number;
-  /** Special (R) cooldown 0..1 ready. */
-  specialReadyPct: number;
-  /** Block held (Q). */
-  blocking: boolean;
-  /** Jump airborne. */
-  jumping: boolean;
-  /** Active perk labels for HUD. */
-  activePerks: string[];
 }
 
 export interface PlayerInitStats {
@@ -229,8 +131,6 @@ export interface PlayerInitStats {
   equipMainCategory?: string;
   equipHasOffhand?: boolean;
   equipHasShoulder?: boolean;
-  /** QA override — `?boss=boss_noble_dragon` forces dungeon boss GLB. */
-  testBossId?: string | null;
 }
 
 export class GameEngine {
@@ -255,8 +155,8 @@ export class GameEngine {
   private container: HTMLDivElement | null = null;
 
   private playerGroup: THREE.Group | null = null;
-  private playerMixer: THREE.AnimationMixer | null = null;
-  private playerAnimator: PlayerAnimator | null = null;
+  private heroAnim: HeroLike | null = null;
+  private lastDodgeAt = 0;
   private initStats!: PlayerInitStats;
   private _camLook = new THREE.Vector3(0, 0, 0);
   private playerPos = new THREE.Vector3(0, 0, 0);
@@ -315,62 +215,6 @@ export class GameEngine {
   private coveLabel: THREE.Sprite | null = null;
   private coveCenter = new THREE.Vector3(70, 0, -14);
   private disposed = false;
-  private harvestField: HarvestField | null = null;
-  private mapSeed = (Math.random() * 0xffffffff) >>> 0;
-  /** Optional QA boss override from URL `?boss=`. */
-  private bossOverrideId: string | null = null;
-  /** Round 1 = first island; captain re-sail increments. */
-  private islandRound = 1;
-  private bossEnemyId: string | null = null;
-  private nearbyPirate: NearbyPirateInfo | null = null;
-  private nearbyHarvestLabel: string | null = null;
-  /** Callback when captain sails — React can hard-refresh or show toast. */
-  public onMapReseed: ((seed: number) => void) | null = null;
-  public onOpenVendor: (() => void) | null = null;
-  public onSailBoss: (() => void) | null = null;
-
-  private fighterKit: FighterKit = getActiveFighterKit();
-  private slashField: SlashWaveField | null = null;
-  private auras: AuraField | null = null;
-  /** fighterId → brain for hero-rival enemies. */
-  private enemyBrains = new Map<string, BrainArchetype>();
-  private playerAuraElement = getActiveCombatProfile().auraElement;
-  /** Racalvin sword/pistol rig — null for other fighters. */
-  private racalvinWeapons: RacalvinWeapons | null = null;
-  /** Party allies (max 2) — Grudge6 units with AI brains. */
-  private allies: AllyAgent[] = [];
-  private grudge6Factory = new Grudge6Factory();
-  private partySpawned = false;
-  /** -1 = none; 0-4 = skill awaiting ground placement. */
-  private pendingSkillIdx = -1;
-  private skillCdUntil = [0, 0, 0, 0, 0];
-  private specialCdUntil = 0;
-  private blocking = false;
-  private jumpVel = 0;
-  private playerY = 0;
-  private dodgeIframeUntil = 0;
-  private skillCursor: THREE.Mesh | null = null;
-  private skillCursorMat: THREE.MeshBasicMaterial | null = null;
-
-  /** Live perk combat modifiers (refreshed each frame / on cast). */
-  private perkMods(): PerkCombatMods {
-    return getActivePerkMods();
-  }
-
-  /** Enemy scaling for current island round: HP/dmg grow each re-sail. */
-  private difficultyMult(): number {
-    return 1 + (this.islandRound - 1) * 0.28;
-  }
-
-  private scaleTemplate(t: EnemyTemplate): EnemyTemplate {
-    const m = this.difficultyMult();
-    return {
-      ...t,
-      hp: Math.round(t.hp * m),
-      damage: Math.round(t.damage * (1 + (this.islandRound - 1) * 0.18)),
-      name: this.islandRound > 1 ? `R${this.islandRound} ${t.name}` : t.name,
-    };
-  }
   private hoveredEnemy: EnemyInstance | null = null;
   private hoverEmissive = new Map<THREE.MeshStandardMaterial, { hex: number; intensity: number }>();
   private _moveHandler!: (e: MouseEvent) => void;
@@ -394,24 +238,14 @@ export class GameEngine {
     this.playerMaxAttackCooldown = stats.attackSpeed;
     this.enemyTemplates = enemyTemplates;
     this.initStats = stats;
-    this.bossOverrideId =
-      stats.testBossId && isBossMonsterId(stats.testBossId) ? stats.testBossId : null;
-    // Attribute stones + fighter loadout → speed / defense baseline
-    try {
-      const lo = getGameLoadout();
-      this.playerSpeed = 6 * lo.combat.moveSpeedMult;
-      this.playerDefense = Math.round(stats.defense + lo.combat.defense * 40);
-    } catch {
-      /* ignore */
-    }
     this._camLook.copy(this.playerPos);
 
     const w = container.clientWidth;
     const h = container.clientHeight;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x060608);
-    this.scene.fog = new THREE.FogExp2(0x060608, 0.010);
+    this.scene.background = new THREE.Color(0x08060a);
+    this.scene.fog = new THREE.FogExp2(0x0a080c, 0.009);
 
     const aspect = w / h;
     const d = 18;
@@ -425,17 +259,13 @@ export class GameEngine {
       this.renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
     }
     this.renderer.setSize(w, h);
-    // Cap DPR for lag-free rendering on high-DPI laptops (2x often halves FPS).
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
-    // PCFSoft is deprecated / slower — PCF is clearer and cheaper.
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     // Filmic tone mapping for richer contrast across the larger lit map.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
-    // Prefer power-of-two shadow maps and avoid auto-clear thrash.
-    this.renderer.shadowMap.autoUpdate = true;
+    this.renderer.toneMappingExposure = 1.15;
     container.appendChild(this.renderer.domElement);
 
     this.clock = new THREE.Clock();
@@ -444,24 +274,6 @@ export class GameEngine {
     this.particles = new ParticleVfx(this.scene);
     this.telegraphs = new TelegraphField(this.scene);
     this.deployables = new DeployableManager(this.scene);
-    this.slashField = new SlashWaveField(this.scene, this.particles);
-    this.auras = new AuraField(this.scene);
-    this.fighterKit = getActiveFighterKit();
-    this.playerAuraElement = getActiveCombatProfile().auraElement;
-    // Ground-AoE placement ring (shown while a skill is pending).
-    this.skillCursorMat = new THREE.MeshBasicMaterial({
-      color: 0x66ccff,
-      transparent: true,
-      opacity: 0.45,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    this.skillCursor = new THREE.Mesh(new THREE.RingGeometry(0.85, 1.0, 48), this.skillCursorMat);
-    this.skillCursor.rotation.x = -Math.PI / 2;
-    this.skillCursor.position.y = 0.12;
-    this.skillCursor.visible = false;
-    this.skillCursor.renderOrder = 6;
-    this.scene.add(this.skillCursor);
     // Selective bloom so the additive particle VFX glow without washing out the
     // dark scene. Null (graceful fallback to direct render) if setup fails headless.
     this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h);
@@ -470,13 +282,10 @@ export class GameEngine {
     this.loadEnvironment();
     this.camp = buildOrcCamp(this.loader, this.scene, `${import.meta.env.BASE_URL}models/buildings/orc_camp_set.glb`);
     this.buildPirateCove();
-    this.buildHarvestables();
     this.buildWorldCollectables();
-    this.scatterGenerativeProps();
     this.setupLighting();
     this.loadPlayerModel();
     this.spawnInitialEnemies();
-    this.spawnDungeonBoss();
     this.setupInput(container);
 
     this.fx = new FX2D(container);
@@ -507,15 +316,11 @@ export class GameEngine {
     this.scene.add(terrain);
     this.terrainMesh = terrain;
 
-    // Scattered boulders — visual + minable stone (wired in buildHarvestables).
-    const rocks = makeRockField(180, D * 0.28, D - 4);
-    this.scene.add(rocks.mesh);
-    this.rockField = rocks.mesh;
-    // Stash for harvest wiring (positions live until buildHarvestables runs).
-    (this as unknown as { _rockFieldMeta?: { positions: THREE.Vector3[]; scales: number[] } })._rockFieldMeta = {
-      positions: rocks.positions,
-      scales: rocks.scales,
-    };
+    // Hundreds of scattered rocks in a single InstancedMesh draw call (fills
+    // the now-much-larger map without tanking performance).
+    const rocks = makeRockField(220, D * 0.35, D - 4);
+    this.scene.add(rocks);
+    this.rockField = rocks;
 
     // Invisible click plane — covers the playable area for click-to-move
     // raycasting. Sits just above the visible ground so floor picks are stable.
@@ -587,28 +392,23 @@ export class GameEngine {
    */
   private buildPirateCove() {
     const c = this.coveCenter;
-    // Boat assistance: docked ships as the cove landmark + jetty + loot.
+    // Boat assistance: a docked ship as the cove landmark + a jetty + loot.
     this.loadCoveProp("world/Ship_Small.gltf", new THREE.Vector3(c.x + 7, 0, c.z - 4), 16, Math.PI * 0.18);
-    this.loadCoveProp("world/Ship_Large.gltf", new THREE.Vector3(c.x + 14, 0, c.z - 8), 22, Math.PI * 0.08);
     this.loadCoveProp("world/Environment_Dock.gltf", new THREE.Vector3(c.x + 1, 0, c.z), 11, 0);
-    this.loadCoveProp("world/Environment_Dock_Pole.gltf", new THREE.Vector3(c.x - 4, 0, c.z + 4), 2.2, 0.3);
     this.loadCoveProp("world/Prop_Chest_Gold.gltf", new THREE.Vector3(c.x - 2.5, 0, c.z + 2.5), 1.3, 0.6);
     this.loadCoveProp("world/Prop_Barrel.gltf", new THREE.Vector3(c.x - 3.5, 0, c.z + 1), 1.1, 0);
     this.loadCoveProp("world/Prop_Anchor.gltf", new THREE.Vector3(c.x - 1.5, 0, c.z + 3.5), 1.4, -0.4);
-    this.loadCoveProp("world/Prop_Coins.gltf", new THREE.Vector3(c.x - 2, 0, c.z + 1.5), 0.9, 0.2);
 
-    // Full crew: vendor (Anne), captain (Barbarossa), + crew for atmosphere.
-    PIRATE_DEFS.forEach((def, i) => {
-      const angle = (i / PIRATE_DEFS.length) * Math.PI * 1.1 - Math.PI * 0.55;
-      const r = def.role === "captain" ? 4.2 : def.role === "vendor" ? 3.0 : 3.6;
-      const px = c.x - 1.5 + Math.cos(angle) * r;
-      const pz = c.z + 1.5 + Math.sin(angle) * r;
+    // Three neutral pirate allies standing around the cove.
+    const trio = PIRATE_DEFS.slice(0, 3);
+    trio.forEach((def, i) => {
+      const angle = (i / trio.length) * Math.PI * 0.8 - Math.PI * 0.4;
+      const px = c.x - 2 + Math.cos(angle) * 3.2;
+      const pz = c.z + 2 + Math.sin(angle) * 3.2;
       const handle = loadPirate(def, this.loader);
       handle.group.position.set(px, 0, pz);
-      handle.group.rotation.y = Math.atan2(c.x - px, c.z - pz);
+      handle.group.rotation.y = Math.atan2(-px, -pz); // face the map centre
       handle.group.userData.waveTimer = 1.5 + Math.random() * 4;
-      handle.group.userData.pirateId = def.id;
-      handle.group.userData.pirateRole = def.role ?? "crew";
       this.scene.add(handle.group);
       this.pirates.push(handle);
     });
@@ -616,47 +416,6 @@ export class GameEngine {
     this.addCoveLabel(new THREE.Vector3(c.x + 1, 4.6, c.z));
 
     this.buildTownsfolk();
-  }
-
-  /** Tall generative trees (2–4× character height) + stone piles + island rocks. */
-  private buildHarvestables() {
-    if (this.harvestField) {
-      this.scene.remove(this.harvestField.root);
-      this.harvestField.dispose();
-      this.harvestField = null;
-    }
-    this.harvestField = buildHarvestField(this.mapSeed, this.DUNGEON, {
-      treeCount: 52,
-      stoneCount: 36,
-    });
-    this.scene.add(this.harvestField.root);
-
-    // Wire decorative rock field into minable stone nodes.
-    const meta = (this as unknown as { _rockFieldMeta?: { positions: THREE.Vector3[]; scales: number[] } })._rockFieldMeta;
-    if (this.rockField && meta) {
-      attachRockFieldNodes(this.harvestField, this.rockField, meta.positions, meta.scales);
-    }
-  }
-
-  /** Scatter extra pirate-kit props as generative dungeon flavor. */
-  private scatterGenerativeProps() {
-    const rng = mulberry(this.mapSeed ^ 0x9e3779b9);
-    const props: Array<{ rel: string; extent: number }> = [
-      { rel: "world/Prop_Barrel.gltf", extent: 1.0 },
-      { rel: "world/Prop_Chest_Gold.gltf", extent: 1.1 },
-      { rel: "world/Prop_Anchor.gltf", extent: 1.2 },
-      { rel: "world/Prop_Coins.gltf", extent: 0.85 },
-    ];
-    for (let i = 0; i < 14; i++) {
-      const p = props[i % props.length]!;
-      const a = rng() * Math.PI * 2;
-      const r = 18 + rng() * (this.DUNGEON - 28);
-      let x = Math.cos(a) * r;
-      let z = Math.sin(a) * r;
-      // Keep clear of cove cluster.
-      if (x > 55 && Math.abs(z + 14) < 20) x -= 25;
-      this.loadCoveProp(p.rel, new THREE.Vector3(x, 0, z), p.extent * (0.85 + rng() * 0.4), rng() * Math.PI * 2);
-    }
   }
 
   /** Neutral KayKit townsfolk wandering near the cove — ambient population only,
@@ -713,13 +472,8 @@ export class GameEngine {
       const dz = wp.holder.position.z - this.playerPos.z;
       if (dx * dx + dz * dz <= pickupRadius * pickupRadius) {
         this.collectedPropIds.add(key);
-        const perkId = wp.def.perkId as PerkId | undefined;
-        if (perkId) {
-          const r = grantPerk(perkId);
-          this.log(r.ok ? `Unlocked perk: ${PERK_BY_ID.get(perkId)?.name ?? perkId}!` : r.message);
-        } else {
-          this.log(`Collected ${wp.def.name}!`);
-        }
+        const label = wp.def.perkId ?? wp.def.name;
+        this.log(`Collected ${label}!`);
         this.scene.remove(wp.holder);
         disposeWorldProp(wp);
         this.worldCollectables.splice(i, 1);
@@ -811,8 +565,8 @@ export class GameEngine {
     sun.shadow.mapSize.setScalar(2048);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 220;
-    sun.shadow.camera.left = sun.shadow.camera.bottom = -60;
-    sun.shadow.camera.right = sun.shadow.camera.top = 60;
+    sun.shadow.camera.left = sun.shadow.camera.bottom = -35;
+    sun.shadow.camera.right = sun.shadow.camera.top = 35;
     sun.shadow.bias = -0.001;
     this.scene.add(sun);
     this.scene.add(sun.target);
@@ -848,60 +602,27 @@ export class GameEngine {
   }
 
   private loadPlayerModel() {
-    if (this.initStats.skinId === RACALVIN_ID) {
-      this.loadRacalvinModel();
-      return;
-    }
-    const skin = getSkin(this.initStats.skinId);
-    if (skin) this.loadSkinModel(skin);
-    else this.loadRaceModel();
-  }
-
-  /** Racalvin (Corsair King) — bespoke base model + library clips + sword/pistol. */
-  private loadRacalvinModel() {
-    loadRacalvinForDungeon(
+    // Same fighter → HeroLike pipeline as /camp and /boss (KayKit library clips).
+    loadActiveFighterModel(
       this.loader,
       1.9,
-      (wrapper, animator, weapons) => {
-        this.racalvinWeapons = weapons;
-        this.finalizePlayer(wrapper, animator);
+      (wrapper, anim) => {
+        if (this.disposed) return;
+        this.finalizePlayer(wrapper, anim);
       },
-      () => this.loadRaceModel(),
-    );
-  }
-
-  private syncRacalvinWeaponForSkill(skill: FighterSkillDef | FighterSpecialDef) {
-    if (!this.racalvinWeapons) return;
-    this.racalvinWeapons.setMode(racalvinWeaponModeForSkill(skill));
-  }
-
-  private syncRacalvinWeaponMelee() {
-    this.racalvinWeapons?.setMode("sword");
-  }
-
-  private syncPlayerMeshVisibility(clipNames: string[]) {
-    const model = this.playerGroup?.children[0];
-    if (!model) return;
-    const name = clipNames[0];
-    if (name) syncHiddenMeshesForClip(model, name);
-  }
-
-  /** One Piece champion skin — fully rigged GLB, plays its own labelled clips. */
-  private loadSkinModel(skin: SkinDef) {
-    this.loader.load(
-      skinUrl(skin),
-      (gltf) => {
-        const model = gltf.scene;
-        model.traverse((c) => {
-          const m = c as THREE.Mesh;
-          if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; }
-        });
-        const wrapper = this.buildPlayerWrapper(model, skin.height ?? 1.9);
-        const { actions, pool, attackBlend } = buildSkinAnim(gltf.animations, skin.scheme);
-        this.finalizePlayer(wrapper, new PlayerAnimator(model, actions, pool, { attackBlend }));
+      () => {
+        loadKayKitHeroModel(
+          this.loader,
+          this.initStats.charClass,
+          this.initStats.charRace,
+          1.9,
+          (wrapper, anim) => {
+            if (this.disposed) return;
+            this.finalizePlayer(wrapper, anim);
+          },
+          () => this.loadRaceModel(),
+        );
       },
-      undefined,
-      () => this.loadRaceModel(), // graceful fallback to the race model
     );
   }
 
@@ -932,7 +653,7 @@ export class GameEngine {
         const wrapper = this.buildPlayerWrapper(model, 1.9);
         model.updateWorldMatrix(true, true);
         const clips = buildAuthoredClips(model);
-        this.finalizePlayer(wrapper, new PlayerAnimator(model, clips));
+        this.finalizePlayer(wrapper, new PlayerHeroAdapter(new PlayerAnimator(model, clips)));
       },
       undefined,
       () => this.finalizePlayer(this.buildFallbackPlayer(), null),
@@ -960,10 +681,10 @@ export class GameEngine {
     return wrapper;
   }
 
-  private finalizePlayer(group: THREE.Group, animator: PlayerAnimator | null) {
+  private finalizePlayer(group: THREE.Group, animator: HeroLike | null) {
     this.playerGroup = group;
     this.playerGroup.position.copy(this.playerPos);
-    this.playerAnimator = animator;
+    this.heroAnim = animator;
 
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(0.55, 0.7, 32),
@@ -974,12 +695,6 @@ export class GameEngine {
     this.playerGroup.add(ring);
 
     this.scene.add(this.playerGroup);
-    // Element signature aura under the fighter (from combat profile).
-    this.auras?.attach(this.playerAuraElement, {
-      follow: this.playerGroup,
-      radius: 1.35,
-      yOffset: 0.05,
-    });
     this.loaded = true;
     this.notifyState();
   }
@@ -1030,81 +745,19 @@ export class GameEngine {
     // Spawn the KayKit skeleton minions (real shared-library skeletal animation).
     for (const m of KIT_TEMPLATES) configs.push({ template: m, count: m.tier === 1 ? 3 : 2 });
 
-    // Rival heroes (unused fighters) — elite pack with AI brains from combat profiles.
-    const rivals = pickHeroEnemies(this.mapSeed ^ 0xc0ffee, Math.min(3, 1 + Math.floor((this.islandRound - 1) / 2)));
-    for (const h of rivals) {
-      configs.push({ template: heroEnemyAsTemplate(h), count: 1 });
-      this.enemyBrains.set(h.visualId, h.brain);
-      this.enemyBrains.set(h.id, h.brain);
-    }
-
-    // CDN monster pack (D1 / assets.grudge-studio.com) — streams at runtime.
-    const cdnRng = mulberry(this.mapSeed ^ 0xcd4);
-    const cdnPick = [...CDN_MONSTER_TEMPLATES].sort(() => cdnRng() - 0.5).slice(0, 3 + Math.min(4, this.islandRound));
-    for (const m of cdnPick) configs.push({ template: m, count: 1 });
-
-    const rng = mulberry(this.mapSeed ^ 0x51aced);
     for (const { template, count } of configs) {
       for (let i = 0; i < count; i++) {
         const D = this.DUNGEON - 3;
         let x = 0, z = 0;
         let attempts = 0;
         do {
-          x = (rng() * 2 - 1) * D;
-          z = (rng() * 2 - 1) * D;
+          x = (Math.random() * 2 - 1) * D;
+          z = (Math.random() * 2 - 1) * D;
           attempts++;
         } while (Math.sqrt(x * x + z * z) < 6 && attempts < 20);
-        this.createEnemy(this.scaleTemplate(template), new THREE.Vector3(x, 0, z));
+        this.createEnemy(template, new THREE.Vector3(x, 0, z));
       }
     }
-    // Extra packs on later rounds
-    const extra = Math.min(12, (this.islandRound - 1) * 2);
-    if (extra > 0 && this.enemyTemplates.length) {
-      const rng2 = mulberry(this.mapSeed ^ 0xdead);
-      for (let i = 0; i < extra; i++) {
-        const t = this.enemyTemplates[Math.floor(rng2() * this.enemyTemplates.length)]!;
-        const D = this.DUNGEON - 4;
-        const x = (rng2() * 2 - 1) * D;
-        const z = (rng2() * 2 - 1) * D;
-        if (Math.hypot(x, z) < 8) continue;
-        this.createEnemy(this.scaleTemplate(t), new THREE.Vector3(x, 0, z));
-      }
-    }
-  }
-
-  /**
-   * One generative dungeon boss far from spawn (opposite the cove). Uses the
-   * largest monster GLB when available; does not soft-respawn on death.
-   */
-  private spawnDungeonBoss() {
-    const bossPos = new THREE.Vector3(-52, 0, 38);
-    const m = this.difficultyMult();
-    const bossId = this.bossOverrideId ?? pickDungeonBossId(this.mapSeed, this.islandRound);
-    const def = BOSS_MONSTER_BY_ID.get(bossId);
-    const template: EnemyTemplate = {
-      id: bossId,
-      name: def
-        ? this.islandRound > 1
-          ? `R${this.islandRound} ${def.name}`
-          : def.name
-        : this.islandRound > 1
-          ? `R${this.islandRound} Island Colossus`
-          : "Island Colossus",
-      type: def?.type ?? "titan",
-      tier: def?.tier ?? 5,
-      hp: Math.round((def?.hp ?? 1400) * m * 1.1),
-      damage: Math.round((def?.damage ?? 38) * (1 + (this.islandRound - 1) * 0.15)),
-    };
-    const boss = this.createEnemy(template, bossPos);
-    boss.aggroRange = 14;
-    boss.attackRange = def?.archetype === "dragon" ? 5.2 : 4.2;
-    boss.speed = def?.archetype === "dragon" ? 1.9 : 1.7;
-    const scaleMul = (def?.bossScale ?? 1.35);
-    boss.model.group.scale.multiplyScalar(scaleMul);
-    boss.model.height *= scaleMul;
-    this.bossEnemyId = boss.id;
-    boss.model.group.userData.isBoss = true;
-    this.log(`${template.name} stirs in the western ruins…`);
   }
 
   /** FNV-1a hash → deterministic per-template model pick. */
@@ -1130,9 +783,7 @@ export class GameEngine {
     switch (archetypeFor(template.type)) {
       case "arachnid": pool = ["mon_pincher"]; break;
       case "quadruped": pool = ["mon_dante_beast", "mon_pincher"]; break;
-      case "dragon":
-        pool = ["boss_fireworm", "boss_noble_dragon", "boss_tarisland_dragon", "mon_dante_beast"];
-        break;
+      case "dragon": pool = ["mon_dante_beast"]; break;
       case "golem": pool = ["mon_dante_beast", "mon_medusa"]; break;
       case "flying": pool = ["kit_skel_mage"]; break;
       case "humanoid":
@@ -1169,24 +820,6 @@ export class GameEngine {
     model.group.userData.enemyId = id;
     this.scene.add(model.group);
 
-    const brain = this.enemyBrains.get(template.id) ?? this.enemyBrains.get(modelId);
-    const tune = brain ? brainTuning(brain) : null;
-    let aggroRange = 6.5 + template.tier * 0.6;
-    let attackRange = 1.8 + template.tier * 0.2 + (model.archetype === "dragon" || model.archetype === "golem" ? 1.2 : 0);
-    let speed =
-      model.archetype === "flying"
-        ? 3.5
-        : model.archetype === "golem"
-          ? 1.6
-          : model.archetype === "dragon"
-            ? 2.4
-            : 2.4 + template.tier * 0.35;
-    if (tune) {
-      aggroRange *= tune.aggroMult;
-      attackRange *= tune.attackRangeMult;
-      speed *= tune.speedMult;
-    }
-
     const enemy: EnemyInstance = {
       id,
       template,
@@ -1200,30 +833,15 @@ export class GameEngine {
       spawnPos: pos.clone(),
       facing: Math.random() * Math.PI * 2,
       attackCooldown: Math.random() * 1.5,
+      attackWindup: 0,
       hurtTimer: 0,
-      aggroRange,
-      attackRange,
-      speed,
+      aggroRange: 6.5 + template.tier * 0.6,
+      attackRange: 1.8 + template.tier * 0.2 + (model.archetype === "dragon" || model.archetype === "golem" ? 1.2 : 0),
+      speed: model.archetype === "flying" ? 3.5 : model.archetype === "golem" ? 1.6 : model.archetype === "dragon" ? 2.4 : 2.4 + template.tier * 0.35,
     };
 
     // Make every mesh under the enemy carry the enemyId for raycast hits
     model.group.traverse((c) => { c.userData.enemyId = id; });
-    // Soft signature aura for elites / rivals (tier ≥ 3).
-    if (template.tier >= 3 && this.auras) {
-      const el =
-        brain === "caster" || brain === "gunner"
-          ? "arcane"
-          : brain === "assassin"
-            ? "poison"
-            : brain === "tank"
-              ? "physical"
-              : "fire";
-      this.auras.attach(el as import("./combat/particles").SkillElement, {
-        follow: model.group,
-        radius: 1.1 + template.tier * 0.12,
-        yOffset: 0.06,
-      });
-    }
 
     this.enemies.push(enemy);
     return enemy;
@@ -1235,44 +853,22 @@ export class GameEngine {
 
     this._keyDownHandler = (e: KeyboardEvent) => {
       this.keys.add(e.code);
-      // F = basic attack | Space = jump | Q = block | Shift = dodge | E = interact | R = special
-      if (e.code === "KeyF") {
+      if (e.repeat) return;
+      if (e.code === "KeyF" || e.code === "Space") {
         e.preventDefault();
         this.attackNearest();
       }
-      if (e.code === "Space") {
-        e.preventDefault();
-        this.doJump();
-      }
-      if (e.code === "KeyQ") {
-        e.preventDefault();
-        this.blocking = true;
-      }
-      if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+      if (e.code === "KeyQ" || e.code === "ShiftLeft" || e.code === "ShiftRight") {
         e.preventDefault();
         this.doDodge();
-      }
-      if (e.code === "KeyE") {
-        e.preventDefault();
-        this.tryEngagePirate();
-      }
-      if (e.code === "KeyR") {
-        e.preventDefault();
-        this.useSpecial();
-      }
-      if (e.code === "Escape") {
-        this.cancelSkillTargeting();
       }
       const n = Number(e.key);
       if (n >= 1 && n <= 5) {
         e.preventDefault();
-        this.selectSkill(n - 1);
+        this.useSkill(n - 1);
       }
     };
-    this._keyUpHandler = (e: KeyboardEvent) => {
-      this.keys.delete(e.code);
-      if (e.code === "KeyQ") this.blocking = false;
-    };
+    this._keyUpHandler = (e: KeyboardEvent) => this.keys.delete(e.code);
     this._clickHandler = (e: MouseEvent) => this.handleClick(e, container);
     this._moveHandler = (e: MouseEvent) => this.handleHover(e, container);
     // LEFT button = selection / move (handled by the `click` event) and, while
@@ -1390,18 +986,6 @@ export class GameEngine {
     );
     this.raycaster.setFromCamera(mouse, this.camera);
 
-    // Ground pick (used for AoE placement and move).
-    const pt = this.dungeonMap?.ready
-      ? this.dungeonMap.floorPickFromRay(this.raycaster.ray)
-      : (this.raycaster.intersectObject(this.floorPlane)[0]?.point ?? null);
-
-    // Skill targeting: first number key selects, this LMB places & casts.
-    if (this.pendingSkillIdx >= 0 && pt) {
-      this.clampToArena(pt);
-      this.castPendingSkillAt(new THREE.Vector3(pt.x, 0, pt.z));
-      return;
-    }
-
     // Raycast against all enemy meshes recursively
     const liveGroups: THREE.Object3D[] = this.enemies
       .filter((en) => en.state !== "dead" && en.state !== "death")
@@ -1419,309 +1003,36 @@ export class GameEngine {
       }
     }
 
-    // Click-to-move
+    // Click-to-move: pick the real dungeon floor when the BVH is ready, else
+    // fall back to the flat plane.
+    const pt = this.dungeonMap?.ready
+      ? this.dungeonMap.floorPickFromRay(this.raycaster.ray)
+      : (this.raycaster.intersectObject(this.floorPlane)[0]?.point ?? null);
     if (pt) {
       this.clampToArena(pt);
       this.playerTarget = new THREE.Vector3(pt.x, 0, pt.z);
       this.targetEnemy = null;
       if (this.indicatorRing) {
+        // Seat the marker on the actually-picked surface (pt.y from the ray hit).
         this.indicatorRing.position.set(this.playerTarget.x, pt.y + 0.08, this.playerTarget.z);
         this.indicatorRing.visible = true;
       }
     }
   }
 
-  /** Space — jump (clip + hop). */
-  doJump() {
-    if (this.playerY > 0.05 || this.jumpVel > 0) return;
-    this.jumpVel = 7.5;
-    this.playerAnimator?.triggerRole("jump");
-    this.playerAnimator?.triggerNamed(["jump", "jump_full"]);
-  }
-
-  /** Shift — dodge with i-frames via committed dash. */
+  /** Dodge roll — KayKit / skin clip when available, procedural lunge fallback. */
   doDodge() {
-    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    if (this.keys.has("KeyA") || this.keys.has("ArrowLeft")) {
-      forward.set(-Math.cos(this.playerFacing), 0, Math.sin(this.playerFacing));
-    } else if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) {
-      forward.set(Math.cos(this.playerFacing), 0, -Math.sin(this.playerFacing));
-    }
-    this.playerPos.x += forward.x * 3.2;
-    this.playerPos.z += forward.z * 3.2;
-    this.clampToArena(this.playerPos);
-    this.playerAnimator?.triggerRole("dodge");
-    this.playerAnimator?.triggerNamed(["dodge", "roll"]);
+    const now = performance.now();
+    if (!canDodge(this.lastDodgeAt, now)) return;
+    this.lastDodgeAt = now;
     this.playerTarget = null;
-    this.dodgeIframeUntil = performance.now() + 380;
-  }
-
-  private isDodging(): boolean {
-    return performance.now() < this.dodgeIframeUntil;
-  }
-
-  /** 1-5: select skill. Ground-AoE skills wait for LMB; others cast immediately. */
-  selectSkill(idx: number) {
-    const skill = this.fighterKit.skills[idx];
-    if (!skill) {
-      // Fall back to legacy class skill path.
-      this.useSkill(idx);
-      return;
-    }
-    const now = performance.now();
-    if (now < (this.skillCdUntil[idx] ?? 0)) {
-      this.log(`${skill.name} is on cooldown.`);
-      return;
-    }
-    if (this.playerMana < skill.manaCost) {
-      this.log("Not enough mana.");
-      return;
-    }
-    if (skill.targeting === "ground_aoe") {
-      this.pendingSkillIdx = idx;
-      if (this.skillCursor && this.skillCursorMat) {
-        this.skillCursor.visible = true;
-        const r = (skill.aoeRadius ?? 4) * this.perkMods().aoeRadiusMult;
-        this.skillCursor.scale.setScalar(r);
-        this.skillCursorMat.color.setHex(skill.color ?? elementColor(skill.element));
-      }
-      this.log(`${skill.name} ready — LMB to place AoE (Esc cancel).`);
-      this.notifyState();
-      return;
-    }
-    this.castFighterSkill(idx, null);
-  }
-
-  cancelSkillTargeting() {
-    this.pendingSkillIdx = -1;
-    if (this.skillCursor) this.skillCursor.visible = false;
-    this.notifyState();
-  }
-
-  private castPendingSkillAt(world: THREE.Vector3) {
-    const idx = this.pendingSkillIdx;
-    if (idx < 0) return;
-    this.pendingSkillIdx = -1;
-    if (this.skillCursor) this.skillCursor.visible = false;
-    this.castFighterSkill(idx, world);
-  }
-
-  /** R — character special attack (skill_a / skill_b wave). */
-  useSpecial() {
-    const now = performance.now();
-    if (now < this.specialCdUntil) {
-      this.log("Special on cooldown.");
-      return;
-    }
-    const sp = this.fighterKit.special;
-    if (this.playerMana < sp.manaCost) {
-      this.log("Not enough mana for special.");
-      return;
-    }
-    this.playerMana -= sp.manaCost;
-    this.specialCdUntil = now + sp.cooldown * 1000;
-    this.syncRacalvinWeaponForSkill(sp);
-    this.playerFacing = Math.atan2(this.resolveAimDir().x, this.resolveAimDir().z);
-    this.playerAnimator?.triggerNamed(sp.anim);
-    this.syncPlayerMeshVisibility(sp.anim);
-    if (!this.playerAnimator?.isRootMotionActive()) {
-      const f = this.resolveAimDir();
-      this.playerPos.x += f.x * 1.2;
-      this.playerPos.z += f.z * 1.2;
-      this.clampToArena(this.playerPos);
-    }
-    const mods = this.perkMods();
-    const dir = this.resolveAimDir();
-    const origin = this.playerPos.clone().setY(1.15);
-    const dmg = this.playerBaseDamage * sp.damageMult * mods.autoAttackMult * (0.9 + Math.random() * 0.2);
-    if (sp.slashWave) {
-      this.slashField?.spawn(origin, dir, {
-        damage: dmg,
-        range: sp.slashRange * mods.slashRangeMult,
-        color: sp.color,
-        radius: 1.5 * Math.min(1.4, mods.aoeRadiusMult),
-      });
-    } else {
-      // Melee special cone
-      const q: ShapeQuery = {
-        kind: "cone",
-        origin: this.playerPos.clone(),
-        dir,
-        radius: 5.5,
-        halfAngle: Math.PI / 4,
-      };
-      this.telegraphs?.show(q, 0.25, sp.color);
-      for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
-        this.damageEnemy(en, dmg, Math.random() < this.playerCritChance + 0.08);
-      }
-    }
-    this.auras?.pulse(sp.element ?? this.playerAuraElement, this.playerPos.clone(), 2.8, 0.5);
-    this.log(`${getActiveFighter().name} — ${sp.name}!`);
-    this.notifyState();
-  }
-
-  /** Cast a fighter skill; `place` is set for ground_aoe. */
-  private castFighterSkill(idx: number, place: THREE.Vector3 | null) {
-    const skill = this.fighterKit.skills[idx];
-    if (!skill) return;
-    const now = performance.now();
-    if (now < (this.skillCdUntil[idx] ?? 0)) return;
-    if (this.playerMana < skill.manaCost) {
-      this.log("Not enough mana.");
-      return;
-    }
-    this.playerMana -= skill.manaCost;
-    const preBoost = resolveSkillBoost(skill.id);
-    this.skillCdUntil[idx] = now + skill.cooldown * 1000 * preBoost.cooldownMult;
-
-    const dir = this.resolveAimDir();
-    this.playerFacing = Math.atan2(dir.x, dir.z);
-    this.syncRacalvinWeaponForSkill(skill);
-    this.playerAnimator?.triggerNamed(skill.anim);
-    this.syncPlayerMeshVisibility(skill.anim);
-    if (!this.playerAnimator?.isRootMotionActive() && skill.targeting !== "self" && skill.targeting !== "ground_aoe") {
-      this.playerPos.x += dir.x * 1.1;
-      this.playerPos.z += dir.z * 1.1;
-      this.clampToArena(this.playerPos);
-    }
-
-    const mods = this.perkMods();
-    const skillBoost = preBoost;
-    const stones = getStoneCombatMods();
-    const loadout = getGameLoadout();
-    const spell = loadout.combat.spellDamageMult;
-    const dmg =
-      this.playerBaseDamage *
-      skill.damageMult *
-      mods.autoAttackMult *
-      skillBoost.damageMult *
-      spell *
-      (0.85 + Math.random() * 0.3);
-    const color = skill.color ?? elementColor(skill.element);
-    const aoeMul = mods.aoeRadiusMult * skillBoost.aoeMult * loadout.combat.aoeMult;
-    const slashMul = mods.slashRangeMult * (1 + stones.aoe * 0.5);
-    const skillId = skill.id;
-
-    if (skill.targeting === "self") {
-      // Heal-ish for marco regen style
-      if (skill.damageMult < 0.6) {
-        this.playerHp = Math.min(this.playerMaxHp, this.playerHp + 40 + this.playerLevel * 5);
-        this.log(`${skill.name} — restored vitality.`);
-      } else {
-        const q: ShapeQuery = {
-          kind: "nova",
-          origin: this.playerPos.clone(),
-          dir,
-          radius: skill.aoeRadius ?? 4,
-        };
-        this.telegraphs?.show(q, 0.3, color);
-        this.particles?.castSkillVfx({
-          element: skill.element,
-          shape: "nova",
-          center: this.playerPos.clone(),
-          origin: this.playerPos.clone(),
-          dir,
-          reach: skill.aoeRadius ?? 4,
-        });
-        for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
-          this.damageEnemy(en, dmg, false, skillId);
-        }
-      }
-      this.auras?.pulse(skill.element, this.playerPos.clone(), 2.2 * aoeMul, 0.45);
-      this.notifyState();
-      return;
-    }
-
-    if (skill.targeting === "slash_wave" || skill.shape === "slash") {
-      this.slashField?.spawn(this.playerPos.clone().setY(1.15), dir, {
-        damage: dmg,
-        range: (skill.slashRange ?? 11) * slashMul,
-        color,
-        radius: 1.4 * Math.min(1.35, aoeMul),
-      });
-      this.auras?.pulse(skill.element, this.playerPos.clone(), 1.8, 0.35);
-      this.log(`${skill.name}!`);
-      this.notifyState();
-      return;
-    }
-
-    if (skill.targeting === "ground_aoe") {
-      const maxR = (skill.placeRange ?? 9) * Math.min(1.25, aoeMul);
-      let center = place ?? this.playerPos.clone().add(dir.clone().multiplyScalar(maxR * 0.55));
-      const to = center.clone().sub(this.playerPos);
-      if (to.length() > maxR) {
-        to.setLength(maxR);
-        center = this.playerPos.clone().add(to);
-      }
-      this.clampToArena(center);
-      const radius = (skill.aoeRadius ?? 4) * aoeMul;
-      const kind = skill.shape === "nova" ? "nova" : "circle";
-      const q: ShapeQuery = {
-        kind,
-        origin: center.clone(),
-        dir,
-        radius,
-      };
-      this.telegraphs?.show(q, 0.4, color);
-      this.skillVfx?.spawn("cloud", center.clone(), radius, 1.1);
-      this.particles?.castSkillVfx({
-        element: skill.element,
-        shape: kind,
-        center: center.clone(),
-        origin: this.playerPos.clone(),
-        dir,
-        reach: radius,
-      });
-      this.auras?.pulse(skill.element, center.clone(), radius * 0.9, 0.5);
-      for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
-        const isCrit = Math.random() < this.playerCritChance + mods.critBonus + skillBoost.critBonus + 0.05;
-        this.damageEnemy(en, dmg * (isCrit ? 1.75 : 1), isCrit, skillId);
-      }
-      this.log(`${skill.name} detonates!`);
-      this.notifyState();
-      return;
-    }
-
-    // Instant cone / line / nova from self (slash shapes already returned above).
-    const shapeKind: ShapeQuery["kind"] =
-      skill.shape === "line" || skill.shape === "cone" || skill.shape === "nova" || skill.shape === "circle"
-        ? skill.shape
-        : "cone";
-    const q: ShapeQuery = {
-      kind: shapeKind,
-      origin: this.playerPos.clone(),
-      dir,
-      radius: (skill.aoeRadius ?? 5) * aoeMul,
-      halfAngle: Math.PI / 4,
-      length: (skill.slashRange ?? 9) * slashMul,
-      halfWidth: 1.3 * Math.min(1.3, aoeMul),
-    };
-    this.telegraphs?.show(q, 0.28, color);
-    this.particles?.castSkillVfx({
-      element: skill.element,
-      shape: shapeKind as SkillShapeKind,
-      center: this.playerPos.clone(),
-      origin: this.playerPos.clone(),
-      dir,
-      reach: (skill.aoeRadius ?? skill.slashRange ?? 5) * aoeMul,
-      halfAngle: Math.PI / 4,
-    });
-    // Also fire a short slash wave so physical cuts travel past the fist.
-    if (skill.element === "physical" || shapeKind === "cone" || mods.autoAttackSlash) {
-      this.slashField?.spawn(this.playerPos.clone().setY(1.1), dir, {
-        damage: dmg * 0.55,
-        range: Math.min(14, (skill.slashRange ?? 7) * slashMul),
-        color,
-        radius: 1.2,
-      });
-    }
-    for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
-      const isCrit = Math.random() < this.playerCritChance + mods.critBonus + skillBoost.critBonus + 0.05;
-      this.damageEnemy(en, dmg * (isCrit ? 1.75 : 1), isCrit, skillId);
-    }
-    this.auras?.pulse(skill.element, this.playerPos.clone(), 1.6 * aoeMul, 0.35);
-    this.log(`${skill.name}!`);
-    this.notifyState();
+    this.targetEnemy = null;
+    if (this.indicatorRing) this.indicatorRing.visible = false;
+    if (this.heroAnim?.trigger("dodge")) return;
+    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    this.playerPos.x += forward.x * 2.4;
+    this.playerPos.z += forward.z * 2.4;
+    this.clampToArena(this.playerPos);
   }
 
   attackNearest() {
@@ -1733,12 +1044,7 @@ export class GameEngine {
       const d = en.position.distanceTo(this.playerPos);
       if (d < nearestDist) { nearestDist = d; nearest = en; }
     }
-    if (nearest && nearestDist < 4.5) {
-      this.doAttack(nearest);
-      return;
-    }
-    // No foe in melee — chop trees / quarry stone by attacking harvest nodes.
-    this.tryHarvestAttack();
+    if (nearest && nearestDist < 4.5) this.doAttack(nearest);
   }
 
   /** Nearest live enemy within `maxDist` (used by the RMB hold-to-attack lock). */
@@ -1778,69 +1084,22 @@ export class GameEngine {
     return out;
   }
 
-  /**
-   * Apply damage + stone procs (bolts, novas, elemental). Optional skillId for ranks.
-   */
-  private damageEnemy(en: EnemyInstance, amount: number, isCrit: boolean, skillId?: string) {
+  /** Apply skill/deployable damage to one enemy (tier mitigation, damage number,
+   *  hurt/death). Marks state dirty so off-cast hits refresh the HUD once/frame. */
+  private damageEnemy(en: EnemyInstance, amount: number, isCrit: boolean) {
     if (en.state === "dead" || en.state === "death") return;
-    const skillBoost = skillId ? resolveSkillBoost(skillId) : undefined;
-    const stones = getStoneCombatMods();
-    const spell = 1 + stones.spellDamage;
-    let raw = amount * (skillBoost?.damageMult ?? 1);
-    const baseForProc = Math.max(1, Math.floor(amount));
-    const procs = resolveHitProcs({
-      isCrit,
-      isSkill: !!skillId,
-      baseDamage: baseForProc,
-      spellPower: spell,
-    });
-    let dmg = Math.max(1, Math.floor(raw) + procs.extraDamage - Math.floor(en.template.tier * 2));
-    if (en.model.group.userData.shockedUntil && performance.now() < en.model.group.userData.shockedUntil) {
-      dmg = Math.floor(dmg * 1.2);
-    }
+    const dmg = Math.max(1, Math.floor(amount) - Math.floor(en.template.tier * 2));
     en.hp = Math.max(0, en.hp - dmg);
-    if (procs.heal > 0) this.playerHp = Math.min(this.playerMaxHp, this.playerHp + procs.heal);
-    if (procs.shock) en.model.group.userData.shockedUntil = performance.now() + 2500;
-    if (procs.frost) en.model.group.userData.chilledUntil = performance.now() + 2200;
-    if (procs.burn) en.model.group.userData.bleedUntil = performance.now() + 2800;
-
     const wp = en.model.group.position.clone();
     wp.y += en.model.height * 0.7;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
-    this.particles?.impact(wp, procs.elementColor || (isCrit ? 0xffd54a : 0xff7a1e), procs.particles ? 1.1 : 0.7);
-
-    // Auto-fire projectile / nova from stones
-    const aim = new THREE.Vector3(en.position.x - this.playerPos.x, 0, en.position.z - this.playerPos.z);
-    if (aim.lengthSq() < 1e-4) aim.set(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    aim.normalize();
-    if (procs.fireBolt) {
-      this.slashField?.spawn(this.playerPos.clone().setY(1.2), aim, {
-        damage: Math.max(4, Math.floor(baseForProc * 0.5)),
-        range: 11 + stones.aoe * 4,
-        color: procs.elementColor,
-        radius: 1.15,
-        speed: 32,
-      });
-    }
-    if (procs.nova) {
-      const r = 3.2 * (1 + stones.aoe);
-      const q: ShapeQuery = { kind: "nova", origin: en.position.clone(), dir: aim, radius: r };
-      this.telegraphs?.show(q, 0.2, procs.elementColor);
-      this.auras?.pulse("fire", en.position.clone(), r, 0.4);
-      for (const other of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death" && e !== en)) {
-        const splash = Math.max(1, Math.floor(baseForProc * 0.35));
-        other.hp = Math.max(0, other.hp - splash);
-        if (other.hp <= 0) this.killEnemy(other, skillId);
-      }
-    }
-
-    if (procs.labels.length) this.log(procs.labels.join(" · "));
+    this.particles?.impact(wp, isCrit ? 0xffd54a : 0xff7a1e);
     if (en.hp <= 0) {
-      this.killEnemy(en, skillId);
+      this.killEnemy(en);
     } else {
       en.anim.hurtPhase = 1;
       en.state = "hurt";
-      en.hurtTimer = en.model.group.userData.chilledUntil ? 0.55 : 0.35;
+      en.hurtTimer = 0.4;
     }
   }
 
@@ -1875,17 +1134,8 @@ export class GameEngine {
     this.playerFacing = Math.atan2(dir.x, dir.z);
 
     const isCast = arch.shape === "circle" || arch.shape === "nova" || arch.shape === "deployable";
-    const played = this.playerAnimator?.triggerNamed(skillAnimCandidates(idx, isCast)) ?? false;
-    if (!played) this.playerAnimator?.triggerAttack();
-    // If the model has no locomotion root bone, commit permanent forward travel
-    // so the fighter ends where the skill ends instead of sliding back.
-    if (!this.playerAnimator?.isRootMotionActive()) {
-      const dist = isCast ? 0.35 : 1.5;
-      const f = this.resolveAimDir();
-      this.playerPos.x += f.x * dist;
-      this.playerPos.z += f.z * dist;
-      this.clampToArena(this.playerPos);
-    }
+    const played = this.heroAnim?.triggerNamed(skillAnimCandidates(idx, isCast)) ?? false;
+    if (!played) this.heroAnim?.trigger("attack");
     this.playerAttackCooldown = this.playerMaxAttackCooldown;
 
     const origin = this.playerPos.clone();
@@ -1944,109 +1194,6 @@ export class GameEngine {
     }
   }
 
-  /**
-   * Engage nearby pirate: vendor opens shop, captain re-seeds the generative
-   * island (new trees/stones/enemy layout) and can sail to the boss arena.
-   */
-  tryEngagePirate() {
-    this.refreshNearbyInteractables();
-    const np = this.nearbyPirate;
-    if (!np) {
-      this.log("No pirate nearby — head to Pirate Cove (east).");
-      return;
-    }
-    const pirate = this.pirates.find((p) => p.def.id === np.id);
-    pirate?.animator?.wave();
-
-    if (np.role === "vendor") {
-      this.log(`${np.name}: "Wood, stone, grog — fair prices for a corsair."`);
-      this.onOpenVendor?.();
-      return;
-    }
-    if (np.role === "captain") {
-      this.log(`${np.name}: "The wind shifts — I chart a new island!"`);
-      this.reseedGenerativeMap();
-      return;
-    }
-    this.log(`${np.name}: "${np.prompt}"`);
-  }
-
-  /** Captain re-sails: next round — tougher enemies, new seed/layout/boss. */
-  reseedGenerativeMap() {
-    this.mapSeed = (Math.random() * 0xffffffff) >>> 0;
-    this.islandRound += 1;
-    // Clear enemies and respawn scaled for the new round.
-    for (const en of [...this.enemies]) {
-      this.scene.remove(en.model.group);
-      en.model.group.userData.disposed = true;
-      if (en.model.kit) disposeKitModel(en.model);
-      else if (en.model.isGLB) disposeMonsterModel(en.model);
-    }
-    this.enemies = [];
-    this.enemyBrains.clear();
-    this.bossEnemyId = null;
-    this.auras?.clear();
-    if (this.playerGroup) {
-      this.auras?.attach(this.playerAuraElement, {
-        follow: this.playerGroup,
-        radius: 1.35,
-        yOffset: 0.05,
-      });
-    }
-    this.buildHarvestables();
-    this.spawnInitialEnemies();
-    this.spawnDungeonBoss();
-    this.playerPos.set(0, 0, 0);
-    this.playerY = 0;
-    this.jumpVel = 0;
-    if (this.playerGroup) this.playerGroup.position.set(0, 0, 0);
-    // Soft heal between rounds so the loop is fair but still pressured.
-    this.playerHp = Math.min(this.playerMaxHp, this.playerHp + this.playerMaxHp * 0.35);
-    this.playerMana = Math.min(this.playerMaxMana, this.playerMana + this.playerMaxMana * 0.4);
-    const mult = this.difficultyMult();
-    this.log(
-      `Round ${this.islandRound} — island #${this.mapSeed.toString(16)} · enemies ×${mult.toFixed(2)}`,
-    );
-    this.onMapReseed?.(this.mapSeed);
-    this.notifyState();
-  }
-
-  private refreshNearbyInteractables() {
-    this.nearbyPirate = null;
-    this.nearbyHarvestLabel = null;
-    const now = performance.now() / 1000;
-
-    let bestPirateDist = 3.6;
-    for (const p of this.pirates) {
-      if (!p.ready) continue;
-      const d = Math.hypot(p.group.position.x - this.playerPos.x, p.group.position.z - this.playerPos.z);
-      if (d < bestPirateDist) {
-        bestPirateDist = d;
-        const role = (p.def.role ?? "crew") as PirateRole;
-        this.nearbyPirate = {
-          id: p.def.id,
-          name: p.def.name,
-          title: p.def.title,
-          role,
-          prompt: p.def.prompt ?? "Talk",
-        };
-      }
-    }
-
-    if (this.harvestField) {
-      const n = nearestHarvestNode(this.harvestField.nodes, this.playerPos, 3.5, now);
-      if (n) {
-        this.nearbyHarvestLabel =
-          n.kind === "wood"
-            ? `Tree (${Math.ceil(n.hp)} HP) — F/RMB chop wood`
-            : n.meshBank === "rock"
-              ? `Rock (${Math.ceil(n.hp)} HP) — F/RMB mine stone`
-              : `Stone pile (${Math.ceil(n.hp)} HP) — F/RMB quarry`;
-      }
-    }
-  }
-
-  /** Attack nearest enemy, or harvest a tree/stone node if no foe is in reach. */
   private doAttack(enemy: EnemyInstance) {
     if (this.playerAttackCooldown > 0) return;
     if (enemy.state === "dead" || enemy.state === "death") return;
@@ -2057,49 +1204,49 @@ export class GameEngine {
       return;
     }
 
-    const mods = this.perkMods();
-    const stones = getStoneCombatMods();
-    const base = this.playerBaseDamage * mods.autoAttackMult + stones.damage * 0.35;
+    const base = this.playerBaseDamage;
     const variance = 0.8 + Math.random() * 0.4;
-    const critChance = Math.min(0.75, this.playerCritChance + mods.critBonus + stones.crit);
-    const isCrit = Math.random() < critChance;
-    let rawDmg = Math.max(1, Math.floor(base * variance * (isCrit ? 1.85 : 1)));
-    if (mods.burnOnHit > 0) rawDmg += Math.floor(base * mods.burnOnHit);
-    // Route through damageEnemy for procs/bolts/novas
-    this.playerAttackCooldown =
-      this.playerMaxAttackCooldown * mods.attackSpeedMult * Math.max(0.5, 1 - stones.attackSpeed) * onslaughtAttackSpeedMult();
+    const isCrit = Math.random() < this.playerCritChance;
+    const rawDmg = Math.max(1, Math.floor(base * variance * (isCrit ? 1.75 : 1)));
+    const dmg = Math.max(1, rawDmg - Math.floor(enemy.template.tier * 2));
 
+    enemy.hp = Math.max(0, enemy.hp - dmg);
+    this.playerAttackCooldown = this.playerMaxAttackCooldown;
+
+    // Face the enemy
     const dx = enemy.position.x - this.playerPos.x;
     const dz = enemy.position.z - this.playerPos.z;
     this.playerFacing = Math.atan2(dx, dz);
-    this.syncRacalvinWeaponMelee();
-    this.playerAnimator?.triggerAttack();
-    this.syncPlayerMeshVisibility(["attack", "combo"]);
 
-    if (mods.autoAttackSlash) {
-      const dir = new THREE.Vector3(dx, 0, dz);
-      if (dir.lengthSq() < 1e-4) dir.set(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-      dir.normalize();
-      this.slashField?.spawn(this.playerPos.clone().setY(1.1), dir, {
-        damage: rawDmg * 0.55,
-        range: 7 * mods.slashRangeMult * (1 + stones.aoe * 0.4),
-        color: stones.procBurn > 0.1 ? 0xff5522 : 0xffcc66,
-        radius: 1.25 + stones.aoe,
-      });
+    this.heroAnim?.trigger("attack");
+
+    const wp = enemy.model.group.position.clone();
+    wp.y += enemy.model.height * 0.7;
+    this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
+
+    // 2D hit spark at the enemy's screen position
+    if (this.fx) {
+      const sc = this.worldToScreen(wp);
+      if (isCrit) {
+        this.fx.spawnSpellImpact(sc.x, sc.y, "#ff4400", 50);
+      } else {
+        this.fx.spawnHitSparks(sc.x, sc.y, "#ffaa00", 10);
+      }
     }
 
-    this.damageEnemy(enemy, rawDmg, isCrit);
-    if (this.fx) {
-      const wp = enemy.model.group.position.clone();
-      wp.y += enemy.model.height * 0.7;
-      const sc = this.worldToScreen(wp);
-      if (isCrit) this.fx.spawnSpellImpact(sc.x, sc.y, "#ff4400", 50);
-      else this.fx.spawnHitSparks(sc.x, sc.y, "#ffaa00", 10);
+    this.log(`You hit ${enemy.template.name} for ${dmg}${isCrit ? " CRIT!" : ""}`);
+
+    if (enemy.hp <= 0) {
+      this.killEnemy(enemy);
+    } else {
+      enemy.anim.hurtPhase = 1;
+      enemy.state = "hurt";
+      enemy.hurtTimer = 0.4;
     }
     this.notifyState();
   }
 
-  private killEnemy(enemy: EnemyInstance, skillId?: string) {
+  private killEnemy(enemy: EnemyInstance) {
     enemy.hp = 0;
     enemy.state = "death";
     enemy.anim.deathPhase = 0.01;  // trigger death animation
@@ -2109,44 +1256,9 @@ export class GameEngine {
       this.hoveredEnemy = null;
     }
 
-    const isBoss = enemy.id === this.bossEnemyId || !!enemy.model.group.userData.isBoss;
-    const xp = enemy.template.tier * 50 + 25 + (isBoss ? 400 : 0);
+    const xp = enemy.template.tier * 50 + 25;
     this.playerXp += xp;
     this.log(`${enemy.template.name} defeated! +${xp} XP`);
-
-    // Gold + attribute stone drops + kill procs
-    const w = getWallet();
-    const goldGain = 8 + enemy.template.tier * 6 + (isBoss ? 180 + enemy.template.tier * 40 : 0) + Math.floor(Math.random() * 8);
-    const soulsGain = isBoss ? 2 + Math.floor(enemy.template.tier / 2) : Math.random() < 0.08 ? 1 : 0;
-    saveWallet({
-      ...w,
-      gold: w.gold + goldGain,
-      souls: w.souls + soulsGain,
-      embers: w.embers + (isBoss ? 3 : Math.random() < 0.12 ? 1 : 0),
-    });
-    this.log(`+${goldGain} gold${soulsGain ? ` · +${soulsGain} souls` : ""}`);
-
-    const dropChance = isBoss ? 0.92 : 0.28 + enemy.template.tier * 0.05 + this.islandRound * 0.012;
-    if (Math.random() < dropChance) {
-      const stone = rollStoneDrop({
-        itemLevel: enemy.template.tier * 5 + this.islandRound * 2,
-        seed: (Math.random() * 0xffffffff) >>> 0,
-        boss: isBoss,
-      });
-      addStone(stone);
-      const meta = STONE_META[stone.attr];
-      this.log(`Stone: ${meta.glyph} ${stone.name} (${stone.effects.length} effects)`);
-    }
-
-    const killProc = resolveKillProcs();
-    if (killProc.onslaughtSec > 0) {
-      this.log("Onslaught! (attack speed up)");
-      this.auras?.pulse("lightning", this.playerPos.clone(), 2.2, 0.4);
-    }
-
-    if (isBoss) {
-      this.bossEnemyId = null;
-    }
 
     setTimeout(() => {
       enemy.state = "dead";
@@ -2155,6 +1267,8 @@ export class GameEngine {
       if (enemy.model.kit) {
         disposeKitModel(enemy.model);
       } else if (enemy.model.isGLB) {
+        // Thorough GLB cleanup (mixer + geometry + materials + textures), and
+        // releases resources even if the GLB is still streaming in.
         disposeMonsterModel(enemy.model);
       } else {
         enemy.model.group.traverse((c) => {
@@ -2165,117 +1279,23 @@ export class GameEngine {
       }
     }, 1400);
 
-    // Dungeon boss does not soft-respawn; trash mobs do.
-    if (!isBoss) {
-      setTimeout(() => {
-        if (this.disposed) return;
-        const idx = this.enemies.indexOf(enemy);
-        if (idx !== -1) this.enemies.splice(idx, 1);
-        const spawnPos = enemy.spawnPos.clone();
-        spawnPos.x += (Math.random() - 0.5) * 4;
-        spawnPos.z += (Math.random() - 0.5) * 4;
-        // Respawn with current round difficulty
-        const base: EnemyTemplate = {
-          id: enemy.template.id,
-          name: enemy.template.name.replace(/^R\d+\s+/, ""),
-          type: enemy.template.type,
-          tier: enemy.template.tier,
-          hp: Math.round(enemy.template.hp / this.difficultyMult()),
-          damage: enemy.template.damage,
-        };
-        this.createEnemy(this.scaleTemplate(base), spawnPos);
-      }, 14000);
-    } else {
-      setTimeout(() => {
-        if (this.disposed) return;
-        const idx = this.enemies.indexOf(enemy);
-        if (idx !== -1) this.enemies.splice(idx, 1);
-      }, 1400);
-    }
-  }
-
-  /** Chop / quarry: attack nearest harvest node (tree or stone). */
-  private tryHarvestAttack() {
-    if (this.playerAttackCooldown > 0 || !this.harvestField) return;
-    const now = performance.now() / 1000;
-    // Respawn elapsed nodes.
-    for (const n of this.harvestField.nodes) {
-      if (n.hp <= 0 && n.respawnAt > 0 && now >= n.respawnAt) {
-        n.hp = n.maxHp;
-        n.respawnAt = 0;
-        showHarvestNode(this.harvestField, n);
-      }
-    }
-    // Rocks are bulky — slightly longer reach so mining feels fair.
-    const node = nearestHarvestNode(this.harvestField.nodes, this.playerPos, 3.4, now);
-    if (!node) return;
-
-    this.playerAttackCooldown = this.playerMaxAttackCooldown * 0.85;
-    this.playerFacing = Math.atan2(node.position.x - this.playerPos.x, node.position.z - this.playerPos.z);
-    this.playerAnimator?.triggerAttack();
-
-    const dmg = Math.max(8, Math.floor(this.playerBaseDamage * 0.55 * (0.85 + Math.random() * 0.3)));
-    node.hp = Math.max(0, node.hp - dmg);
-    const wp = node.position.clone();
-    wp.y = node.kind === "wood" ? 2.5 : 1.2;
-    this.damageNumbers.push({
-      id: `d${this.idCounter++}`,
-      value: dmg,
-      worldPos: wp,
-      age: 0,
-      isPlayer: false,
-      isCrit: false,
-    });
-    this.log(
-      node.kind === "wood"
-        ? `You chop the tree (−${dmg}).`
-        : `You strike the stone (−${dmg}).`,
-    );
-
-    if (node.hp <= 0) {
-      const yMin = node.yieldMin;
-      const yMax = node.yieldMax;
-      const amount = yMin + Math.floor(Math.random() * (yMax - yMin + 1));
-      const res = resourceForKind(node.kind);
-      addResource(res, amount);
-      hideHarvestNode(this.harvestField, node);
-      node.respawnAt = now + 45 + Math.random() * 30;
-      this.log(`Harvested ${amount} ${res}!`);
-    }
-    this.notifyState();
+    setTimeout(() => {
+      const idx = this.enemies.indexOf(enemy);
+      if (idx !== -1) this.enemies.splice(idx, 1);
+      const spawnPos = enemy.spawnPos.clone();
+      spawnPos.x += (Math.random() - 0.5) * 4;
+      spawnPos.z += (Math.random() - 0.5) * 4;
+      this.createEnemy(enemy.template, spawnPos);
+    }, 14000);
   }
 
   private takeDamage(amount: number, source: string) {
-    if (this.isDodging()) {
-      this.log(`Dodged ${source}!`);
-      return;
-    }
-    const mods = this.perkMods();
-    const stones = getStoneCombatMods();
-    // Magical vs physical: bosses/magic names use magicDefense
-    const isMagic = /bolt|hex|arcane|magic|curse|spell|nova|shock/i.test(source);
-    const def = isMagic ? stones.magicDefense : stones.defense;
-    let mitigated = Math.max(1, amount - Math.floor(this.playerDefense * 0.5));
-    mitigated = Math.max(
-      1,
-      Math.floor(mitigated * mods.damageTakenMult * Math.max(0.5, 1 - def) * blurDamageMult()),
-    );
-    if (tryBlurOnHitTaken()) {
-      this.log("Blur! Damage reduced.");
-      this.auras?.pulse("arcane", this.playerPos.clone(), 1.6, 0.35);
-    }
-    if (this.blocking) {
-      mitigated = Math.max(1, Math.floor(mitigated * 0.3));
-      this.log(`Blocked ${source} — only ${mitigated} damage.`);
-    } else if (isBlurActive()) {
-      this.log(`${source} glances (${mitigated})`);
-    } else {
-      this.log(`${source} hits you for ${mitigated}`);
-    }
+    const mitigated = Math.max(1, amount - Math.floor(this.playerDefense * 0.5));
     this.playerHp = Math.max(0, this.playerHp - mitigated);
     const wp = this.playerPos.clone();
     wp.y += 2.5;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: mitigated, worldPos: wp, age: 0, isPlayer: true, isCrit: false });
+    this.log(`${source} hits you for ${mitigated}`);
     this.notifyState();
   }
 
@@ -2313,16 +1333,9 @@ export class GameEngine {
       return;
     }
 
-    // Spawn party once the world is ready (async race models).
-    if (!this.partySpawned) {
-      this.partySpawned = true;
-      void this.spawnPartyAllies();
-    }
-
     if (this.playerAttackCooldown > 0) this.playerAttackCooldown -= delta;
 
     this.updateWorldCollectables(delta, elapsed);
-    this.updateAllies(delta);
 
     // Keyboard movement
     const raw = new THREE.Vector2();
@@ -2351,10 +1364,7 @@ export class GameEngine {
         this.targetEnemy && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death"
           ? this.targetEnemy
           : this.nearestEnemy(14);
-      if (!locked) {
-        // RMB with no foe: harvest nearby tree / stone.
-        this.tryHarvestAttack();
-      } else if (locked) {
+      if (locked) {
         this.targetEnemy = locked;
         const toFoe = new THREE.Vector3().subVectors(locked.position, this.playerPos);
         const dist = toFoe.length();
@@ -2389,62 +1399,19 @@ export class GameEngine {
       }
     }
 
-    // Jump arc (Space).
-    if (this.jumpVel !== 0 || this.playerY > 0) {
-      this.jumpVel -= 22 * delta;
-      this.playerY += this.jumpVel * delta;
-      if (this.playerY <= 0) {
-        this.playerY = 0;
-        this.jumpVel = 0;
-      }
-    }
-
-    // Drive mixer first so root-motion sample sees this frame's pose, then
-    // fold travel into world position. Ending a skill must leave the body at
-    // the clip terminus (no snap back to the cast origin).
-    if (this.playerAnimator) {
-      this.playerAnimator.setMoving(playerMoving && this.playerY <= 0.05);
-      this.playerAnimator.update(delta);
-      if (this.playerAnimator.consumeRootMotion(this._rmTmp)) {
-        this.playerPos.x += this._rmTmp.x;
-        this.playerPos.z += this._rmTmp.z;
-      }
-    } else if (this.playerMixer) {
-      this.playerMixer.update(delta);
+    // Root motion: lunging/dodge/jump clips translate the player so the mesh
+    // moves WITH the character; collision + floor are resolved next.
+    if (this.heroAnim && this.heroAnim.consumeRootMotion(this._rmTmp)) {
+      this.playerPos.x += this._rmTmp.x;
+      this.playerPos.z += this._rmTmp.z;
     }
 
     // Resolve the freshly-moved player against the real dungeon geometry.
     this.resolvePlayer();
-    this.playerPos.y = this.playerY;
-
-    // Slash waves (special + skill cuts) — travel farther than the melee hit.
-    if (this.slashField) {
-      const slashHits = this.slashField.update(
-        delta,
-        this.enemies.map((en) => ({
-          id: en.id,
-          position: en.position,
-          alive: en.state !== "dead" && en.state !== "death",
-        })),
-      );
-      for (const h of slashHits) {
-        const en = this.enemies.find((e) => e.id === h.enemyId);
-        if (en) this.damageEnemy(en, h.damage, Math.random() < this.playerCritChance);
-      }
-    }
-
-    // Skill cursor follows mouse while ground-AoE is pending.
-    if (this.pendingSkillIdx >= 0 && this.skillCursor && this.pointerGround) {
-      this.skillCursor.visible = true;
-      this.skillCursor.position.set(this.pointerGround.x, 0.12, this.pointerGround.z);
-      const sk = this.fighterKit.skills[this.pendingSkillIdx];
-      if (sk) this.skillCursor.scale.setScalar(sk.aoeRadius ?? 4);
-    }
 
     if (this.playerGroup) {
-      const targetPos = new THREE.Vector3(this.playerPos.x, this.playerY, this.playerPos.z);
-      const blend = this.playerAnimator?.isRootMotionActive() ? 0.9 : 0.4;
-      this.playerGroup.position.lerp(targetPos, blend);
+      const targetPos = new THREE.Vector3(this.playerPos.x, this.playerPos.y, this.playerPos.z);
+      this.playerGroup.position.lerp(targetPos, 0.35);
       // Shortest-arc turn toward facing — avoids the long way around at ±π.
       let dy = this.playerFacing - this.playerGroup.rotation.y;
       while (dy > Math.PI) dy -= Math.PI * 2;
@@ -2452,10 +1419,15 @@ export class GameEngine {
       this.playerGroup.rotation.y += dy * 0.25;
     }
 
+    // Drive locomotion + attack animation from movement state.
+    if (this.heroAnim) {
+      this.heroAnim.setMoving(playerMoving);
+      this.heroAnim.update(delta);
+    }
+
     this.skillVfx.update(delta);
     this.particles?.update(delta);
     this.telegraphs?.update(delta);
-    this.auras?.update(delta);
     this.deployables?.update(delta, {
       targets: this.enemyTargets(),
       particles: this.particles,
@@ -2463,7 +1435,8 @@ export class GameEngine {
       log: (m) => this.log(m),
     });
 
-    // Neutral pirate allies at the cove: idle anim, turn-to-face, wave.
+    // Neutral pirate allies at the cove: idle anim, plus turn-to-face and an
+    // occasional wave when the player wanders close.
     for (const t of this.townsfolk) t.update(delta);
     for (const p of this.pirates) {
       if (!p.ready || !p.animator) continue;
@@ -2480,21 +1453,6 @@ export class GameEngine {
         if (p.group.userData.waveTimer <= 0) {
           p.animator.wave();
           p.group.userData.waveTimer = 5 + Math.random() * 5;
-        }
-      }
-    }
-
-    // Proximity prompts for cove + harvest nodes.
-    this.refreshNearbyInteractables();
-
-    // Soft-respawn harvest nodes on timer.
-    if (this.harvestField) {
-      const now = performance.now() / 1000;
-      for (const n of this.harvestField.nodes) {
-        if (n.hp <= 0 && n.respawnAt > 0 && now >= n.respawnAt) {
-          n.hp = n.maxHp;
-          n.respawnAt = 0;
-          showHarvestNode(this.harvestField, n);
         }
       }
     }
@@ -2529,10 +1487,8 @@ export class GameEngine {
       return d.age < 1.4;
     });
 
-    const mods = this.perkMods();
-    const regen = 6 + mods.regenPerSec;
     if (this.playerHp < this.playerMaxHp) {
-      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + delta * regen);
+      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + delta * 6);
     }
 
     this.notifyState();
@@ -2548,58 +1504,51 @@ export class GameEngine {
 
     const distToPlayer = en.position.distanceTo(this.playerPos);
     en.anim.isWalking = false;
-    const brain = this.enemyBrains.get(en.template.id);
-    const tune = brain ? brainTuning(brain) : null;
+
+    if (en.attackWindup > 0) {
+      en.attackWindup -= delta;
+      if (en.attackWindup <= 0 && en.attackCooldown <= 0) {
+        const dmg = Math.floor(en.template.damage * (0.85 + Math.random() * 0.3));
+        this.takeDamage(dmg, en.template.name);
+        en.attackCooldown = 1.8 + Math.random() * 0.6;
+        en.anim.isAttacking = false;
+      }
+    }
 
     if (en.state !== "hurt" && en.state !== "death") {
-      if (distToPlayer < en.aggroRange) {
+      const leash = en.aggroRange * 2.4;
+      if (distToPlayer > leash && (en.state === "chase" || en.state === "attack")) {
+        en.state = "patrol";
+        en.attackWindup = 0;
+        en.patrolTarget.copy(en.spawnPos);
+      } else if (distToPlayer < en.aggroRange) {
         // Face the player
         const dx = this.playerPos.x - en.position.x;
         const dz = this.playerPos.z - en.position.z;
         en.facing = Math.atan2(dx, dz);
 
-        // Brain kite: skirmishers/casters back off when too close.
-        const kiteFloor = tune ? en.attackRange * tune.kiteBelow : 0;
-        if (tune && distToPlayer < kiteFloor && distToPlayer > 0.6) {
-          en.state = "chase";
-          const dir = new THREE.Vector3().subVectors(en.position, this.playerPos).normalize();
-          en.position.x += dir.x * en.speed * 0.85 * delta;
-          en.position.z += dir.z * en.speed * 0.85 * delta;
-          this.clampToArena(en.position);
-          en.anim.isWalking = true;
-        } else if (distToPlayer <= en.attackRange) {
+        if (distToPlayer <= en.attackRange) {
           en.state = "attack";
-          if (en.attackCooldown <= 0) {
+          if (en.attackCooldown <= 0 && en.attackWindup <= 0) {
+            en.attackWindup = 0.42 + en.template.tier * 0.06;
             en.anim.isAttacking = true;
-            const special = tune && Math.random() < tune.specialBias;
-            const dmg = Math.floor(
-              en.template.damage * (special ? 1.45 : 1) * (0.85 + Math.random() * 0.3),
+            this.telegraphs?.show(
+              {
+                kind: "circle",
+                origin: this.playerPos.clone(),
+                dir: new THREE.Vector3(0, 0, 1),
+                radius: 1.1 + en.template.tier * 0.08,
+              },
+              0.38,
+              0xcc2222,
             );
-            this.takeDamage(dmg, en.template.name + (special ? " ★" : ""));
-            if (special && this.auras) {
-              this.auras.pulse(
-                brain === "caster" ? "arcane" : brain === "assassin" ? "poison" : "fire",
-                en.position.clone(),
-                2.2 + en.template.tier * 0.2,
-                0.45,
-              );
-            }
-            en.attackCooldown = (special ? 2.4 : 1.7) + Math.random() * 0.6;
           }
         } else {
           en.state = "chase";
           const dir = new THREE.Vector3().subVectors(this.playerPos, en.position).normalize();
-          // Assassins add a slight lateral strafe for flanking feel.
-          if (brain === "assassin") {
-            const side = Math.sin(elapsed * 1.7) >= 0 ? 1 : -1;
-            const sx = -dir.z * 0.4 * side;
-            const sz = dir.x * 0.4 * side;
-            dir.x += sx;
-            dir.z += sz;
-            dir.normalize();
-          }
-          en.position.x += dir.x * en.speed * delta;
-          en.position.z += dir.z * en.speed * delta;
+          const chaseMul = distToPlayer > en.attackRange * 2.5 ? 1.25 : 1;
+          en.position.x += dir.x * en.speed * chaseMul * delta;
+          en.position.z += dir.z * en.speed * chaseMul * delta;
           this.clampToArena(en.position);
           en.anim.isWalking = true;
         }
@@ -2637,135 +1586,6 @@ export class GameEngine {
     updateEnemyAnimation(en.model, en.anim, delta, elapsed);
   }
 
-  /** Load up to 2 Grudge6 allies from party selection. */
-  private async spawnPartyAllies() {
-    const ids = getPartyAllyIds().slice(0, MAX_PARTY_ALLIES);
-    if (!ids.length) {
-      this.log("No party allies selected — visit Party.");
-      return;
-    }
-    let slot = 0;
-    for (const id of ids) {
-      const def = getGrudge6Hero(id);
-      if (!def) continue;
-      try {
-        const inst = await this.grudge6Factory.create(def, 1.85);
-        if (this.disposed) {
-          inst.dispose();
-          return;
-        }
-        const agent = createAllyAgent(inst, slot);
-        agent.pos.set(
-          this.playerPos.x + (slot === 0 ? -2.2 : 2.2),
-          0,
-          this.playerPos.z + 1.8,
-        );
-        inst.group.position.copy(agent.pos);
-        this.scene.add(inst.group);
-        this.allies.push(agent);
-        this.log(`${def.displayName} joins the party (${def.brain}).`);
-        slot++;
-      } catch (e) {
-        console.warn("[party] failed to load ally", id, e);
-        this.log(`Could not summon ${def.displayName}.`);
-      }
-    }
-  }
-
-  private updateAllies(delta: number) {
-    if (!this.allies.length) return;
-    const now = performance.now() / 1000;
-    const enemies = this.enemies
-      .filter((e) => e.state !== "dead" && e.state !== "death")
-      .map((e) => ({
-        id: e.id,
-        pos: e.position.clone(),
-        hp: e.hp,
-        maxHp: e.maxHp,
-      }));
-    const harvest: Array<{ id: string; pos: THREE.Vector3; kind: "wood" | "stone" }> = [];
-    if (this.harvestField) {
-      for (const n of this.harvestField.nodes) {
-        if (n.hp <= 0) continue;
-        harvest.push({
-          id: n.id,
-          pos: new THREE.Vector3(n.position.x, 0, n.position.z),
-          kind: n.kind === "wood" ? "wood" : "stone",
-        });
-      }
-    }
-    const focusEnemy =
-      this.targetEnemy && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death"
-        ? this.targetEnemy
-        : this.attackHeld
-          ? this.nearestEnemy(14)
-          : null;
-
-    const world = {
-      playerPos: this.playerPos.clone(),
-      playerHp: this.playerHp,
-      playerMaxHp: this.playerMaxHp,
-      focusTarget: focusEnemy ? focusEnemy.position.clone() : null,
-      focusEnemyId: focusEnemy?.id ?? null,
-      enemies,
-      harvest,
-      dt: delta,
-      now,
-    };
-
-    for (const agent of this.allies) {
-      if (agent.hp <= 0) continue;
-      const brain = agent.instance.def.brain;
-      const action = thinkAlly(agent, brain, world, this.playerFacing);
-      const speed = 5.2 + (brain === "skirmish" || brain === "assassin" ? 0.8 : 0);
-      stepAllyMovement(agent, action, speed, delta, (p) => this.clampToArena(p));
-
-      // Apply action results
-      if (action.type === "attack" && action.enemyId) {
-        const en = this.enemies.find((e) => e.id === action.enemyId);
-        if (en && en.state !== "dead" && en.state !== "death") {
-          const dmg = Math.max(
-            1,
-            Math.floor(agent.instance.def.kit.damage * agent.instance.def.kit.skillMult * (0.85 + Math.random() * 0.3)),
-          );
-          this.damageEnemy(en, dmg, Math.random() < 0.12);
-        }
-      } else if (action.type === "heal") {
-        const amt = agent.instance.def.kit.healAmount;
-        if (action.healTarget === "player" || !action.healTarget) {
-          this.playerHp = Math.min(this.playerMaxHp, this.playerHp + amt);
-          this.log(`${agent.instance.def.displayName} heals you +${amt}`);
-          this.auras?.pulse("arcane", this.playerPos.clone(), 2.0, 0.45);
-        } else {
-          agent.hp = Math.min(agent.maxHp, agent.hp + amt);
-          this.log(`${agent.instance.def.displayName} mends wounds +${amt}`);
-        }
-      } else if (action.type === "harvest" && action.harvestId && this.harvestField) {
-        const node = this.harvestField.nodes.find((n) => n.id === action.harvestId);
-        if (node && node.hp > 0) {
-          node.hp -= 12 + agent.instance.def.kit.damage * 0.4;
-          if (node.hp <= 0) {
-            const amount = node.yieldMin + Math.floor(Math.random() * (node.yieldMax - node.yieldMin + 1));
-            const res = resourceForKind(node.kind);
-            addResource(res, amount);
-            hideHarvestNode(this.harvestField, node);
-            node.respawnAt = now + 50;
-            this.log(`${agent.instance.def.displayName} gathered ${amount} ${res}`);
-          }
-        }
-      }
-
-      // Sync mesh
-      agent.instance.group.position.x = agent.pos.x;
-      agent.instance.group.position.z = agent.pos.z;
-      let dy = agent.facing - agent.instance.group.rotation.y;
-      while (dy > Math.PI) dy -= Math.PI * 2;
-      while (dy < -Math.PI) dy += Math.PI * 2;
-      agent.instance.group.rotation.y += dy * 0.2;
-      agent.instance.animator?.update(delta);
-    }
-  }
-
   worldToScreen(worldPos: THREE.Vector3): { x: number; y: number } {
     if (!this.container) return { x: -9999, y: -9999 };
     const pos = worldPos.clone().project(this.camera);
@@ -2791,8 +1611,6 @@ export class GameEngine {
       return { id: d.id, value: d.value, x: sc.x, y: sc.y, age: d.age, isPlayer: d.isPlayer, isCrit: d.isCrit };
     });
 
-    const boss = this.enemies.find((e) => e.id === this.bossEnemyId && e.state !== "dead" && e.state !== "death");
-    const w = getWallet();
     this.onStateUpdate({
       playerHp: Math.round(this.playerHp),
       playerMaxHp: this.playerMaxHp,
@@ -2801,28 +1619,12 @@ export class GameEngine {
       playerLevel: this.playerLevel,
       playerXp: this.playerXp,
       playerAttackCooldown: Math.max(0, this.playerAttackCooldown / this.playerMaxAttackCooldown),
-      enemies: enemyUI.map((e) => ({ ...e, isBoss: e.id === this.bossEnemyId })),
+      enemies: enemyUI,
       damageNumbers: dmgUI,
       combatLog: [...this.combatLog],
-      zone: `Round ${this.islandRound} · Pirate Island · seed ${this.mapSeed.toString(16)}`,
+      zone: "Grudge Dungeon — Starter Island",
       loaded: this.loaded,
       mapReady: this.mapReady,
-      resources: getResources(),
-      gold: w.gold,
-      nearbyPirate: this.nearbyPirate,
-      nearbyHarvest: this.nearbyHarvestLabel,
-      mapSeed: this.mapSeed,
-      islandRound: this.islandRound,
-      difficultyMult: this.difficultyMult(),
-      bossAlive: !!boss,
-      bossName: boss?.template.name ?? null,
-      bossHp: boss?.hp ?? 0,
-      bossMaxHp: boss?.maxHp ?? 0,
-      pendingSkillIdx: this.pendingSkillIdx,
-      specialReadyPct: Math.min(1, 1 - Math.max(0, this.specialCdUntil - performance.now()) / Math.max(1, this.fighterKit.special.cooldown * 1000)),
-      blocking: this.blocking,
-      jumping: this.playerY > 0.05 || this.jumpVel > 0,
-      activePerks: getActivePerks().map((id) => PERK_BY_ID.get(id)?.name ?? id),
     });
   }
 
@@ -2861,26 +1663,11 @@ export class GameEngine {
     this.clearHover();
     this.fx?.dispose();
     this.fx = null;
-    this.playerAnimator?.dispose();
+    this.heroAnim?.dispose();
     this.skillVfx?.dispose();
     this.particles?.dispose();
     this.telegraphs?.dispose();
     this.deployables?.dispose();
-    this.slashField?.dispose();
-    this.slashField = null;
-    this.auras?.dispose();
-    this.auras = null;
-    for (const a of this.allies) {
-      this.scene.remove(a.instance.group);
-      a.instance.dispose();
-    }
-    this.allies = [];
-    if (this.skillCursor) {
-      this.scene.remove(this.skillCursor);
-      this.skillCursor.geometry.dispose();
-      this.skillCursorMat?.dispose();
-      this.skillCursor = null;
-    }
     // Dispose the procedural ground + rock field.
     if (this.groundMesh) {
       this.groundMesh.geometry.dispose();
@@ -2894,8 +1681,6 @@ export class GameEngine {
       (this.terrainMesh.material as THREE.Material).dispose();
     }
     this.camp?.dispose();
-    this.harvestField?.dispose();
-    this.harvestField = null;
     this.dungeonMap?.dispose();
     this.dungeonMap = null;
     for (const p of this.pirates) {

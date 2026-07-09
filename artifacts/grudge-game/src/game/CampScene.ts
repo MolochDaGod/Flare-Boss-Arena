@@ -14,23 +14,25 @@ import { TelegraphField } from "./combat/telegraphs";
 import { ParticleVfx } from "./combat/particles";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import type { ClassSkill } from "../data/classSkills";
-import {
-  CAMP_BOUNDS,
-  CAMP_DUMMY_SPOTS,
-  CAMP_FIGHTER_NPCS,
-  CAMP_KAYKIT_NPCS,
-  CAMP_PROP_LAYOUTS,
-  CAMP_STATION_BY_ID,
-  CAMP_STATION_LAYOUTS,
-  CAMP_STATION_PROXIMITY,
-  campStationMarkers,
-  type CampStationCategory,
-  type CampStationId,
-} from "../data/campTown";
+import { CAMP_PROP_PLACEMENTS } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
-import { FighterTownsperson } from "./FighterTownsperson";
+import { canDodge } from "./combatInput";
 
-export type { CampStationId };
+export type CampStationId =
+  | "anvil"
+  | "skills"
+  | "stats"
+  | "quests"
+  | "stash"
+  | "portal_dungeon"
+  | "portal_boss"
+  | "perk_machines"
+  | "gumball"
+  | "perk_firebug"
+  | "perk_medic"
+  | "perk_support"
+  | "perk_gunslinger"
+  | "weapon_panel";
 
 export interface CampStation {
   id: CampStationId;
@@ -63,27 +65,12 @@ export interface CampDamageNumber {
   age: number;
 }
 
-export interface CampMapMarker {
-  id: CampStationId;
-  nx: number;
-  nz: number;
-  color: number;
-  category: CampStationCategory;
-}
-
 export interface CampStateUpdate {
   nearbyStationId: CampStationId | null;
   nearbyStationLabel: string | null;
   nearbyStationHint: string | null;
-  nearbyStationCategory: CampStationCategory | null;
-  nearbyStationAction: string | null;
-  nearbyStationDistrict: string | null;
   promptKey: string;
   loaded: boolean;
-  /** Player position on the town map (-1..1). */
-  playerMapX: number;
-  playerMapZ: number;
-  mapMarkers: CampMapMarker[];
   // ── Combat / testing-ground state ──
   playerHp: number;
   playerMaxHp: number;
@@ -149,20 +136,20 @@ export class CampScene {
 
   private playerGroup: THREE.Group | null = null;
   private heroAnim: HeroLike | null = null;
-  private playerPos = new THREE.Vector3(0, 0, 14);
+  private playerPos = new THREE.Vector3(0, 0, 6);
   private _rmTmp = new THREE.Vector3();
   private playerTarget: THREE.Vector3 | null = null;
   private playerFacing = 0;
-  private playerSpeed = 10.5;
+  private playerSpeed = 6;
+  private lastDodgeAt = 0;
 
   private stations: CampStation[] = [];
   private campfireLight!: THREE.PointLight;
   private campfireMesh!: THREE.Mesh;
   private embers: { mesh: THREE.Mesh; vel: THREE.Vector3; life: number; max: number }[] = [];
 
-  // ── Ambient townsfolk (KayKit + real fighter skins, non-targetable) ──
+  // ── Ambient townsfolk (KayKit heroes, non-targetable) ──
   private townsfolk: Townsperson[] = [];
-  private fighterFolk: FighterTownsperson[] = [];
 
   // ── Perk machines, collectable symbols, environment props ──
   private worldProps: LoadedWorldProp[] = [];
@@ -193,13 +180,12 @@ export class CampScene {
   private currentNearbyId: CampStationId | null = null;
   private loaded = false;
   private disposed = false;
-  private resizeObserver: ResizeObserver | null = null;
   private stateAccum = 0;
   private readonly stateInterval = 1 / 30; // throttle HUD updates to ~30 Hz
 
-  private readonly STATION_PROXIMITY = CAMP_STATION_PROXIMITY;
-  private readonly BOUNDS = CAMP_BOUNDS;
-  private readonly mapMarkers = campStationMarkers();
+  private readonly STATION_RADIUS = 6.2; // engage marker (doorway) distance from centre
+  private readonly BUILDING_RADIUS = 9.2; // building distance from centre
+  private readonly BOUNDS = 18;
 
   private options: CampSceneOptions;
   private _engaged = false;
@@ -215,24 +201,16 @@ export class CampScene {
     this.critChance = options.critChance ?? 0.12;
   }
 
-  private getContainerSize(): { w: number; h: number } {
-    if (!this.container) {
-      return { w: window.innerWidth, h: window.innerHeight };
-    }
-    const w = this.container.clientWidth || window.innerWidth;
-    const h = this.container.clientHeight || window.innerHeight;
-    return { w, h };
-  }
-
   init(container: HTMLElement) {
     this.container = container;
-    const { w, h } = this.getContainerSize();
-    const aspect = w / Math.max(h, 1);
-    const d = 14;
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    const aspect = w / h;
+    const d = 11;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x05050a);
-    this.scene.fog = new THREE.FogExp2(0x06060c, 0.0045);
+    this.scene.fog = new THREE.FogExp2(0x06060c, 0.025);
     this.skillVfx = new SkillVfx(this.scene, new GLTFLoader());
     this.telegraphs = new TelegraphField(this.scene);
     this.particles = new ParticleVfx(this.scene);
@@ -266,9 +244,6 @@ export class CampScene {
     window.addEventListener("keyup", this._keyUp);
     container.addEventListener("click", this._click);
 
-    this.resizeObserver = new ResizeObserver(() => this.applyResize());
-    this.resizeObserver.observe(container);
-
     this.animFrameId = requestAnimationFrame(this.animate);
   }
 
@@ -279,8 +254,8 @@ export class CampScene {
     moonDir.position.set(-15, 20, -10);
     this.scene.add(moonDir);
 
-    // Town ground — wide cobble plaza + outer wilds
-    const floorGeom = new THREE.CircleGeometry(this.BOUNDS, 96);
+    // Stone floor — large dark hex-like tile
+    const floorGeom = new THREE.CircleGeometry(this.BOUNDS, 64);
     const floorMat = new THREE.MeshStandardMaterial({
       color: 0x1a1410,
       roughness: 0.95,
@@ -291,51 +266,27 @@ export class CampScene {
     floor.receiveShadow = true;
     this.scene.add(floor);
 
-    const innerPlaza = new THREE.Mesh(
-      new THREE.CircleGeometry(22, 48),
-      new THREE.MeshStandardMaterial({ color: 0x252018, roughness: 0.88, metalness: 0.04 }),
-    );
-    innerPlaza.rotation.x = -Math.PI / 2;
-    innerPlaza.position.y = 0.02;
-    innerPlaza.receiveShadow = true;
-    this.scene.add(innerPlaza);
-
-    // Cobble rings + radial roads
-    const stoneGeom = new THREE.BoxGeometry(0.65, 0.18, 0.65);
+    // Inner ring stones (cobble path) — instanced
+    const stoneGeom = new THREE.BoxGeometry(0.6, 0.18, 0.6);
     const stoneMat = new THREE.MeshStandardMaterial({ color: 0x2b2520, roughness: 0.85 });
-    const ringRadii = [16, 34, 52, 72];
-    let stoneIdx = 0;
-    const totalStones = ringRadii.reduce((n, r) => n + Math.max(24, Math.floor(r * 1.1)), 0);
-    const ringInstanced = new THREE.InstancedMesh(stoneGeom, stoneMat, totalStones);
+    const ringCount = 64;
+    const ringInstanced = new THREE.InstancedMesh(stoneGeom, stoneMat, ringCount);
     const m = new THREE.Matrix4();
-    for (const r of ringRadii) {
-      const count = Math.max(24, Math.floor(r * 1.1));
-      for (let i = 0; i < count; i++) {
-        const a = (i / count) * Math.PI * 2;
-        const x = Math.cos(a) * (r + (Math.random() - 0.5) * 0.6);
-        const z = Math.sin(a) * (r + (Math.random() - 0.5) * 0.6);
-        const yRot = Math.random() * Math.PI;
-        m.compose(
-          new THREE.Vector3(x, 0.09, z),
-          new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yRot, 0)),
-          new THREE.Vector3(1, 0.55 + Math.random() * 0.45, 1),
-        );
-        ringInstanced.setMatrixAt(stoneIdx++, m);
-      }
+    for (let i = 0; i < ringCount; i++) {
+      const a = (i / ringCount) * Math.PI * 2;
+      const r = 3.2 + Math.random() * 0.4;
+      const x = Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+      const yRot = Math.random() * Math.PI;
+      m.compose(
+        new THREE.Vector3(x, 0.09, z),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yRot, 0)),
+        new THREE.Vector3(1, 0.6 + Math.random() * 0.4, 1),
+      );
+      ringInstanced.setMatrixAt(i, m);
     }
-    ringInstanced.count = stoneIdx;
     ringInstanced.receiveShadow = true;
     this.scene.add(ringInstanced);
-
-    const roadMat = new THREE.MeshStandardMaterial({ color: 0x3a3028, roughness: 0.92 });
-    for (let a = 0; a < 8; a++) {
-      const ang = (a / 8) * Math.PI * 2;
-      const road = new THREE.Mesh(new THREE.BoxGeometry(6, 0.08, this.BOUNDS * 1.35), roadMat);
-      road.position.y = 0.04;
-      road.rotation.y = ang;
-      road.receiveShadow = true;
-      this.scene.add(road);
-    }
 
     // Outer perimeter rocks
     const rockGeom = new THREE.DodecahedronGeometry(0.7, 0);
@@ -404,9 +355,12 @@ export class CampScene {
 
   // ── Training dummies ──────────────────────────────────────────────────────
   private buildDummies() {
-    CAMP_DUMMY_SPOTS.forEach((s, i) =>
-      this.dummies.push(this.makeDummy(`dummy_${i}`, s.name, s.x, s.z)),
-    );
+    const spots: { x: number; z: number; name: string }[] = [
+      { x: -3.2, z: 3.4, name: "Training Dummy" },
+      { x: 0, z: 4.2, name: "Straw Knight" },
+      { x: 3.2, z: 3.4, name: "Practice Post" },
+    ];
+    spots.forEach((s, i) => this.dummies.push(this.makeDummy(`dummy_${i}`, s.name, s.x, s.z)));
   }
 
   // ── Ambient townsfolk ─────────────────────────────────────────────────────
@@ -414,22 +368,19 @@ export class CampScene {
    *  wander. They carry no `enemyId`, so they can never be targeted or hit. */
   private buildTownsfolk() {
     const loader = new GLTFLoader();
-    for (const npc of CAMP_FIGHTER_NPCS) {
-      const t = new FighterTownsperson(loader, {
-        skinId: npc.skinId,
-        home: new THREE.Vector3(npc.x, 0, npc.z),
-        wanderRadius: npc.wanderRadius ?? 5,
-        faceY: npc.faceY,
-      });
-      this.scene.add(t.group);
-      this.fighterFolk.push(t);
-    }
-    for (const a of CAMP_KAYKIT_NPCS) {
+    const anchors: { x: number; z: number; model?: string }[] = [
+      { x: -7.5, z: -2.0, model: "Knight" },
+      { x: 6.8, z: -3.5, model: "Mage" },
+      { x: -5.0, z: 6.5, model: "Ranger" },
+      { x: 5.5, z: 6.0, model: "Rogue" },
+      { x: 8.0, z: 2.0, model: "Barbarian" },
+    ];
+    for (const a of anchors) {
       const t = new Townsperson(loader, {
         home: new THREE.Vector3(a.x, 0, a.z),
         model: a.model,
-        height: 1.85,
-        wanderRadius: 4,
+        height: 1.8,
+        wanderRadius: 2.6,
       });
       this.scene.add(t.group);
       this.townsfolk.push(t);
@@ -506,75 +457,58 @@ export class CampScene {
     };
   }
 
-  private addStation(
-    x: number,
-    z: number,
-    def: {
-      id: CampStationId;
-      label: string;
-      hint: string;
-      color: number;
-      isBossSigil?: boolean;
-    },
-  ): CampStation {
-    const { id, label, hint, color, isBossSigil } = def;
+  private addStation(def: {
+    id: CampStationId;
+    label: string;
+    hint: string;
+    angleDeg: number;
+    color: number;
+  }): CampStation {
+    const { id, label, hint, angleDeg, color } = def;
+    const a = (angleDeg * Math.PI) / 180;
+    // The engage marker sits at the building's doorway (toward camp centre).
+    const x = Math.cos(a) * this.STATION_RADIUS;
+    const z = Math.sin(a) * this.STATION_RADIUS;
+
     const group = new THREE.Group();
     group.position.set(x, 0, z);
 
+    // Glowing ground pad (pulses) marking where to stand.
     const ringMat = new THREE.MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: isBossSigil ? 0.65 : 0.5,
+      opacity: 0.5,
       side: THREE.DoubleSide,
     });
-    const innerR = isBossSigil ? 1.4 : 0.85;
-    const outerR = isBossSigil ? 2.2 : 1.25;
-    const ring = new THREE.Mesh(new THREE.RingGeometry(innerR, outerR, 48), ringMat);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.85, 1.25, 32), ringMat);
     ring.rotation.x = -Math.PI / 2;
     ring.position.y = 0.06;
     group.add(ring);
     (group.userData as { ring: THREE.Mesh }).ring = ring;
 
+    // Floating interaction glyph hovering over the pad.
     const glyphMat = new THREE.MeshStandardMaterial({
       color,
       emissive: color,
-      emissiveIntensity: isBossSigil ? 1.2 : 0.9,
+      emissiveIntensity: 0.9,
       roughness: 0.35,
       metalness: 0.6,
     });
-    if (isBossSigil) {
-      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.55, 4.2, 8), glyphMat);
-      pillar.position.y = 2.1;
-      pillar.castShadow = true;
-      group.add(pillar);
-      const skull = new THREE.Mesh(new THREE.SphereGeometry(0.55, 16, 12), glyphMat);
-      skull.position.y = 4.6;
-      skull.scale.set(1.1, 1, 1.1);
-      group.add(skull);
-      const orbit = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.08, 8, 32), glyphMat);
-      orbit.rotation.x = Math.PI / 2;
-      orbit.position.y = 3.2;
-      group.add(orbit);
-      (group.userData as { orbit?: THREE.Mesh }).orbit = orbit;
-      const beam = new THREE.PointLight(color, 3.5, 28, 1.6);
-      beam.position.y = 5;
-      group.add(beam);
-    } else {
-      const glyph = new THREE.Mesh(new THREE.OctahedronGeometry(0.38, 0), glyphMat);
-      glyph.position.y = 1.6;
-      glyph.castShadow = true;
-      group.add(glyph);
-    }
+    const glyph = new THREE.Mesh(new THREE.OctahedronGeometry(0.32, 0), glyphMat);
+    glyph.position.y = 1.5;
+    glyph.castShadow = true;
+    group.add(glyph);
 
+    // Floating label sprite above the doorway.
     const labelTex = this.makeLabelTexture(label.toUpperCase());
     const labelMat = new THREE.SpriteMaterial({ map: labelTex, transparent: true, depthTest: false });
     const labelSprite = new THREE.Sprite(labelMat);
-    labelSprite.position.y = isBossSigil ? 6.2 : 3.2;
-    labelSprite.scale.set(isBossSigil ? 4.2 : 3, isBossSigil ? 1 : 0.75, 1);
+    labelSprite.position.y = 3.0;
+    labelSprite.scale.set(2.8, 0.7, 1);
     group.add(labelSprite);
 
-    const glow = new THREE.PointLight(color, isBossSigil ? 2.4 : 1.6, isBossSigil ? 22 : 14, 2);
-    glow.position.y = isBossSigil ? 3.5 : 1.8;
+    const glow = new THREE.PointLight(color, 1.6, 9, 2);
+    glow.position.y = 1.8;
     group.add(glow);
 
     this.scene.add(group);
@@ -592,21 +526,35 @@ export class CampScene {
     return station;
   }
 
+  /**
+   * Each camp interaction is hosted by a different building of the fishing town.
+   * `building` is the GLB node name extracted by {@link loadTown}; angles fan the
+   * houses around the camp centre.
+   */
+  private readonly STATION_DEFS: {
+    id: CampStationId;
+    label: string;
+    hint: string;
+    angleDeg: number;
+    color: number;
+    building: string;
+  }[] = [
+    { id: "stash", label: "Stash", hint: "Manage and equip your gear.", angleDeg: -90, color: 0x66ddaa, building: "bank_9" },
+    { id: "skills", label: "Skill Obelisk", hint: "Allocate skill points across your trees.", angleDeg: -38.6, color: 0x44aaff, building: "guild_51" },
+    { id: "stats", label: "Soul Altar", hint: "Distribute attribute points.", angleDeg: 12.9, color: 0xaa44ff, building: "guild.001_49" },
+    { id: "quests", label: "War Board", hint: "Review boss intel and active hunts.", angleDeg: 64.3, color: 0xffcc33, building: "bar_25" },
+    { id: "anvil", label: "Forge", hint: "Craft & repair weapons and armor.", angleDeg: 115.7, color: 0xff7733, building: "house_59" },
+    { id: "portal_dungeon", label: "Dungeon Gate", hint: "Enter the infinite dungeon.", angleDeg: 167.1, color: 0xff4422, building: "house.001_67" },
+    { id: "portal_boss", label: "Boss Sigil", hint: "Challenge a generated boss.", angleDeg: 218.6, color: 0xff22aa, building: "house.002_75" },
+  ];
+
   private buildStations() {
-    for (const layout of CAMP_STATION_LAYOUTS) {
-      this.addStation(layout.x, layout.z, {
-        id: layout.id,
-        label: layout.label,
-        hint: layout.hint,
-        color: layout.color,
-        isBossSigil: layout.category === "boss",
-      });
-    }
+    for (const def of this.STATION_DEFS) this.addStation(def);
   }
 
   /** Perk machines, gumball, weapon panel, trenches — from `worldProps` catalog. */
   private buildWorldProps() {
-    for (const place of CAMP_PROP_LAYOUTS) {
+    for (const place of CAMP_PROP_PLACEMENTS) {
       const loaded = loadWorldProp(place.propId, this.propLoader, {
         position: new THREE.Vector3(place.x, 0, place.z),
         rotationY: place.rotY,
@@ -703,7 +651,7 @@ export class CampScene {
           return;
         }
         gltf.scene.updateWorldMatrix(true, true);
-        for (const def of CAMP_STATION_LAYOUTS) {
+        for (const def of this.STATION_DEFS) {
           const src = this.findBuilding(gltf.scene, def.building);
           if (!src) {
             if (import.meta.env.DEV) {
@@ -711,9 +659,10 @@ export class CampScene {
             }
             continue;
           }
-          const faceX = -def.x * 0.12;
-          const faceZ = -def.z * 0.12;
-          this.scene.add(this.placeBuilding(src, def.x + faceX, def.z + faceZ));
+          const a = (def.angleDeg * Math.PI) / 180;
+          const x = Math.cos(a) * this.BUILDING_RADIUS;
+          const z = Math.sin(a) * this.BUILDING_RADIUS;
+          this.scene.add(this.placeBuilding(src, x, z));
         }
       },
       undefined,
@@ -803,23 +752,15 @@ export class CampScene {
 
   private loadPlayer() {
     const loader = new GLTFLoader();
-    let settled = false;
-    const timer = window.setTimeout(() => {
-      if (settled || this.disposed) return;
-      settled = true;
-      this.loadFallbackPlayer();
-    }, 12_000);
     // Prefer the globally-selected fighter skin; fall back to the KayKit hero.
     loadActiveFighterModel(
       loader,
       2.6,
       (root, anim) => {
-        window.clearTimeout(timer);
-        if (this.disposed || settled) {
+        if (this.disposed) {
           disposeObject3D(root);
           return;
         }
-        settled = true;
         root.position.copy(this.playerPos);
         this.scene.add(root);
         this.playerGroup = root;
@@ -827,12 +768,7 @@ export class CampScene {
         this.loaded = true;
         this.emitState();
       },
-      () => {
-        window.clearTimeout(timer);
-        if (settled || this.disposed) return;
-        settled = true;
-        this.loadFallbackPlayer();
-      },
+      () => this.loadFallbackPlayer(),
     );
   }
 
@@ -857,13 +793,17 @@ export class CampScene {
 
   private _keyDown = (e: KeyboardEvent) => {
     this.keys.add(e.code);
+    if (e.repeat) return;
     if (e.code === "KeyE") this.tryEngage();
     if (e.code === "KeyF") this.attackNearest();
     if (e.code === "Space") {
       e.preventDefault();
       this.doJump();
     }
-    if (e.code === "KeyQ" || e.code === "ShiftLeft") this.doDodge();
+    if (e.code === "KeyQ" || e.code === "ShiftLeft" || e.code === "ShiftRight") {
+      e.preventDefault();
+      this.doDodge();
+    }
     if (e.code.startsWith("Digit")) {
       const n = Number(e.code.slice(5));
       if (n >= 1 && n <= 5) this.useSkill(n - 1);
@@ -952,6 +892,9 @@ export class CampScene {
 
   /** Dodge roll — quick dash in the facing direction + animation. */
   doDodge() {
+    const now = performance.now();
+    if (!canDodge(this.lastDodgeAt, now)) return;
+    this.lastDodgeAt = now;
     this.playerTarget = null;
     // Dodge clips carry their own forward lunge via root motion; only dash
     // manually when the active model has no dodge clip (e.g. fighter skins).
@@ -983,8 +926,14 @@ export class CampScene {
     // Resolve the skill's archetype shape (idx fallback gives a broad mix).
     const arch = archetypeForSkill(this.hudSkills[idx], idx);
     const isCast = arch.shape === "circle" || arch.shape === "nova" || arch.shape === "deployable";
+    if (this.heroAnim) {
+      const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
+      if (!played) this.proceduralLunge();
+    } else {
+      this.proceduralLunge();
+    }
 
-    // Auto-aim first so committed travel faces the target.
+    // Auto-aim the nearest living dummy so shaped skills read as aimed.
     let nearest: CampDummy | null = null;
     let nearestDist = Infinity;
     for (const d of this.dummies) {
@@ -993,15 +942,6 @@ export class CampScene {
       if (dist < nearestDist) { nearestDist = dist; nearest = d; }
     }
     if (nearest) this.playerFacing = Math.atan2(nearest.pos.x - this.playerPos.x, nearest.pos.z - this.playerPos.z);
-
-    if (this.heroAnim) {
-      const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
-      if (!played) this.commitSkillTravel(isCast ? 0.4 : 1.6);
-      else if (!this.heroAnim.isRootMotionActive()) this.commitSkillTravel(isCast ? 0.35 : 1.4);
-    } else {
-      this.commitSkillTravel(isCast ? 0.4 : 1.6);
-    }
-
     const dir = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
     const origin = this.playerPos.clone();
 
@@ -1048,33 +988,23 @@ export class CampScene {
     this.emitState();
   }
 
-  /** Permanent skill travel — end where the skill ends, never ease back. */
-  private commitSkillTravel(distance: number) {
-    const B = this.BOUNDS - 1;
-    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    const start = this.playerPos.clone();
-    const end = start.clone().add(forward.multiplyScalar(Math.max(0.15, distance)));
-    end.x = Math.max(-B, Math.min(B, end.x));
-    end.z = Math.max(-B, Math.min(B, end.z));
-    this.playerPos.copy(end);
+  private proceduralLunge() {
     if (!this.playerGroup) return;
     const g = this.playerGroup;
-    g.position.copy(start);
+    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    const start = g.position.clone();
+    const peak = start.clone().add(forward.multiplyScalar(0.5));
     let t = 0;
-    const dur = 0.28;
+    const dur = 0.22;
     const step = () => {
-      if (this.disposed || !this.playerGroup) return;
+      if (this.disposed) return;
       t += 0.016;
       const p = Math.min(1, t / dur);
-      const e = 1 - (1 - p) * (1 - p);
-      g.position.lerpVectors(start, this.playerPos, e);
+      const e = p < 0.5 ? p * 2 : (1 - p) * 2;
+      g.position.lerpVectors(start, peak, e);
       if (p < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
-  }
-
-  private proceduralLunge() {
-    this.commitSkillTravel(1.1);
   }
 
   private damageDummy(d: CampDummy, dmg: number, isCrit: boolean, isPlayer: boolean) {
@@ -1201,6 +1131,20 @@ export class CampScene {
       }
     }
 
+    // Root motion: let lunging/dodge/jump clips carry the logical position so
+    // the mesh moves WITH the character instead of sliding and snapping back.
+    if (this.heroAnim && this.heroAnim.consumeRootMotion(this._rmTmp)) {
+      const B = this.BOUNDS - 1;
+      this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + this._rmTmp.x));
+      this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + this._rmTmp.z));
+    }
+
+    if (this.playerGroup) {
+      const targetPos = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z);
+      this.playerGroup.position.lerp(targetPos, 0.3);
+      this.playerGroup.rotation.y += (this.playerFacing - this.playerGroup.rotation.y) * 0.2;
+    }
+
     // Basic-attack loop against the current target when in range.
     this.attackCdT = Math.max(0, this.attackCdT - delta);
     if (!moving && this.attackTarget && this.attackTarget.alive) {
@@ -1209,7 +1153,7 @@ export class CampScene {
         this.attackCdT = this.attackInterval;
         if (this.heroAnim) {
           const played = this.heroAnim.trigger("attack");
-          if (!played || !this.heroAnim.isRootMotionActive()) this.proceduralLunge();
+          if (!played) this.proceduralLunge();
         } else {
           this.proceduralLunge();
         }
@@ -1223,22 +1167,10 @@ export class CampScene {
     this.playerMana = Math.min(this.playerMaxMana, this.playerMana + 14 * delta);
     this.playerHp = Math.min(this.playerMaxHp, this.playerHp + 6 * delta);
 
-    // Mixer → sample root travel → apply world position (no snap-back).
+    // Animator state.
     if (this.heroAnim) {
       this.heroAnim.setMoving(moving);
       this.heroAnim.update(delta);
-      if (this.heroAnim.consumeRootMotion(this._rmTmp)) {
-        const B = this.BOUNDS - 1;
-        this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + this._rmTmp.x));
-        this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + this._rmTmp.z));
-      }
-    }
-
-    if (this.playerGroup) {
-      const targetPos = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z);
-      const blend = this.heroAnim?.isRootMotionActive() ? 0.9 : 0.4;
-      this.playerGroup.position.lerp(targetPos, blend);
-      this.playerGroup.rotation.y += (this.playerFacing - this.playerGroup.rotation.y) * 0.2;
     }
 
     this.skillVfx.update(delta);
@@ -1246,7 +1178,6 @@ export class CampScene {
     this.particles?.update(delta);
 
     for (const t of this.townsfolk) t.update(delta);
-    for (const f of this.fighterFolk) f.update(delta);
 
     // Dummies: hit-flash decay, death tip-over + respawn.
     for (const d of this.dummies) {
@@ -1297,13 +1228,11 @@ export class CampScene {
       if (dn.age > 1.4) this.damageNumbers.splice(i, 1);
     }
 
-    // Camera follow — wider offset for the 5× harbor
-    const camOffset = new THREE.Vector3(24, 24, 24);
-    const look = new THREE.Vector3(this.playerPos.x * 0.35, 0, this.playerPos.z * 0.35);
-    const camTarget = look.clone().add(camOffset);
-    const camLerp = this.keys.size > 0 ? 0.07 : 0.045;
-    this.camera.position.lerp(camTarget, camLerp);
-    this.camera.lookAt(look);
+    // Camera follow (gentle)
+    const camOffset = new THREE.Vector3(18, 18, 18);
+    const camTarget = new THREE.Vector3(this.playerPos.x * 0.4, 0, this.playerPos.z * 0.4).add(camOffset);
+    this.camera.position.lerp(camTarget, 0.04);
+    this.camera.lookAt(this.playerPos.x * 0.4, 0, this.playerPos.z * 0.4);
 
     // World prop animation mixers + floating perk symbols.
     for (const wp of this.worldProps) {
@@ -1365,10 +1294,7 @@ export class CampScene {
       const pulse = 0.45 + 0.2 * Math.sin(elapsed * 2.5 + st.position.x * 0.3);
       if (ring) (ring.material as THREE.MeshBasicMaterial).opacity = pulse;
       st.glow.intensity = 1.0 + 0.5 * Math.sin(elapsed * 3 + st.position.z * 0.2);
-      const orbit = (st.group.userData as { orbit?: THREE.Mesh }).orbit;
-      if (orbit) orbit.rotation.z += delta * 0.45;
-
-      if (d < this.STATION_PROXIMITY && (!closest || d < closest.d)) closest = { st, d };
+      if (d < 3.4 && (!closest || d < closest.d)) closest = { st, d };
     }
 
     const newNearbyId = closest?.st.id ?? null;
@@ -1396,30 +1322,13 @@ export class CampScene {
   private emitState() {
     if (this.disposed || !this.options.onStateUpdate) return;
     const st = this.stations.find((s) => s.id === this.currentNearbyId) ?? null;
-    const layout = this.currentNearbyId ? CAMP_STATION_BY_ID.get(this.currentNearbyId) : undefined;
-    const propLayout = !layout && this.currentNearbyId
-      ? CAMP_PROP_LAYOUTS.find((p) => p.stationId === this.currentNearbyId)
-      : undefined;
     const now = performance.now();
-    const b = this.BOUNDS;
     this.options.onStateUpdate({
       nearbyStationId: this.currentNearbyId,
-      nearbyStationLabel: st?.label ?? propLayout?.label ?? null,
-      nearbyStationHint: st?.hint ?? propLayout?.hint ?? null,
-      nearbyStationCategory: layout?.category ?? (propLayout ? "perk" : null),
-      nearbyStationAction: layout?.action ?? (propLayout ? "Interact" : null),
-      nearbyStationDistrict: layout?.district ?? (propLayout ? "Perk Alley" : null),
+      nearbyStationLabel: st?.label ?? null,
+      nearbyStationHint: st?.hint ?? null,
       promptKey: "E",
       loaded: this.loaded,
-      playerMapX: this.playerPos.x / b,
-      playerMapZ: this.playerPos.z / b,
-      mapMarkers: this.mapMarkers.map((mk) => ({
-        id: mk.id,
-        nx: mk.x / b,
-        nz: mk.z / b,
-        color: mk.color,
-        category: mk.category,
-      })),
       playerHp: this.playerHp,
       playerMaxHp: this.playerMaxHp,
       playerMana: this.playerMana,
@@ -1448,12 +1357,12 @@ export class CampScene {
     });
   }
 
-  private applyResize() {
-    if (!this.container || !this.renderer || !this.camera) return;
-    const { w, h } = this.getContainerSize();
-    if (w <= 0 || h <= 0) return;
+  private onResize = () => {
+    if (!this.container) return;
+    const w = this.container.clientWidth;
+    const h = this.container.clientHeight;
     const aspect = w / h;
-    const d = 14;
+    const d = 11;
     this.camera.left = -d * aspect;
     this.camera.right = d * aspect;
     this.camera.top = d;
@@ -1462,16 +1371,10 @@ export class CampScene {
     this.renderer.setSize(w, h);
     this.bloom?.composer.setSize(w, h);
     this.bloom?.bloomPass.resolution.set(w, h);
-  }
-
-  private onResize = () => {
-    this.applyResize();
   };
 
   dispose() {
     this.disposed = true;
-    this.resizeObserver?.disconnect();
-    this.resizeObserver = null;
     cancelAnimationFrame(this.animFrameId);
     window.removeEventListener("resize", this.onResize);
     window.removeEventListener("keydown", this._keyDown);
@@ -1494,11 +1397,6 @@ export class CampScene {
       t.dispose();
     }
     this.townsfolk = [];
-    for (const f of this.fighterFolk) {
-      this.scene.remove(f.group);
-      f.dispose();
-    }
-    this.fighterFolk = [];
     for (const wp of this.worldProps) {
       this.scene.remove(wp.holder);
       disposeWorldProp(wp);

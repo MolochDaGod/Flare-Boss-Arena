@@ -125,16 +125,18 @@ export type HeroState = "idle" | "walk" | "run" | "attack" | "cast" | "hit" | "j
  * KayKit `HeroAnimator` and by `SkinHeroAdapter` (One Piece fighter skins), so a
  * scene can drive either interchangeably and stay model-agnostic.
  */
+const HERO_BASE = `${import.meta.env.BASE_URL}models/kaykit/heroes`;
+
 export interface HeroLike {
   setMoving(moving: boolean): void;
+  /** Hold sprint intent (run clip when moving). No-op when no run clip exists. */
+  setSprinting?(sprinting: boolean): void;
   trigger(state: HeroState): boolean;
   /** Play the first matching clip (by substring) as a one-shot skill animation. */
   triggerNamed(candidates: string[]): boolean;
   update(delta: number): void;
   /** World-space horizontal displacement banked from root motion this frame. */
   consumeRootMotion(out: THREE.Vector3): boolean;
-  /** True while a one-shot (attack/skill/dodge) is playing and root motion is armed. */
-  isRootMotionActive(): boolean;
   addLibraryClips(clips: THREE.AnimationClip[]): void;
   dispose(): void;
 }
@@ -190,6 +192,7 @@ export class HeroAnimator implements HeroLike {
   private current: HeroState = "idle";
   private oneShot: THREE.AnimationAction | null = null;
   private wantMoving = false;
+  private wantSprint = false;
   private onFinished: (e: { action: THREE.AnimationAction }) => void;
   /** Extracts in-clip root translation so the world position follows the anim. */
   private rm: RootMotion;
@@ -259,7 +262,21 @@ export class HeroAnimator implements HeroLike {
   }
 
   private locomotion(): HeroState {
+    if (this.wantSprint && this.actions.run) return "run";
     return this.actions.walk ? "walk" : this.actions.run ? "run" : "idle";
+  }
+
+  setSprinting(sprinting: boolean) {
+    this.wantSprint = sprinting;
+    if (this.oneShot || !this.wantMoving) return;
+    const next = this.locomotion();
+    if (next === this.current) return;
+    const prev = this.actions[this.current];
+    const nextA = this.actions[next];
+    if (!nextA) return;
+    prev?.fadeOut(0.12);
+    nextA.reset().fadeIn(0.12).play();
+    this.current = next;
   }
 
   setMoving(moving: boolean) {
@@ -275,10 +292,11 @@ export class HeroAnimator implements HeroLike {
     this.current = next;
   }
 
-  /** Play a one-shot state. Returns false if no clip resolves. */
+  /** Play a one-shot state. Returns false if no clip resolves or one is active. */
   trigger(state: HeroState): boolean {
     const a = this.actions[state];
-    if (!a || this.oneShot) return !!a;
+    if (!a) return false;
+    if (this.oneShot) return false;
     this.oneShot = a;
     a.reset();
     a.setLoop(THREE.LoopOnce, 1);
@@ -323,10 +341,6 @@ export class HeroAnimator implements HeroLike {
     return this.rm.consume(out);
   }
 
-  isRootMotionActive(): boolean {
-    return this.rm.isActive;
-  }
-
   dispose() {
     this.mixer.removeEventListener(
       "finished",
@@ -343,12 +357,15 @@ export class HeroAnimator implements HeroLike {
  * they drive a KayKit hero. Action states without a dedicated skin clip
  * (jump/dodge/hit) return false so the caller falls back to its procedural lunge.
  */
-export class SkinHeroAdapter implements HeroLike {
+/** Wraps a race-model `PlayerAnimator` (authored Biped clips) as `HeroLike`. */
+export class PlayerHeroAdapter implements HeroLike {
   constructor(private readonly inner: PlayerAnimator) {}
 
   setMoving(moving: boolean) {
     this.inner.setMoving(moving);
   }
+
+  setSprinting() {}
 
   trigger(state: HeroState): boolean {
     if (state === "attack" || state === "cast") {
@@ -356,11 +373,11 @@ export class SkinHeroAdapter implements HeroLike {
       this.inner.triggerAttack();
       return true;
     }
-    // Bounty-rush skins ship labelled dodge / jump / damage clips — play them
-    // instead of silently returning false (which forced a procedural lunge only).
-    if (state === "dodge") return this.inner.triggerRole("dodge");
-    if (state === "jump") return this.inner.triggerRole("jump");
-    if (state === "hit") return this.inner.triggerRole("hit");
+    if (state === "dodge" || state === "jump" || state === "hit") {
+      return this.inner.triggerNamed(
+        state === "dodge" ? ["dodge", "roll", "evade"] : state === "jump" ? ["jump", "leap"] : ["hit", "damage"],
+      );
+    }
     return false;
   }
 
@@ -376,8 +393,44 @@ export class SkinHeroAdapter implements HeroLike {
     return this.inner.consumeRootMotion(out);
   }
 
-  isRootMotionActive(): boolean {
-    return this.inner.isRootMotionActive();
+  addLibraryClips(_clips: THREE.AnimationClip[]) {}
+
+  dispose() {
+    this.inner.dispose();
+  }
+}
+
+export class SkinHeroAdapter implements HeroLike {
+  constructor(private readonly inner: PlayerAnimator) {}
+
+  setMoving(moving: boolean) {
+    this.inner.setMoving(moving);
+  }
+
+  setSprinting() {}
+
+  trigger(state: HeroState): boolean {
+    if (state === "attack" || state === "cast") {
+      if (!this.inner.canAttack) return false;
+      this.inner.triggerAttack();
+      return true;
+    }
+    if (state === "dodge") return this.inner.triggerNamed(["dodge", "roll", "evade"]);
+    if (state === "jump") return this.inner.triggerNamed(["jump", "leap", "jump_full"]);
+    if (state === "hit") return this.inner.triggerNamed(["hit", "damage", "hit_a"]);
+    return false;
+  }
+
+  triggerNamed(candidates: string[]): boolean {
+    return this.inner.triggerNamed(candidates);
+  }
+
+  update(delta: number) {
+    this.inner.update(delta);
+  }
+
+  consumeRootMotion(out: THREE.Vector3): boolean {
+    return this.inner.consumeRootMotion(out);
   }
 
   // Skins are self-contained (labelled clips ship in the GLB) — no shared library.
@@ -412,35 +465,31 @@ export function loadActiveFighterModel(
   loader.load(
     skinUrl(skin),
     (gltf) => {
-      try {
-        const model = gltf.scene;
-        model.traverse((c) => {
-          const m = c as THREE.Mesh & { isSkinnedMesh?: boolean };
-          if (m.isMesh) {
-            m.castShadow = true;
-            m.receiveShadow = true;
-            m.frustumCulled = false;
-          }
-        });
-        const wrapper = new THREE.Group();
-        model.updateWorldMatrix(true, true);
-        const box = new THREE.Box3().setFromObject(model);
-        const size = new THREE.Vector3();
-        box.getSize(size);
-        if (size.y > 0.001) model.scale.setScalar(targetHeight / size.y);
-        model.updateWorldMatrix(true, true);
-        const box2 = new THREE.Box3().setFromObject(model);
-        const center = new THREE.Vector3();
-        box2.getCenter(center);
-        model.position.x -= center.x;
-        model.position.z -= center.z;
-        model.position.y -= box2.min.y;
-        wrapper.add(model);
-        const { actions, pool, attackBlend } = buildSkinAnim(gltf.animations, skin.scheme);
-        onReady(wrapper, new SkinHeroAdapter(new PlayerAnimator(model, actions, pool, { attackBlend })));
-      } catch {
-        onMiss();
-      }
+      const model = gltf.scene;
+      model.traverse((c) => {
+        const m = c as THREE.Mesh & { isSkinnedMesh?: boolean };
+        if (m.isMesh) {
+          m.castShadow = true;
+          m.receiveShadow = true;
+          m.frustumCulled = false;
+        }
+      });
+      const wrapper = new THREE.Group();
+      model.updateWorldMatrix(true, true);
+      const box = new THREE.Box3().setFromObject(model);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      if (size.y > 0.001) model.scale.setScalar(targetHeight / size.y);
+      model.updateWorldMatrix(true, true);
+      const box2 = new THREE.Box3().setFromObject(model);
+      const center = new THREE.Vector3();
+      box2.getCenter(center);
+      model.position.x -= center.x;
+      model.position.z -= center.z;
+      model.position.y -= box2.min.y;
+      wrapper.add(model);
+      const { actions, pool, attackBlend } = buildSkinAnim(gltf.animations, skin.scheme);
+      onReady(wrapper, new SkinHeroAdapter(new PlayerAnimator(model, actions, pool, { attackBlend })));
     },
     undefined,
     () => onMiss(),
@@ -462,11 +511,65 @@ export function loadRacalvinHero(
   loadRacalvinBase(
     loader,
     targetHeight,
-    (wrapper, root, baseClips, _weapons) => {
+    (wrapper, root, baseClips) => {
       const hero = new HeroAnimator(root, baseClips);
       loadRacalvinClips(loader).then((clips) => hero.addLibraryClips(clips));
       onReady(wrapper, hero);
     },
     onMiss,
   );
+}
+
+/**
+ * KayKit hero fallback — class/race KayKit GLB + shared animation library via
+ * `HeroAnimator`. Used by `/game` when no fighter skin resolves.
+ */
+export function loadKayKitHeroModel(
+  loader: GLTFLoader,
+  className: string | undefined,
+  raceKey: string | undefined,
+  targetHeight: number,
+  onReady: (root: THREE.Group, anim: HeroLike) => void,
+  onMiss: () => void,
+) {
+  const modelName = resolveModelName(className, raceKey);
+  const localUrl = `${HERO_BASE}/${modelName}.glb`;
+  const remoteUrl = `${OBJECTSTORE}/models/characters/kaykit/${modelName}.glb`;
+
+  const fitHero = (root: THREE.Object3D) => {
+    const wrapper = new THREE.Group();
+    root.updateWorldMatrix(true, true);
+    const box = new THREE.Box3().setFromObject(root);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    if (size.y > 0.001) root.scale.setScalar(targetHeight / size.y);
+    root.updateWorldMatrix(true, true);
+    const box2 = new THREE.Box3().setFromObject(root);
+    const center = new THREE.Vector3();
+    box2.getCenter(center);
+    root.position.x -= center.x;
+    root.position.z -= center.z;
+    root.position.y -= box2.min.y;
+    root.traverse((c) => {
+      const m = c as THREE.Mesh & { isSkinnedMesh?: boolean };
+      if (m.isMesh) {
+        m.castShadow = true;
+        m.receiveShadow = true;
+        if (m.isSkinnedMesh) m.frustumCulled = false;
+      }
+    });
+    wrapper.add(root);
+    return wrapper;
+  };
+
+  const onGltf = (gltf: { scene: THREE.Group; animations: THREE.AnimationClip[] }) => {
+    const wrapper = fitHero(gltf.scene);
+    const hero = new HeroAnimator(gltf.scene, gltf.animations);
+    loadKayKitAnimLibrary(loader).then((clips) => hero.addLibraryClips(clips));
+    onReady(wrapper, hero);
+  };
+
+  loader.load(localUrl, onGltf, undefined, () => {
+    loader.load(remoteUrl, onGltf, undefined, () => onMiss());
+  });
 }
