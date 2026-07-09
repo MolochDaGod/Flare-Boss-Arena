@@ -1,7 +1,9 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RACALVIN_ID } from "../data/fighters";
+import { getFighterAssetTuning } from "../data/fighterAssetTuning";
 import { getSkin, skinUrl } from "../data/skins";
+import { setupFighterMeshVisibility } from "./assetVisibility";
 import { buildSkinAnim, PlayerAnimator } from "./PlayerAnimator";
 import { HeroAnimator, disposeObject3D } from "./kaykitHero";
 import { loadRacalvinBase, loadRacalvinClips } from "./racalvinHero";
@@ -89,6 +91,8 @@ export class FighterTownsperson {
         const wrapper = this.fitToHeight(model, height);
         this.group.add(wrapper);
         const { actions, pool } = buildSkinAnim(gltf.animations, skin.scheme);
+        const idleClip = actions.idle?.name ?? actions.walk?.name;
+        setupFighterMeshVisibility(model, skinId, getFighterAssetTuning(skinId).hiddenMeshes, idleClip);
         const pa = new PlayerAnimator(model, actions, pool);
         this.anim = {
           setMoving: (m) => pa.setMoving(m),

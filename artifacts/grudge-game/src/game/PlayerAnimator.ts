@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { SKIN_CLIP_SUFFIX, KOBY_CLIPS, type SkinScheme } from "../data/skins";
+import { syncHiddenMeshesForClip } from "./assetVisibility";
 import { RootMotion } from "./rootMotion";
 
 /**
@@ -60,6 +61,7 @@ export class PlayerAnimator {
     const idle = this.actions.idle ?? this.actions.walk;
     if (idle) idle.reset().play();
     this.current = this.actions.idle ? "idle" : "walk";
+    this.syncMeshVisibility(idle?.getClip().name);
 
     this.mixer.addEventListener("finished", (e) => {
       if (!this.attacking) return; // ignore stray finishes (and the 2nd of a pair)
@@ -86,6 +88,18 @@ export class PlayerAnimator {
     cur.enabled = true;
     cur.setEffectiveWeight(1);
     cur.reset().fadeIn(fade).play();
+    this.syncMeshVisibility(cur.getClip().name);
+  }
+
+  private syncMeshVisibility(clipName?: string) {
+    const root = this.mixer.getRoot() as THREE.Object3D;
+    if (!root.userData.assetVisibilityRules?.length) return;
+    const name =
+      clipName ??
+      this.oneShot?.getClip().name ??
+      this.oneShotBlend[0]?.getClip().name ??
+      this.actions[this.current]?.getClip().name;
+    if (name) syncHiddenMeshesForClip(root, name);
   }
 
   /**
@@ -108,6 +122,7 @@ export class PlayerAnimator {
     } else {
       nextA.fadeIn(0.16);
     }
+    this.syncMeshVisibility(nextA.getClip().name);
   }
 
   /** Cross-fade into a one-shot role/skill clip from locomotion. */
@@ -120,6 +135,7 @@ export class PlayerAnimator {
     action.fadeIn(fadeIn).play();
     const loco = this.actions[this.current];
     if (loco && loco !== action) loco.fadeOut(fadeIn);
+    this.syncMeshVisibility(action.getClip().name);
   }
 
   /** True when a dedicated attack clip resolved (a labelled attack OR a blend). */

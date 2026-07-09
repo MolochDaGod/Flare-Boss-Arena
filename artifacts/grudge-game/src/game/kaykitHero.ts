@@ -3,7 +3,9 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { PlayerAnimator, buildSkinAnim } from "./PlayerAnimator";
 import { RootMotion } from "./rootMotion";
 import { getActiveFighter, RACALVIN_ID } from "../data/fighters";
+import { getFighterAssetTuning } from "../data/fighterAssetTuning";
 import { getSkin, skinUrl } from "../data/skins";
+import { setupFighterMeshVisibility } from "./assetVisibility";
 import { loadRacalvinBase, loadRacalvinClips } from "./racalvinHero";
 
 /**
@@ -489,6 +491,9 @@ export function loadActiveFighterModel(
       model.position.y -= box2.min.y;
       wrapper.add(model);
       const { actions, pool, attackBlend } = buildSkinAnim(gltf.animations, skin.scheme);
+      const fighterId = getActiveFighter().id;
+      const idleClip = actions.idle?.name ?? actions.walk?.name;
+      setupFighterMeshVisibility(model, fighterId, getFighterAssetTuning(fighterId).hiddenMeshes, idleClip);
       onReady(wrapper, new SkinHeroAdapter(new PlayerAnimator(model, actions, pool, { attackBlend })));
     },
     undefined,

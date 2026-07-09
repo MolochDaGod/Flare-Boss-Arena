@@ -13,7 +13,7 @@ import {
   loadRacalvinClips,
 } from "@/game/racalvinHero";
 import { getFighterAssetTuning, type FighterAssetTuning } from "@/data/fighterAssetTuning";
-import { applyHiddenMeshRules, collectMeshNames, syncHiddenMeshesForClip } from "@/game/assetVisibility";
+import { collectMeshNames, setupFighterMeshVisibility, syncHiddenMeshesForClip } from "@/game/assetVisibility";
 
 export interface FighterPreviewHandle {
   previewClip: (name: string) => void;
@@ -75,10 +75,9 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     if (fighterId === RACALVIN_ID) {
       applyRacalvinAssetTuning(model, tuning);
     } else {
-      applyHiddenMeshRules(model, tuning.hiddenMeshes);
+      const active = sceneRef.current.activeAction?.getClip().name;
+      setupFighterMeshVisibility(model, fighterId, tuning.hiddenMeshes, active);
     }
-    const active = sceneRef.current.activeAction?.getClip().name;
-    if (active) syncHiddenMeshesForClip(model, active);
   }, [tuning, fighterId]);
 
   useEffect(() => {
@@ -194,12 +193,11 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
             if (idle) {
               activeAction = mixer.clipAction(idle).reset().play();
               sceneRef.current.activeAction = activeAction;
-              applyHiddenMeshRules(m, tuning.hiddenMeshes);
-              syncHiddenMeshesForClip(m, idle.name);
+              setupFighterMeshVisibility(m, fighterId, tuning.hiddenMeshes, idle.name);
             }
           } else {
             onClipsReady?.([]);
-            applyHiddenMeshRules(m, tuning.hiddenMeshes);
+            setupFighterMeshVisibility(m, fighterId, tuning.hiddenMeshes);
           }
           sceneRef.current.mixer = mixer;
         },
