@@ -133,8 +133,10 @@ function Camp() {
         return;
       }
       if (PERK_STATIONS.includes(id)) {
-        setPerkToast(`Perk station: ${id.replace("perk_", "").replace("_", " ")}`);
-        window.setTimeout(() => setPerkToast(null), 2400);
+        // Route to full perk shop — machines sell real combat mods.
+        setLocation("/perks");
+        setPerkToast(`Opening ${id.replace("perk_", "").replace("_", " ")} perks…`);
+        window.setTimeout(() => setPerkToast(null), 1800);
       }
       const panel = STATION_TO_PANEL[id];
       if (panel) {

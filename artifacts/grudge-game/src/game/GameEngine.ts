@@ -24,6 +24,14 @@ import {
   type FighterKit,
 } from "../data/fighterSkills";
 import { getActiveFighter, RACALVIN_ID } from "../data/fighters";
+import {
+  getActivePerkMods,
+  grantPerk,
+  getActivePerks,
+  PERK_BY_ID,
+  type PerkId,
+  type PerkCombatMods,
+} from "../data/perks";
 import { PlayerAnimator, buildAuthoredClips, buildSkinAnim } from "./PlayerAnimator";
 import { DungeonMap } from "./DungeonMap";
 import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "../data/characterMeshes";
@@ -150,6 +158,10 @@ export interface GameState {
   nearbyHarvest: string | null;
   /** Island generation seed (captain re-sails change this). */
   mapSeed: number;
+  /** Progressive island / round number (1 = first area). */
+  islandRound: number;
+  /** Difficulty mult shown in HUD (enemy HP/dmg scale). */
+  difficultyMult: number;
   /** True while a dungeon boss is alive. */
   bossAlive: boolean;
   bossName: string | null;
@@ -163,6 +175,8 @@ export interface GameState {
   blocking: boolean;
   /** Jump airborne. */
   jumping: boolean;
+  /** Active perk labels for HUD. */
+  activePerks: string[];
 }
 
 export interface PlayerInitStats {
@@ -268,6 +282,8 @@ export class GameEngine {
   private disposed = false;
   private harvestField: HarvestField | null = null;
   private mapSeed = (Math.random() * 0xffffffff) >>> 0;
+  /** Round 1 = first island; captain re-sail increments. */
+  private islandRound = 1;
   private bossEnemyId: string | null = null;
   private nearbyPirate: NearbyPirateInfo | null = null;
   private nearbyHarvestLabel: string | null = null;
@@ -288,6 +304,26 @@ export class GameEngine {
   private dodgeIframeUntil = 0;
   private skillCursor: THREE.Mesh | null = null;
   private skillCursorMat: THREE.MeshBasicMaterial | null = null;
+
+  /** Live perk combat modifiers (refreshed each frame / on cast). */
+  private perkMods(): PerkCombatMods {
+    return getActivePerkMods();
+  }
+
+  /** Enemy scaling for current island round: HP/dmg grow each re-sail. */
+  private difficultyMult(): number {
+    return 1 + (this.islandRound - 1) * 0.28;
+  }
+
+  private scaleTemplate(t: EnemyTemplate): EnemyTemplate {
+    const m = this.difficultyMult();
+    return {
+      ...t,
+      hp: Math.round(t.hp * m),
+      damage: Math.round(t.damage * (1 + (this.islandRound - 1) * 0.18)),
+      name: this.islandRound > 1 ? `R${this.islandRound} ${t.name}` : t.name,
+    };
+  }
   private hoveredEnemy: EnemyInstance | null = null;
   private hoverEmissive = new Map<THREE.MeshStandardMaterial, { hex: number; intensity: number }>();
   private _moveHandler!: (e: MouseEvent) => void;
@@ -614,8 +650,13 @@ export class GameEngine {
       const dz = wp.holder.position.z - this.playerPos.z;
       if (dx * dx + dz * dz <= pickupRadius * pickupRadius) {
         this.collectedPropIds.add(key);
-        const label = wp.def.perkId ?? wp.def.name;
-        this.log(`Collected ${label}!`);
+        const perkId = wp.def.perkId as PerkId | undefined;
+        if (perkId) {
+          const r = grantPerk(perkId);
+          this.log(r.ok ? `Unlocked perk: ${PERK_BY_ID.get(perkId)?.name ?? perkId}!` : r.message);
+        } else {
+          this.log(`Collected ${wp.def.name}!`);
+        }
         this.scene.remove(wp.holder);
         disposeWorldProp(wp);
         this.worldCollectables.splice(i, 1);
@@ -912,7 +953,20 @@ export class GameEngine {
           z = (rng() * 2 - 1) * D;
           attempts++;
         } while (Math.sqrt(x * x + z * z) < 6 && attempts < 20);
-        this.createEnemy(template, new THREE.Vector3(x, 0, z));
+        this.createEnemy(this.scaleTemplate(template), new THREE.Vector3(x, 0, z));
+      }
+    }
+    // Extra packs on later rounds
+    const extra = Math.min(12, (this.islandRound - 1) * 2);
+    if (extra > 0 && this.enemyTemplates.length) {
+      const rng2 = mulberry(this.mapSeed ^ 0xdead);
+      for (let i = 0; i < extra; i++) {
+        const t = this.enemyTemplates[Math.floor(rng2() * this.enemyTemplates.length)]!;
+        const D = this.DUNGEON - 4;
+        const x = (rng2() * 2 - 1) * D;
+        const z = (rng2() * 2 - 1) * D;
+        if (Math.hypot(x, z) < 8) continue;
+        this.createEnemy(this.scaleTemplate(t), new THREE.Vector3(x, 0, z));
       }
     }
   }
@@ -923,13 +977,14 @@ export class GameEngine {
    */
   private spawnDungeonBoss() {
     const bossPos = new THREE.Vector3(-52, 0, 38);
+    const m = this.difficultyMult();
     const template: EnemyTemplate = {
       id: "mon_big_scary_t3",
-      name: "Island Colossus",
+      name: this.islandRound > 1 ? `R${this.islandRound} Island Colossus` : "Island Colossus",
       type: "titan",
       tier: 5,
-      hp: 1400,
-      damage: 38,
+      hp: Math.round(1400 * m * 1.1),
+      damage: Math.round(38 * (1 + (this.islandRound - 1) * 0.15)),
     };
     // Prefer animated medusa/dante if t3 fails resolution — createEnemy maps mon_*.
     const boss = this.createEnemy(template, bossPos);
@@ -1281,7 +1336,7 @@ export class GameEngine {
       this.pendingSkillIdx = idx;
       if (this.skillCursor && this.skillCursorMat) {
         this.skillCursor.visible = true;
-        const r = skill.aoeRadius ?? 4;
+        const r = (skill.aoeRadius ?? 4) * this.perkMods().aoeRadiusMult;
         this.skillCursor.scale.setScalar(r);
         this.skillCursorMat.color.setHex(skill.color ?? elementColor(skill.element));
       }
@@ -1328,15 +1383,16 @@ export class GameEngine {
       this.playerPos.z += f.z * 1.2;
       this.clampToArena(this.playerPos);
     }
+    const mods = this.perkMods();
     const dir = this.resolveAimDir();
     const origin = this.playerPos.clone().setY(1.15);
-    const dmg = this.playerBaseDamage * sp.damageMult * (0.9 + Math.random() * 0.2);
+    const dmg = this.playerBaseDamage * sp.damageMult * mods.autoAttackMult * (0.9 + Math.random() * 0.2);
     if (sp.slashWave) {
       this.slashField?.spawn(origin, dir, {
         damage: dmg,
-        range: sp.slashRange,
+        range: sp.slashRange * mods.slashRangeMult,
         color: sp.color,
-        radius: 1.5,
+        radius: 1.5 * Math.min(1.4, mods.aoeRadiusMult),
       });
     } else {
       // Melee special cone
@@ -1378,8 +1434,11 @@ export class GameEngine {
       this.clampToArena(this.playerPos);
     }
 
-    const dmg = this.playerBaseDamage * skill.damageMult * (0.85 + Math.random() * 0.3);
+    const mods = this.perkMods();
+    const dmg = this.playerBaseDamage * skill.damageMult * mods.autoAttackMult * (0.85 + Math.random() * 0.3);
     const color = skill.color ?? elementColor(skill.element);
+    const aoeMul = mods.aoeRadiusMult;
+    const slashMul = mods.slashRangeMult;
 
     if (skill.targeting === "self") {
       // Heal-ish for marco regen style
@@ -1413,9 +1472,9 @@ export class GameEngine {
     if (skill.targeting === "slash_wave" || skill.shape === "slash") {
       this.slashField?.spawn(this.playerPos.clone().setY(1.15), dir, {
         damage: dmg,
-        range: skill.slashRange ?? 11,
+        range: (skill.slashRange ?? 11) * slashMul,
         color,
-        radius: 1.4,
+        radius: 1.4 * Math.min(1.35, aoeMul),
       });
       this.log(`${skill.name}!`);
       this.notifyState();
@@ -1423,7 +1482,7 @@ export class GameEngine {
     }
 
     if (skill.targeting === "ground_aoe") {
-      const maxR = skill.placeRange ?? 9;
+      const maxR = (skill.placeRange ?? 9) * Math.min(1.25, aoeMul);
       let center = place ?? this.playerPos.clone().add(dir.clone().multiplyScalar(maxR * 0.55));
       const to = center.clone().sub(this.playerPos);
       if (to.length() > maxR) {
@@ -1431,7 +1490,7 @@ export class GameEngine {
         center = this.playerPos.clone().add(to);
       }
       this.clampToArena(center);
-      const radius = skill.aoeRadius ?? 4;
+      const radius = (skill.aoeRadius ?? 4) * aoeMul;
       const kind = skill.shape === "nova" ? "nova" : "circle";
       const q: ShapeQuery = {
         kind,
@@ -1450,7 +1509,7 @@ export class GameEngine {
         reach: radius,
       });
       for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
-        const isCrit = Math.random() < this.playerCritChance + 0.05;
+        const isCrit = Math.random() < this.playerCritChance + mods.critBonus + 0.05;
         this.damageEnemy(en, dmg * (isCrit ? 1.75 : 1), isCrit);
       }
       this.log(`${skill.name} detonates!`);
@@ -1467,10 +1526,10 @@ export class GameEngine {
       kind: shapeKind,
       origin: this.playerPos.clone(),
       dir,
-      radius: skill.aoeRadius ?? 5,
+      radius: (skill.aoeRadius ?? 5) * aoeMul,
       halfAngle: Math.PI / 4,
-      length: skill.slashRange ?? 9,
-      halfWidth: 1.3,
+      length: (skill.slashRange ?? 9) * slashMul,
+      halfWidth: 1.3 * Math.min(1.3, aoeMul),
     };
     this.telegraphs?.show(q, 0.28, color);
     this.particles?.castSkillVfx({
@@ -1479,20 +1538,20 @@ export class GameEngine {
       center: this.playerPos.clone(),
       origin: this.playerPos.clone(),
       dir,
-      reach: skill.aoeRadius ?? skill.slashRange ?? 5,
+      reach: (skill.aoeRadius ?? skill.slashRange ?? 5) * aoeMul,
       halfAngle: Math.PI / 4,
     });
     // Also fire a short slash wave so physical cuts travel past the fist.
-    if (skill.element === "physical" || shapeKind === "cone") {
+    if (skill.element === "physical" || shapeKind === "cone" || mods.autoAttackSlash) {
       this.slashField?.spawn(this.playerPos.clone().setY(1.1), dir, {
         damage: dmg * 0.55,
-        range: Math.min(8, skill.slashRange ?? 7),
+        range: Math.min(14, (skill.slashRange ?? 7) * slashMul),
         color,
         radius: 1.2,
       });
     }
     for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
-      const isCrit = Math.random() < this.playerCritChance + 0.05;
+      const isCrit = Math.random() < this.playerCritChance + mods.critBonus + 0.05;
       this.damageEnemy(en, dmg * (isCrit ? 1.75 : 1), isCrit);
     }
     this.log(`${skill.name}!`);
@@ -1699,10 +1758,11 @@ export class GameEngine {
     this.log(`${np.name}: "${np.prompt}"`);
   }
 
-  /** Captain re-sails: new seed → fresh forest/stones + enemy layout + boss. */
+  /** Captain re-sails: next round — tougher enemies, new seed/layout/boss. */
   reseedGenerativeMap() {
     this.mapSeed = (Math.random() * 0xffffffff) >>> 0;
-    // Clear non-boss enemies and respawn from seed.
+    this.islandRound += 1;
+    // Clear enemies and respawn scaled for the new round.
     for (const en of [...this.enemies]) {
       this.scene.remove(en.model.group);
       en.model.group.userData.disposed = true;
@@ -1715,8 +1775,16 @@ export class GameEngine {
     this.spawnInitialEnemies();
     this.spawnDungeonBoss();
     this.playerPos.set(0, 0, 0);
+    this.playerY = 0;
+    this.jumpVel = 0;
     if (this.playerGroup) this.playerGroup.position.set(0, 0, 0);
-    this.log(`Sailed to island seed #${this.mapSeed.toString(16)} — new woods, stone, and a Colossus await.`);
+    // Soft heal between rounds so the loop is fair but still pressured.
+    this.playerHp = Math.min(this.playerMaxHp, this.playerHp + this.playerMaxHp * 0.35);
+    this.playerMana = Math.min(this.playerMaxMana, this.playerMana + this.playerMaxMana * 0.4);
+    const mult = this.difficultyMult();
+    this.log(
+      `Round ${this.islandRound} — island #${this.mapSeed.toString(16)} · enemies ×${mult.toFixed(2)}`,
+    );
     this.onMapReseed?.(this.mapSeed);
     this.notifyState();
   }
@@ -1767,14 +1835,17 @@ export class GameEngine {
       return;
     }
 
-    const base = this.playerBaseDamage;
+    const mods = this.perkMods();
+    const base = this.playerBaseDamage * mods.autoAttackMult;
     const variance = 0.8 + Math.random() * 0.4;
-    const isCrit = Math.random() < this.playerCritChance;
-    const rawDmg = Math.max(1, Math.floor(base * variance * (isCrit ? 1.75 : 1)));
+    const critChance = Math.min(0.75, this.playerCritChance + mods.critBonus);
+    const isCrit = Math.random() < critChance;
+    let rawDmg = Math.max(1, Math.floor(base * variance * (isCrit ? 1.75 : 1)));
+    if (mods.burnOnHit > 0) rawDmg += Math.floor(base * mods.burnOnHit);
     const dmg = Math.max(1, rawDmg - Math.floor(enemy.template.tier * 2));
 
     enemy.hp = Math.max(0, enemy.hp - dmg);
-    this.playerAttackCooldown = this.playerMaxAttackCooldown;
+    this.playerAttackCooldown = this.playerMaxAttackCooldown * mods.attackSpeedMult;
 
     // Face the enemy
     const dx = enemy.position.x - this.playerPos.x;
@@ -1783,18 +1854,27 @@ export class GameEngine {
 
     this.playerAnimator?.triggerAttack();
 
+    // Perk auto-attack slash waves travel past the punch/kick.
+    if (mods.autoAttackSlash) {
+      const dir = new THREE.Vector3(dx, 0, dz);
+      if (dir.lengthSq() < 1e-4) dir.set(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+      dir.normalize();
+      this.slashField?.spawn(this.playerPos.clone().setY(1.1), dir, {
+        damage: dmg * 0.65,
+        range: 7 * mods.slashRangeMult,
+        color: mods.burnOnHit > 0 ? 0xff5522 : 0xffcc66,
+        radius: 1.25,
+      });
+    }
+
     const wp = enemy.model.group.position.clone();
     wp.y += enemy.model.height * 0.7;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
 
-    // 2D hit spark at the enemy's screen position
     if (this.fx) {
       const sc = this.worldToScreen(wp);
-      if (isCrit) {
-        this.fx.spawnSpellImpact(sc.x, sc.y, "#ff4400", 50);
-      } else {
-        this.fx.spawnHitSparks(sc.x, sc.y, "#ffaa00", 10);
-      }
+      if (isCrit) this.fx.spawnSpellImpact(sc.x, sc.y, "#ff4400", 50);
+      else this.fx.spawnHitSparks(sc.x, sc.y, "#ffaa00", 10);
     }
 
     this.log(`You hit ${enemy.template.name} for ${dmg}${isCrit ? " CRIT!" : ""}`);
@@ -1859,7 +1939,16 @@ export class GameEngine {
         const spawnPos = enemy.spawnPos.clone();
         spawnPos.x += (Math.random() - 0.5) * 4;
         spawnPos.z += (Math.random() - 0.5) * 4;
-        this.createEnemy(enemy.template, spawnPos);
+        // Respawn with current round difficulty
+        const base: EnemyTemplate = {
+          id: enemy.template.id,
+          name: enemy.template.name.replace(/^R\d+\s+/, ""),
+          type: enemy.template.type,
+          tier: enemy.template.tier,
+          hp: Math.round(enemy.template.hp / this.difficultyMult()),
+          damage: enemy.template.damage,
+        };
+        this.createEnemy(this.scaleTemplate(base), spawnPos);
       }, 14000);
     } else {
       setTimeout(() => {
@@ -1926,7 +2015,9 @@ export class GameEngine {
       this.log(`Dodged ${source}!`);
       return;
     }
+    const mods = this.perkMods();
     let mitigated = Math.max(1, amount - Math.floor(this.playerDefense * 0.5));
+    mitigated = Math.max(1, Math.floor(mitigated * mods.damageTakenMult));
     if (this.blocking) {
       mitigated = Math.max(1, Math.floor(mitigated * 0.3));
       this.log(`Blocked ${source} — only ${mitigated} damage.`);
@@ -2182,8 +2273,10 @@ export class GameEngine {
       return d.age < 1.4;
     });
 
+    const mods = this.perkMods();
+    const regen = 6 + mods.regenPerSec;
     if (this.playerHp < this.playerMaxHp) {
-      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + delta * 6);
+      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + delta * regen);
     }
 
     this.notifyState();
@@ -2295,7 +2388,7 @@ export class GameEngine {
       enemies: enemyUI.map((e) => ({ ...e, isBoss: e.id === this.bossEnemyId })),
       damageNumbers: dmgUI,
       combatLog: [...this.combatLog],
-      zone: `Pirate Island · seed ${this.mapSeed.toString(16)}`,
+      zone: `Round ${this.islandRound} · Pirate Island · seed ${this.mapSeed.toString(16)}`,
       loaded: this.loaded,
       mapReady: this.mapReady,
       resources: getResources(),
@@ -2303,6 +2396,8 @@ export class GameEngine {
       nearbyPirate: this.nearbyPirate,
       nearbyHarvest: this.nearbyHarvestLabel,
       mapSeed: this.mapSeed,
+      islandRound: this.islandRound,
+      difficultyMult: this.difficultyMult(),
       bossAlive: !!boss,
       bossName: boss?.template.name ?? null,
       bossHp: boss?.hp ?? 0,
@@ -2311,6 +2406,7 @@ export class GameEngine {
       specialReadyPct: Math.min(1, 1 - Math.max(0, this.specialCdUntil - performance.now()) / Math.max(1, this.fighterKit.special.cooldown * 1000)),
       blocking: this.blocking,
       jumping: this.playerY > 0.05 || this.jumpVel > 0,
+      activePerks: getActivePerks().map((id) => PERK_BY_ID.get(id)?.name ?? id),
     });
   }
 

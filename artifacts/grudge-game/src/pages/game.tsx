@@ -262,8 +262,8 @@ function Game() {
     engine.onStateUpdate = handleStateUpdate;
     engine.onOpenVendor = () => setVendorOpen(true);
     engine.onMapReseed = (seed) => {
-      toast.message("New island charted", {
-        description: `Generative seed #${seed.toString(16)} — fresh woods, stone, and a Colossus.`,
+      toast.message("Next island — tougher round", {
+        description: `Seed #${seed.toString(16)}. Enemies scale up each sail. Equip perks on /perks.`,
       });
       setBagTick((t) => t + 1);
     };
@@ -351,6 +351,13 @@ function Game() {
 
         <div className="text-center">
           <p className="text-[10px] font-serif uppercase tracking-[0.2em] text-muted-foreground/60">{gameState?.zone ?? ""}</p>
+          {gameState && (
+            <p className="text-[10px] font-mono text-amber-200/80 mt-0.5">
+              Round {gameState.islandRound ?? 1}
+              {gameState.difficultyMult != null ? ` · ×${gameState.difficultyMult.toFixed(2)} foes` : ""}
+              {gameState.activePerks?.length ? ` · Perks: ${gameState.activePerks.join(", ")}` : ""}
+            </p>
+          )}
           {gameState?.bossAlive && gameState.bossName && (
             <div className="mt-1 min-w-[220px] mx-auto">
               <p className="text-[10px] font-serif uppercase tracking-widest text-destructive">{gameState.bossName}</p>
