@@ -1,20 +1,17 @@
 /**
- * Flare Boss Arena — independent combat loadout.
- *
- * Not Warlords-era: no R2 weapon trees, no class skill catalogs, no turn-based
- * cooldowns. One fighter → one weapon profile → five skills + one R special,
- * all playable immediately in the real-time dungeon / camp / boss scenes.
+ * Flare Boss Arena — combat loadout.
+ * Fighter stats + signature weapon + equipped attribute stones.
  */
 
-import { getActiveFighter, getFighter, type FighterDef, RACALVIN_ID } from "./fighters";
+import { getActiveFighter, getFighter, type FighterDef, RACALVIN_ID, type AttrKey, ATTR_ORDER } from "./fighters";
 import {
   getFighterKit,
   type FighterKit,
   type FighterSkillDef,
   type FighterSpecialDef,
 } from "./fighterSkills";
-
-// ─── Weapons (simple profiles tied to fighter style) ──────────────────────────
+import { getStoneCombatMods } from "./stones";
+import { onslaughtAttackSpeedMult } from "./procs";
 
 export type WeaponStyle =
   | "sword"
@@ -32,16 +29,12 @@ export interface GameWeapon {
   name: string;
   glyph: string;
   style: WeaponStyle;
-  /** Flat damage added to fighter base. */
   damageBonus: number;
-  /** Added to crit chance (0–1). */
   critBonus: number;
-  /** Melee/ranged reach in world units. */
   range: number;
   description: string;
 }
 
-/** Per-fighter signature weapons — theme fits the character, not a class tree. */
 const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
   [RACALVIN_ID]: {
     id: "wpn_brothers_keeper",
@@ -51,7 +44,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 18,
     critBonus: 0.04,
     range: 3.4,
-    description: "The Corsair King's greatblade — wide cuts and heavy specials.",
+    description: "The Corsair King's greatblade.",
   },
   nightmare_luffy: {
     id: "wpn_rubber_fists",
@@ -61,7 +54,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 10,
     critBonus: 0.06,
     range: 3.2,
-    description: "Stretching punches — combos and shockwave specials.",
+    description: "Stretching punches.",
   },
   ace_sabo_luffy: {
     id: "wpn_brothers_bond",
@@ -71,7 +64,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 14,
     critBonus: 0.05,
     range: 3.3,
-    description: "Fire, wind, and rubber — hybrid mid-range kit.",
+    description: "Fire, wind, and rubber.",
   },
   shanks: {
     id: "wpn_gryphon",
@@ -81,7 +74,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 16,
     critBonus: 0.08,
     range: 3.5,
-    description: "Emperor's saber — slash waves and Haki pressure.",
+    description: "Emperor's saber.",
   },
   law: {
     id: "wpn_kikoku",
@@ -91,7 +84,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 12,
     critBonus: 0.07,
     range: 3.3,
-    description: "Nodachi of the Surgeon — ROOM circles and radio cuts.",
+    description: "Nodachi of the Surgeon.",
   },
   lucci: {
     id: "wpn_rokushiki",
@@ -101,7 +94,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 13,
     critBonus: 0.09,
     range: 3.0,
-    description: "Finger pistols and flying kicks — assassin range.",
+    description: "Assassin hands.",
   },
   smoker: {
     id: "wpn_nanashaku",
@@ -111,7 +104,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 11,
     critBonus: 0.04,
     range: 3.4,
-    description: "Seastone jitte — smoke lines and hard control.",
+    description: "Seastone jitte.",
   },
   sanji_onigashima: {
     id: "wpn_black_leg",
@@ -121,7 +114,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 13,
     critBonus: 0.08,
     range: 3.2,
-    description: "Burning kicks — Diable waves and table courses.",
+    description: "Burning kicks.",
   },
   ryuma: {
     id: "wpn_shusui",
@@ -131,7 +124,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 15,
     critBonus: 0.07,
     range: 3.5,
-    description: "Black blade of the Sword God — far-reaching flashes.",
+    description: "Black blade.",
   },
   page_one: {
     id: "wpn_spino",
@@ -141,7 +134,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 17,
     critBonus: 0.03,
     range: 3.6,
-    description: "Zoan bulk — tail sweeps and ground quakes.",
+    description: "Zoan bulk.",
   },
   marco: {
     id: "wpn_phoenix",
@@ -151,7 +144,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 11,
     critBonus: 0.05,
     range: 3.3,
-    description: "Phoenix fire — burns foes, mends self.",
+    description: "Phoenix fire.",
   },
   shiryu: {
     id: "wpn_rain",
@@ -161,7 +154,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 14,
     critBonus: 0.09,
     range: 3.4,
-    description: "Invisible cuts from the rain — ambush and execution.",
+    description: "Invisible cuts.",
   },
   marine_mullet: {
     id: "wpn_musket",
@@ -171,7 +164,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 9,
     critBonus: 0.06,
     range: 8.0,
-    description: "Long shot and bayonet — keep distance.",
+    description: "Long shot.",
   },
   koby: {
     id: "wpn_honesty",
@@ -181,7 +174,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 8,
     critBonus: 0.05,
     range: 3.0,
-    description: "Raw Marine potential — shockwave specials.",
+    description: "Raw potential.",
   },
 };
 
@@ -193,10 +186,8 @@ const DEFAULT_WEAPON: GameWeapon = {
   damageBonus: 8,
   critBonus: 0.03,
   range: 3.0,
-  description: "A reliable sidearm for any fighter.",
+  description: "A reliable sidearm.",
 };
-
-// ─── Tools (harvest only — not Warlords profession trees) ─────────────────────
 
 export interface GameTool {
   id: string;
@@ -207,23 +198,9 @@ export interface GameTool {
 }
 
 export const GAME_TOOLS: GameTool[] = [
-  {
-    id: "tool_hatchet",
-    name: "Hatchet",
-    glyph: "🪓",
-    resource: "wood",
-    description: "Chop trees for wood. Attack any tree node.",
-  },
-  {
-    id: "tool_pick",
-    name: "Pickaxe",
-    glyph: "⛏",
-    resource: "stone",
-    description: "Quarry stone nodes. Attack any stone pile.",
-  },
+  { id: "tool_hatchet", name: "Hatchet", glyph: "🪓", resource: "wood", description: "Chop trees." },
+  { id: "tool_pick", name: "Pickaxe", glyph: "⛏", resource: "stone", description: "Mine rock." },
 ];
-
-// ─── Unified loadout ──────────────────────────────────────────────────────────
 
 export interface GameLoadout {
   fighter: FighterDef;
@@ -232,32 +209,77 @@ export interface GameLoadout {
   skills: FighterSkillDef[];
   special: FighterSpecialDef;
   tools: GameTool[];
-  /** Derived combat stats from fighter attributes + weapon. */
+  /** Effective attributes after stones. */
+  attributes: Record<AttrKey, number>;
   combat: {
     baseDamage: number;
+    spellDamageMult: number;
     critChance: number;
     maxHp: number;
     maxMana: number;
     attackRange: number;
     attackInterval: number;
+    moveSpeedMult: number;
+    defense: number;
+    magicDefense: number;
+    aoeMult: number;
   };
 }
 
+function effectiveAttrs(fighter: FighterDef): Record<AttrKey, number> {
+  const stones = getStoneCombatMods();
+  const out = { ...fighter.stats };
+  for (const k of ATTR_ORDER) {
+    out[k] = (out[k] ?? 0) + (stones.attrBonus[k] ?? 0);
+  }
+  return out;
+}
+
 function combatFrom(fighter: FighterDef, weapon: GameWeapon) {
-  const s = fighter.stats;
-  // Simple real-time formulas — no Warlords diminishing returns / tiers.
-  const baseDamage = 18 + s.strength * 3 + s.dexterity * 1.5 + weapon.damageBonus;
-  const critChance = Math.min(0.55, 0.08 + s.dexterity * 0.015 + s.agility * 0.01 + weapon.critBonus);
-  const maxHp = 280 + s.vitality * 45 + s.endurance * 20;
-  const maxMana = 90 + s.intellect * 18 + s.wisdom * 10;
-  const attackInterval = weapon.style === "gun" ? 0.95 : weapon.style === "fist" || weapon.style === "kick" ? 0.65 : 0.78;
+  const s = effectiveAttrs(fighter);
+  const st = getStoneCombatMods();
+
+  // Strength → physical damage, Intellect → skill mult, Tactics → hybrid skill edge
+  let baseDamage =
+    16 +
+    s.strength * 3.2 +
+    s.dexterity * 1.2 +
+    s.tactics * 0.8 +
+    weapon.damageBonus +
+    st.damage;
+  const spellDamageMult = 1 + s.intellect * 0.04 + s.tactics * 0.015 + st.spellDamage;
+
+  const critChance = Math.min(
+    0.6,
+    0.06 + s.dexterity * 0.018 + s.agility * 0.008 + weapon.critBonus + st.crit,
+  );
+
+  // Vitality / Endurance → life
+  const maxHp = 260 + s.vitality * 48 + s.endurance * 22 + st.health;
+  // Wisdom / Intellect → mana
+  const maxMana = 85 + s.wisdom * 16 + s.intellect * 12 + st.mana;
+
+  let attackInterval =
+    weapon.style === "gun" ? 0.95 : weapon.style === "fist" || weapon.style === "kick" ? 0.62 : 0.78;
+  attackInterval *= Math.max(0.48, 1 - s.agility * 0.012 - st.attackSpeed) * onslaughtAttackSpeedMult();
+
+  const moveSpeedMult = 1 + s.agility * 0.015 + st.speed;
+  const defense = Math.min(0.5, s.endurance * 0.02 + st.defense);
+  const magicDefense = Math.min(0.5, s.wisdom * 0.022 + st.magicDefense);
+  const aoeMult = 1 + st.aoe + s.intellect * 0.01;
+
   return {
     baseDamage: Math.round(baseDamage),
+    spellDamageMult,
     critChance,
     maxHp: Math.round(maxHp),
     maxMana: Math.round(maxMana),
     attackRange: weapon.range,
     attackInterval,
+    moveSpeedMult,
+    defense,
+    magicDefense,
+    aoeMult,
   };
 }
 
@@ -265,7 +287,6 @@ export function getWeaponForFighter(fighterId: string): GameWeapon {
   return WEAPONS_BY_FIGHTER[fighterId] ?? DEFAULT_WEAPON;
 }
 
-/** Full loadout for a fighter id (defaults to active selection). */
 export function getGameLoadout(fighterId?: string | null): GameLoadout {
   const fighter = (fighterId ? getFighter(fighterId) : null) ?? getActiveFighter();
   const kit = getFighterKit(fighter.id);
@@ -277,11 +298,11 @@ export function getGameLoadout(fighterId?: string | null): GameLoadout {
     skills: kit.skills,
     special: kit.special,
     tools: GAME_TOOLS,
+    attributes: effectiveAttrs(fighter),
     combat: combatFrom(fighter, weapon),
   };
 }
 
-/** HUD-friendly skill row (glyph + name + cooldown + AoE flag). */
 export function loadoutSkillBar(loadout: GameLoadout) {
   return loadout.skills.map((s, i) => ({
     index: i,

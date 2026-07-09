@@ -51,6 +51,19 @@ import { SlashWaveField } from "./combat/slashVfx";
 import { AuraField } from "./combat/auras";
 import { getActiveCombatProfile, brainTuning, type BrainArchetype } from "../data/characterCombatProfiles";
 import { pickHeroEnemies, heroEnemyAsTemplate } from "../data/heroEnemyLibrary";
+import { CDN_MONSTER_TEMPLATES } from "../data/cdnMonsters";
+import { getStoneCombatMods, addStone, rollStoneDrop, STONE_META } from "../data/stones";
+import { resolveSkillBoost } from "../data/abilityUpgrades";
+import {
+  resolveHitProcs,
+  resolveKillProcs,
+  onslaughtAttackSpeedMult,
+  isOnslaughtActive,
+  tryBlurOnHitTaken,
+  blurDamageMult,
+  isBlurActive,
+} from "../data/procs";
+import { getGameLoadout } from "../data/gameCombat";
 import { FX2D } from "./FX2D";
 import { DUNGEON_COLLECTABLES } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
@@ -354,6 +367,14 @@ export class GameEngine {
     this.playerMaxAttackCooldown = stats.attackSpeed;
     this.enemyTemplates = enemyTemplates;
     this.initStats = stats;
+    // Attribute stones + fighter loadout → speed / defense baseline
+    try {
+      const lo = getGameLoadout();
+      this.playerSpeed = 6 * lo.combat.moveSpeedMult;
+      this.playerDefense = Math.round(stats.defense + lo.combat.defense * 40);
+    } catch {
+      /* ignore */
+    }
     this._camLook.copy(this.playerPos);
 
     const w = container.clientWidth;
@@ -969,6 +990,11 @@ export class GameEngine {
       this.enemyBrains.set(h.id, h.brain);
     }
 
+    // CDN monster pack (D1 / assets.grudge-studio.com) — streams at runtime.
+    const cdnRng = mulberry(this.mapSeed ^ 0xcd4);
+    const cdnPick = [...CDN_MONSTER_TEMPLATES].sort(() => cdnRng() - 0.5).slice(0, 3 + Math.min(4, this.islandRound));
+    for (const m of cdnPick) configs.push({ template: m, count: 1 });
+
     const rng = mulberry(this.mapSeed ^ 0x51aced);
     for (const { template, count } of configs) {
       for (let i = 0; i < count; i++) {
@@ -1485,7 +1511,8 @@ export class GameEngine {
       return;
     }
     this.playerMana -= skill.manaCost;
-    this.skillCdUntil[idx] = now + skill.cooldown * 1000;
+    const preBoost = resolveSkillBoost(skill.id);
+    this.skillCdUntil[idx] = now + skill.cooldown * 1000 * preBoost.cooldownMult;
 
     const dir = this.resolveAimDir();
     this.playerFacing = Math.atan2(dir.x, dir.z);
@@ -1497,10 +1524,21 @@ export class GameEngine {
     }
 
     const mods = this.perkMods();
-    const dmg = this.playerBaseDamage * skill.damageMult * mods.autoAttackMult * (0.85 + Math.random() * 0.3);
+    const skillBoost = preBoost;
+    const stones = getStoneCombatMods();
+    const loadout = getGameLoadout();
+    const spell = loadout.combat.spellDamageMult;
+    const dmg =
+      this.playerBaseDamage *
+      skill.damageMult *
+      mods.autoAttackMult *
+      skillBoost.damageMult *
+      spell *
+      (0.85 + Math.random() * 0.3);
     const color = skill.color ?? elementColor(skill.element);
-    const aoeMul = mods.aoeRadiusMult;
-    const slashMul = mods.slashRangeMult;
+    const aoeMul = mods.aoeRadiusMult * skillBoost.aoeMult * loadout.combat.aoeMult;
+    const slashMul = mods.slashRangeMult * (1 + stones.aoe * 0.5);
+    const skillId = skill.id;
 
     if (skill.targeting === "self") {
       // Heal-ish for marco regen style
@@ -1524,9 +1562,10 @@ export class GameEngine {
           reach: skill.aoeRadius ?? 4,
         });
         for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
-          this.damageEnemy(en, dmg, false);
+          this.damageEnemy(en, dmg, false, skillId);
         }
       }
+      this.auras?.pulse(skill.element, this.playerPos.clone(), 2.2 * aoeMul, 0.45);
       this.notifyState();
       return;
     }
@@ -1538,6 +1577,7 @@ export class GameEngine {
         color,
         radius: 1.4 * Math.min(1.35, aoeMul),
       });
+      this.auras?.pulse(skill.element, this.playerPos.clone(), 1.8, 0.35);
       this.log(`${skill.name}!`);
       this.notifyState();
       return;
@@ -1570,9 +1610,10 @@ export class GameEngine {
         dir,
         reach: radius,
       });
+      this.auras?.pulse(skill.element, center.clone(), radius * 0.9, 0.5);
       for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
-        const isCrit = Math.random() < this.playerCritChance + mods.critBonus + 0.05;
-        this.damageEnemy(en, dmg * (isCrit ? 1.75 : 1), isCrit);
+        const isCrit = Math.random() < this.playerCritChance + mods.critBonus + skillBoost.critBonus + 0.05;
+        this.damageEnemy(en, dmg * (isCrit ? 1.75 : 1), isCrit, skillId);
       }
       this.log(`${skill.name} detonates!`);
       this.notifyState();
@@ -1613,9 +1654,10 @@ export class GameEngine {
       });
     }
     for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
-      const isCrit = Math.random() < this.playerCritChance + mods.critBonus + 0.05;
-      this.damageEnemy(en, dmg * (isCrit ? 1.75 : 1), isCrit);
+      const isCrit = Math.random() < this.playerCritChance + mods.critBonus + skillBoost.critBonus + 0.05;
+      this.damageEnemy(en, dmg * (isCrit ? 1.75 : 1), isCrit, skillId);
     }
+    this.auras?.pulse(skill.element, this.playerPos.clone(), 1.6 * aoeMul, 0.35);
     this.log(`${skill.name}!`);
     this.notifyState();
   }
@@ -1674,22 +1716,69 @@ export class GameEngine {
     return out;
   }
 
-  /** Apply skill/deployable damage to one enemy (tier mitigation, damage number,
-   *  hurt/death). Marks state dirty so off-cast hits refresh the HUD once/frame. */
-  private damageEnemy(en: EnemyInstance, amount: number, isCrit: boolean) {
+  /**
+   * Apply damage + stone procs (bolts, novas, elemental). Optional skillId for ranks.
+   */
+  private damageEnemy(en: EnemyInstance, amount: number, isCrit: boolean, skillId?: string) {
     if (en.state === "dead" || en.state === "death") return;
-    const dmg = Math.max(1, Math.floor(amount) - Math.floor(en.template.tier * 2));
+    const skillBoost = skillId ? resolveSkillBoost(skillId) : undefined;
+    const stones = getStoneCombatMods();
+    const spell = 1 + stones.spellDamage;
+    let raw = amount * (skillBoost?.damageMult ?? 1);
+    const baseForProc = Math.max(1, Math.floor(amount));
+    const procs = resolveHitProcs({
+      isCrit,
+      isSkill: !!skillId,
+      baseDamage: baseForProc,
+      spellPower: spell,
+    });
+    let dmg = Math.max(1, Math.floor(raw) + procs.extraDamage - Math.floor(en.template.tier * 2));
+    if (en.model.group.userData.shockedUntil && performance.now() < en.model.group.userData.shockedUntil) {
+      dmg = Math.floor(dmg * 1.2);
+    }
     en.hp = Math.max(0, en.hp - dmg);
+    if (procs.heal > 0) this.playerHp = Math.min(this.playerMaxHp, this.playerHp + procs.heal);
+    if (procs.shock) en.model.group.userData.shockedUntil = performance.now() + 2500;
+    if (procs.frost) en.model.group.userData.chilledUntil = performance.now() + 2200;
+    if (procs.burn) en.model.group.userData.bleedUntil = performance.now() + 2800;
+
     const wp = en.model.group.position.clone();
     wp.y += en.model.height * 0.7;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
-    this.particles?.impact(wp, isCrit ? 0xffd54a : 0xff7a1e);
+    this.particles?.impact(wp, procs.elementColor || (isCrit ? 0xffd54a : 0xff7a1e), procs.particles ? 1.1 : 0.7);
+
+    // Auto-fire projectile / nova from stones
+    const aim = new THREE.Vector3(en.position.x - this.playerPos.x, 0, en.position.z - this.playerPos.z);
+    if (aim.lengthSq() < 1e-4) aim.set(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    aim.normalize();
+    if (procs.fireBolt) {
+      this.slashField?.spawn(this.playerPos.clone().setY(1.2), aim, {
+        damage: Math.max(4, Math.floor(baseForProc * 0.5)),
+        range: 11 + stones.aoe * 4,
+        color: procs.elementColor,
+        radius: 1.15,
+        speed: 32,
+      });
+    }
+    if (procs.nova) {
+      const r = 3.2 * (1 + stones.aoe);
+      const q: ShapeQuery = { kind: "nova", origin: en.position.clone(), dir: aim, radius: r };
+      this.telegraphs?.show(q, 0.2, procs.elementColor);
+      this.auras?.pulse("fire", en.position.clone(), r, 0.4);
+      for (const other of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death" && e !== en)) {
+        const splash = Math.max(1, Math.floor(baseForProc * 0.35));
+        other.hp = Math.max(0, other.hp - splash);
+        if (other.hp <= 0) this.killEnemy(other, skillId);
+      }
+    }
+
+    if (procs.labels.length) this.log(procs.labels.join(" · "));
     if (en.hp <= 0) {
-      this.killEnemy(en);
+      this.killEnemy(en, skillId);
     } else {
       en.anim.hurtPhase = 1;
       en.state = "hurt";
-      en.hurtTimer = 0.4;
+      en.hurtTimer = en.model.group.userData.chilledUntil ? 0.55 : 0.35;
     }
   }
 
@@ -1907,60 +1996,46 @@ export class GameEngine {
     }
 
     const mods = this.perkMods();
-    const base = this.playerBaseDamage * mods.autoAttackMult;
+    const stones = getStoneCombatMods();
+    const base = this.playerBaseDamage * mods.autoAttackMult + stones.damage * 0.35;
     const variance = 0.8 + Math.random() * 0.4;
-    const critChance = Math.min(0.75, this.playerCritChance + mods.critBonus);
+    const critChance = Math.min(0.75, this.playerCritChance + mods.critBonus + stones.crit);
     const isCrit = Math.random() < critChance;
-    let rawDmg = Math.max(1, Math.floor(base * variance * (isCrit ? 1.75 : 1)));
+    let rawDmg = Math.max(1, Math.floor(base * variance * (isCrit ? 1.85 : 1)));
     if (mods.burnOnHit > 0) rawDmg += Math.floor(base * mods.burnOnHit);
-    const dmg = Math.max(1, rawDmg - Math.floor(enemy.template.tier * 2));
+    // Route through damageEnemy for procs/bolts/novas
+    this.playerAttackCooldown =
+      this.playerMaxAttackCooldown * mods.attackSpeedMult * Math.max(0.5, 1 - stones.attackSpeed) * onslaughtAttackSpeedMult();
 
-    enemy.hp = Math.max(0, enemy.hp - dmg);
-    this.playerAttackCooldown = this.playerMaxAttackCooldown * mods.attackSpeedMult;
-
-    // Face the enemy
     const dx = enemy.position.x - this.playerPos.x;
     const dz = enemy.position.z - this.playerPos.z;
     this.playerFacing = Math.atan2(dx, dz);
-
     this.playerAnimator?.triggerAttack();
 
-    // Perk auto-attack slash waves travel past the punch/kick.
     if (mods.autoAttackSlash) {
       const dir = new THREE.Vector3(dx, 0, dz);
       if (dir.lengthSq() < 1e-4) dir.set(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
       dir.normalize();
       this.slashField?.spawn(this.playerPos.clone().setY(1.1), dir, {
-        damage: dmg * 0.65,
-        range: 7 * mods.slashRangeMult,
-        color: mods.burnOnHit > 0 ? 0xff5522 : 0xffcc66,
-        radius: 1.25,
+        damage: rawDmg * 0.55,
+        range: 7 * mods.slashRangeMult * (1 + stones.aoe * 0.4),
+        color: stones.procBurn > 0.1 ? 0xff5522 : 0xffcc66,
+        radius: 1.25 + stones.aoe,
       });
     }
 
-    const wp = enemy.model.group.position.clone();
-    wp.y += enemy.model.height * 0.7;
-    this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
-
+    this.damageEnemy(enemy, rawDmg, isCrit);
     if (this.fx) {
+      const wp = enemy.model.group.position.clone();
+      wp.y += enemy.model.height * 0.7;
       const sc = this.worldToScreen(wp);
       if (isCrit) this.fx.spawnSpellImpact(sc.x, sc.y, "#ff4400", 50);
       else this.fx.spawnHitSparks(sc.x, sc.y, "#ffaa00", 10);
     }
-
-    this.log(`You hit ${enemy.template.name} for ${dmg}${isCrit ? " CRIT!" : ""}`);
-
-    if (enemy.hp <= 0) {
-      this.killEnemy(enemy);
-    } else {
-      enemy.anim.hurtPhase = 1;
-      enemy.state = "hurt";
-      enemy.hurtTimer = 0.4;
-    }
     this.notifyState();
   }
 
-  private killEnemy(enemy: EnemyInstance) {
+  private killEnemy(enemy: EnemyInstance, skillId?: string) {
     enemy.hp = 0;
     enemy.state = "death";
     enemy.anim.deathPhase = 0.01;  // trigger death animation
@@ -1975,13 +2050,38 @@ export class GameEngine {
     this.playerXp += xp;
     this.log(`${enemy.template.name} defeated! +${xp} XP`);
 
+    // Gold + attribute stone drops + kill procs
+    const w = getWallet();
+    const goldGain = 8 + enemy.template.tier * 6 + (isBoss ? 180 + enemy.template.tier * 40 : 0) + Math.floor(Math.random() * 8);
+    const soulsGain = isBoss ? 2 + Math.floor(enemy.template.tier / 2) : Math.random() < 0.08 ? 1 : 0;
+    saveWallet({
+      ...w,
+      gold: w.gold + goldGain,
+      souls: w.souls + soulsGain,
+      embers: w.embers + (isBoss ? 3 : Math.random() < 0.12 ? 1 : 0),
+    });
+    this.log(`+${goldGain} gold${soulsGain ? ` · +${soulsGain} souls` : ""}`);
+
+    const dropChance = isBoss ? 0.92 : 0.28 + enemy.template.tier * 0.05 + this.islandRound * 0.012;
+    if (Math.random() < dropChance) {
+      const stone = rollStoneDrop({
+        itemLevel: enemy.template.tier * 5 + this.islandRound * 2,
+        seed: (Math.random() * 0xffffffff) >>> 0,
+        boss: isBoss,
+      });
+      addStone(stone);
+      const meta = STONE_META[stone.attr];
+      this.log(`Stone: ${meta.glyph} ${stone.name} (${stone.effects.length} effects)`);
+    }
+
+    const killProc = resolveKillProcs();
+    if (killProc.onslaughtSec > 0) {
+      this.log("Onslaught! (attack speed up)");
+      this.auras?.pulse("lightning", this.playerPos.clone(), 2.2, 0.4);
+    }
+
     if (isBoss) {
       this.bossEnemyId = null;
-      const w = getWallet();
-      const goldLoot = 180 + enemy.template.tier * 40;
-      const soulsLoot = 2 + Math.floor(enemy.template.tier / 2);
-      saveWallet({ ...w, gold: w.gold + goldLoot, souls: w.souls + soulsLoot });
-      this.log(`Boss spoils: +${goldLoot} gold, +${soulsLoot} souls.`);
     }
 
     setTimeout(() => {
@@ -2087,11 +2187,24 @@ export class GameEngine {
       return;
     }
     const mods = this.perkMods();
+    const stones = getStoneCombatMods();
+    // Magical vs physical: bosses/magic names use magicDefense
+    const isMagic = /bolt|hex|arcane|magic|curse|spell|nova|shock/i.test(source);
+    const def = isMagic ? stones.magicDefense : stones.defense;
     let mitigated = Math.max(1, amount - Math.floor(this.playerDefense * 0.5));
-    mitigated = Math.max(1, Math.floor(mitigated * mods.damageTakenMult));
+    mitigated = Math.max(
+      1,
+      Math.floor(mitigated * mods.damageTakenMult * Math.max(0.5, 1 - def) * blurDamageMult()),
+    );
+    if (tryBlurOnHitTaken()) {
+      this.log("Blur! Damage reduced.");
+      this.auras?.pulse("arcane", this.playerPos.clone(), 1.6, 0.35);
+    }
     if (this.blocking) {
       mitigated = Math.max(1, Math.floor(mitigated * 0.3));
       this.log(`Blocked ${source} — only ${mitigated} damage.`);
+    } else if (isBlurActive()) {
+      this.log(`${source} glances (${mitigated})`);
     } else {
       this.log(`${source} hits you for ${mitigated}`);
     }

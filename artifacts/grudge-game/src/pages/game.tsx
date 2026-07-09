@@ -230,11 +230,10 @@ function Game() {
     );
   }, [char, classesData, weaponsData]);
 
-  // Independent combat loadout (fighter skills + signature weapon).
-  const loadout = useMemo(() => getGameLoadout(getActiveFighter().id), []);
+  // Fighter + stones + skill ranks (re-read each visit so socketed stones apply).
+  const loadout = useMemo(() => getGameLoadout(getActiveFighter().id), [bagTick]);
   const skillBar = useMemo(() => loadoutSkillBar(loadout), [loadout]);
 
-  // Prefer loadout combat stats over R2 class formulas when available.
   const combatStats = useMemo((): PlayerInitStats | null => {
     if (!playerStats) return null;
     return {
@@ -243,6 +242,7 @@ function Game() {
       mana: loadout.combat.maxMana,
       baseDamage: loadout.combat.baseDamage,
       critChance: loadout.combat.critChance,
+      defense: Math.round(playerStats.defense + loadout.combat.defense * 40),
       // Engine treats this as seconds between basic attacks.
       attackSpeed: loadout.combat.attackInterval,
     };

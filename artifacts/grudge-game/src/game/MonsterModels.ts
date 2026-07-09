@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { EnemyModel, Archetype } from "./EnemyFactory";
+import { CDN_MONSTER_BY_ID, isCdnMonsterId } from "../data/cdnMonsters";
 
 /**
  * GLB monster registry.
@@ -80,10 +81,37 @@ export const ANIMATED_MONSTER_TEMPLATES = MONSTER_DEFS.filter((d) => d.clip).map
 }));
 
 export function isMonsterId(id: string): boolean {
-  return MONSTER_BY_ID.has(id);
+  return MONSTER_BY_ID.has(id) || isCdnMonsterId(id);
 }
 
 const MODELS_BASE = `${import.meta.env.BASE_URL}models/monsters`;
+
+function resolveMonsterLoad(id: string): {
+  url: string;
+  height: number;
+  archetype: Archetype;
+  clip: string | null;
+} | null {
+  const local = MONSTER_BY_ID.get(id);
+  if (local) {
+    return {
+      url: `${MODELS_BASE}/${local.file}`,
+      height: local.height,
+      archetype: local.archetype,
+      clip: local.clip,
+    };
+  }
+  const cdn = CDN_MONSTER_BY_ID.get(id);
+  if (cdn) {
+    return {
+      url: cdn.url,
+      height: cdn.height,
+      archetype: cdn.archetype,
+      clip: cdn.clipHint,
+    };
+  }
+  return null;
+}
 
 /** Dispose every texture referenced by a material. */
 function disposeMaterialTextures(mat: THREE.Material) {
@@ -132,7 +160,7 @@ export function loadMonsterModel(
   loader: GLTFLoader,
   onReady?: (model: EnemyModel) => void,
 ): EnemyModel {
-  const def = MONSTER_BY_ID.get(id);
+  const def = resolveMonsterLoad(id);
   if (!def) throw new Error(`Unknown monster id: ${id}`);
 
   const group = new THREE.Group();
@@ -152,7 +180,7 @@ export function loadMonsterModel(
   };
 
   loader.load(
-    `${MODELS_BASE}/${def.file}`,
+    def.url,
     (gltf) => {
       // If the enemy was removed/disposed before the GLB finished streaming,
       // release the freshly-loaded resources immediately instead of attaching
@@ -201,9 +229,13 @@ export function loadMonsterModel(
       group.add(inner);
 
       // Skeletal clip → AnimationMixer (rigged GLBs only).
-      if (def.clip && gltf.animations.length > 0) {
+      if (gltf.animations.length > 0) {
+        const hint = def.clip;
         const clip =
-          gltf.animations.find((a) => a.name === def.clip) ??
+          (hint
+            ? gltf.animations.find((a) => a.name === hint) ??
+              gltf.animations.find((a) => a.name.toLowerCase().includes(hint.toLowerCase()))
+            : undefined) ??
           gltf.animations.find((a) => /idle/i.test(a.name)) ??
           gltf.animations[0];
         if (clip) {
@@ -221,7 +253,7 @@ export function loadMonsterModel(
     (err) => {
       // Non-fatal: the (empty) group stays in the scene; combat still works.
       // eslint-disable-next-line no-console
-      console.warn(`[MonsterModels] failed to load ${def.file}:`, err);
+      console.warn(`[MonsterModels] failed to load ${def.url}:`, err);
     },
   );
 
