@@ -1,10 +1,10 @@
 /**
- * Playable identity for Flare Boss Arena — derived from the in-game fighter roster,
- * not Warlords character creation / API records.
+ * Playable identity for Flare Boss Arena — fighter roster only.
+ * Independent of Warlords character creation / Soul Forge.
  */
 import type { FighterDef } from "./fighters";
 import { getActiveFighter } from "./fighters";
-import { CLASS_STARTER_WEAPON } from "./starterGear";
+import { getGameLoadout } from "./gameCombat";
 
 /** Virtual character shape consumed by dungeon/camp/boss stat helpers. */
 export interface PlayableCharacter {
@@ -16,23 +16,6 @@ export interface PlayableCharacter {
   faction?: string;
   attributes: Record<string, number>;
   equipment: Record<string, string | undefined>;
-}
-
-const ROLE_CLASS: Record<string, string> = {
-  "Corsair King": "warrior",
-  "Rubber Brawler": "warrior",
-  "Trio Vanguard": "warrior",
-  Emperor: "warrior",
-  Tactician: "mage",
-  Assassin: "ranger",
-  Warden: "warrior",
-  Gunner: "ranger",
-  Recruit: "warrior",
-  "Marine Recruit": "warrior",
-};
-
-function fighterClass(fighter: FighterDef): string {
-  return ROLE_CLASS[fighter.role] ?? "warrior";
 }
 
 function fighterAttributes(fighter: FighterDef): Record<string, number> {
@@ -49,23 +32,23 @@ function fighterAttributes(fighter: FighterDef): Record<string, number> {
   };
 }
 
-/** Build the active fighter as a virtual character record for 3D scenes + HUD. */
+/** Build the active fighter as a virtual character for 3D scenes + HUD. */
 export function playableCharacterFromFighter(fighter: FighterDef): PlayableCharacter {
-  const charClass = fighterClass(fighter);
-  const mainHand = CLASS_STARTER_WEAPON[charClass]?.id ?? CLASS_STARTER_WEAPON.warrior.id;
+  const loadout = getGameLoadout(fighter.id);
   return {
     id: fighter.id,
     name: fighter.name,
-    class: charClass,
+    // Class field kept for UI labels — maps to fighter role, not Warlords class trees.
+    class: fighter.role.toLowerCase().replace(/\s+/g, "_"),
     race: "human",
     level: 1,
-    faction: "grudge-studio",
+    faction: "flare-boss-arena",
     attributes: fighterAttributes(fighter),
-    equipment: { mainHand },
+    equipment: { mainHand: loadout.weapon.id },
   };
 }
 
-/** Active fighter as the sole playable identity (no API / Soul Forge gate). */
+/** Active fighter as the sole playable identity. */
 export function getPlayableCharacter(): PlayableCharacter {
   return playableCharacterFromFighter(getActiveFighter());
 }

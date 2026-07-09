@@ -182,24 +182,20 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
     return () => { live = false; };
   }, []);
 
-  // Equipped slots + inventory. Inventory is seeded with the T0 starter loadout
-  // (class weapon + hatchet + pickaxe + 2× lesser healing potion + hearthstone)
-  // immediately on mount, so a freshly-created warlord always has tools/portal.
-  // Once R2 master data loads we top up the inventory with a handful of T1/T2
-  // demo items so the panel has interesting things to equip.
+  // Inventory: fighter signature weapon + harvest tools + potions (independent game kit).
   const [equipped, setEquipped] = useState<Partial<Record<SlotName, AnyItem>>>({});
-  const [inventory, setInventory] = useState<AnyItem[]>(() => starterLoadout(character.class));
+  const loadoutKey = character.name;
+  const [inventory, setInventory] = useState<AnyItem[]>(() => starterLoadout(loadoutKey));
 
-  // If the character identity changes (different warlord opened), reset to
-  // their own starter loadout instead of carrying state across characters.
+  // If the fighter changes, reset bag to that fighter's kit.
   const characterKey = `${character.name}::${character.class}`;
   const seededKeyRef = useRef<string>(characterKey);
   useEffect(() => {
     if (seededKeyRef.current === characterKey) return;
     seededKeyRef.current = characterKey;
-    setInventory(starterLoadout(character.class));
+    setInventory(starterLoadout(character.name));
     setEquipped({});
-  }, [characterKey, character.class]);
+  }, [characterKey, character.name]);
 
   useEffect(() => {
     if (!data) return;
@@ -742,11 +738,17 @@ function AttributesTab({ character }: { character: CharSummary }) {
 }
 
 function SkillsTab({ character, mainCategory }: { character: CharSummary; mainCategory?: string }) {
-  const { classSkills, weaponType, weaponSlots, isLoading } = useResolvedSkills(character.class, mainCategory);
+  const { classSkills, weaponType, weaponSlots, isLoading, loadout } = useResolvedSkills(character.class, mainCategory);
 
   return (
     <div>
-      <SectionTitle>Class Skills{classSkills ? ` — ${classSkills.name}` : ""}</SectionTitle>
+      <SectionTitle>
+        Fighter Skills{classSkills ? ` — ${classSkills.name}` : ""}
+      </SectionTitle>
+      <p style={{ fontSize: 10, color: THEME.muted, marginBottom: 8 }}>
+        Independent arena kit · keys 1–5 cast · R special · AoE skills need a second LMB to place.
+        {loadout ? ` · Weapon: ${loadout.weapon.glyph} ${loadout.weapon.name}` : ""}
+      </p>
       {classSkills?.skills?.length ? (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 8, marginBottom: 8 }}>
           {classSkills.skills.map((sk) => (
@@ -765,13 +767,12 @@ function SkillsTab({ character, mainCategory }: { character: CharSummary; mainCa
               <div style={{ minWidth: 0 }}>
                 <div className="flex items-center justify-between" style={{ gap: 6 }}>
                   <span style={{ fontFamily: THEME.fontHeading, fontSize: 11, color: THEME.goldLight, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>{sk.name}</span>
-                  {sk.isSignature && <span style={{ fontSize: 7, color: "#000", background: THEME.gold, padding: "1px 4px", borderRadius: 3, fontWeight: 700, textTransform: "uppercase" }}>Sig</span>}
+                  {sk.isSignature && <span style={{ fontSize: 7, color: "#000", background: THEME.gold, padding: "1px 4px", borderRadius: 3, fontWeight: 700, textTransform: "uppercase" }}>R</span>}
                 </div>
                 <p style={{ fontSize: 9, color: THEME.muted, lineHeight: 1.4, margin: "2px 0 0" }}>{sk.description}</p>
                 <div style={{ display: "flex", gap: 8, marginTop: 4, fontFamily: THEME.fontMono, fontSize: 8, color: THEME.dim }}>
-                  {sk.cooldown ? <span>CD {sk.cooldown}t</span> : null}
+                  {sk.cooldown ? <span>CD {sk.cooldown}s</span> : null}
                   {sk.manaCost ? <span style={{ color: THEME.blue }}>MP {sk.manaCost}</span> : null}
-                  {sk.staminaCost ? <span style={{ color: THEME.green }}>SP {sk.staminaCost}</span> : null}
                   {sk.damage ? <span style={{ color: THEME.red }}>{sk.damage}x</span> : null}
                 </div>
               </div>
@@ -779,14 +780,14 @@ function SkillsTab({ character, mainCategory }: { character: CharSummary; mainCa
           ))}
         </div>
       ) : (
-        <p style={{ fontSize: 11, color: THEME.muted }}>No class skills recorded for this discipline.</p>
+        <p style={{ fontSize: 11, color: THEME.muted }}>No skills for this fighter.</p>
       )}
 
       <SectionTitle style={{ marginTop: 18 }}>
-        {weaponType ? `${weaponType.name} Skills` : "Weapon Skills"}
+        {weaponType ? `Weapon — ${weaponType.name}` : "Weapon"}
       </SectionTitle>
       {isLoading ? (
-        <p style={{ fontSize: 11, color: THEME.muted }}>Loading weapon mastery…</p>
+        <p style={{ fontSize: 11, color: THEME.muted }}>…</p>
       ) : weaponSlots.length ? (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 8 }}>
           {weaponSlots.map((slot) => (

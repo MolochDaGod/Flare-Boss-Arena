@@ -5,10 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Book, Flame, Shield, Loader2, Sparkles, Swords } from "lucide-react";
-import { useResolvedSkills } from "@/data/skillsResolver";
+import { useResolvedSkills, type WeaponSlot } from "@/data/skillsResolver";
 import { SkillIcon } from "@/components/SkillIcon";
 import type { ClassSkill } from "@/data/classSkills";
-import type { WeaponSlot } from "@/game/weaponSkills";
 
 const SLOT_ACCENT: Record<string, string> = {
   primary: "border-primary/40 text-primary",
@@ -60,7 +59,9 @@ function WeaponSlotBlock({ slot }: { slot: WeaponSlot }) {
     <div className="rounded border border-border/40 bg-background/40 p-3">
       <div className="flex items-center justify-between mb-2">
         <span className={`text-[10px] font-serif tracking-widest uppercase px-2 py-0.5 rounded border ${SLOT_ACCENT[slot.type] ?? "border-border/50 text-muted-foreground"}`}>{slot.label}</span>
-        <span className="text-[9px] font-mono text-muted-foreground uppercase">Unlock T{slot.unlockTier}</span>
+        <span className="text-[9px] font-mono text-muted-foreground uppercase">
+          {slot.unlockTier != null ? `Tier ${slot.unlockTier}` : "Ready"}
+        </span>
       </div>
       <div className="space-y-2">
         {slot.skills.map((sk) => (

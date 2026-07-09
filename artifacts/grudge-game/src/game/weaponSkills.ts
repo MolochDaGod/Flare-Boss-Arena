@@ -1,3 +1,8 @@
+/**
+ * Weapon skill stubs — Warlords weapon-skills.json is no longer required.
+ * Live combat uses data/fighterSkills + data/gameCombat exclusively.
+ */
+
 export interface WeaponSkill {
   id: string;
   name: string;
@@ -29,27 +34,17 @@ export interface WeaponSkillsData {
   slotTypes: ("primary" | "secondary" | "ability" | "ultimate")[];
 }
 
-const BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
-
-let cache: Promise<WeaponSkillsData> | null = null;
+/** Empty local catalog — no network. Equipment page degrades gracefully. */
+const EMPTY: WeaponSkillsData = {
+  weaponTypes: {},
+  classWeapons: {},
+  slotTypes: ["primary", "secondary", "ability", "ultimate"],
+};
 
 export function fetchWeaponSkills(): Promise<WeaponSkillsData> {
-  if (!cache) {
-    cache = fetch(`${BASE}/data/weapon-skills.json`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`weapon-skills.json HTTP ${r.status}`);
-        return r.json() as Promise<WeaponSkillsData>;
-      })
-      .catch((err) => {
-        cache = null;
-        throw err;
-      });
-  }
-  return cache;
+  return Promise.resolve(EMPTY);
 }
 
-export function classWeaponList(data: WeaponSkillsData, charClass: string): string[] {
-  const map = data.classWeapons;
-  const key = (Object.keys(map).find((k) => k.toLowerCase() === charClass.toLowerCase())) ?? Object.keys(map)[0];
-  return map[key] ?? [];
+export function classWeaponList(_data: WeaponSkillsData, _charClass: string): string[] {
+  return [];
 }

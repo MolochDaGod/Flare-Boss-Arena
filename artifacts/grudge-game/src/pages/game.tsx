@@ -8,8 +8,6 @@ import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type
 import { getSelectedSkin } from "@/data/skins";
 import { getActiveFighter } from "@/data/fighters";
 import { getPlayableCharacter } from "@/data/playableIdentity";
-import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
-import { useResolvedSkills } from "@/data/skillsResolver";
 import { SkillIcon } from "@/components/SkillIcon";
 import { BarGauge, OrbGauge, Separator, WarningBanner } from "@/components/CraftpixUI";
 import { getWallet, saveWallet } from "@/data/wallet";
@@ -19,10 +17,7 @@ import {
   addResource,
   spendResource,
 } from "@/data/resources";
-import {
-  getActiveFighterKit,
-  fighterSkillsAsClassSkills,
-} from "@/data/fighterSkills";
+import { getGameLoadout, loadoutSkillBar } from "@/data/gameCombat";
 import { toast } from "sonner";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
@@ -234,24 +229,31 @@ function Game() {
     );
   }, [char, classesData, weaponsData]);
 
-  // Fighter-canonical skills (One Piece kits) for the HUD skill bar.
-  const fighterKit = useMemo(() => getActiveFighterKit(), []);
-  const fighterHudSkills = useMemo(() => fighterSkillsAsClassSkills(fighterKit), [fighterKit]);
-  // Keep class/weapon resolver as fallback labels only.
-  const hudClass = String(char.class ?? "warrior").toLowerCase();
-  const hudMainCategory = hudClass ? CLASS_STARTER_WEAPON[hudClass]?.category : null;
-  const { classSkills: hudClassSkills, weaponSlots: hudWeaponSlots } = useResolvedSkills(hudClass, hudMainCategory);
+  // Independent combat loadout (fighter skills + signature weapon).
+  const loadout = useMemo(() => getGameLoadout(getActiveFighter().id), []);
+  const skillBar = useMemo(() => loadoutSkillBar(loadout), [loadout]);
 
-  // Only start the engine once we have enemies + stats
-  const ready = enemyTemplates.length > 0 && !!playerStats;
+  // Prefer loadout combat stats over R2 class formulas when available.
+  const combatStats = useMemo((): PlayerInitStats | null => {
+    if (!playerStats) return null;
+    return {
+      ...playerStats,
+      hp: loadout.combat.maxHp,
+      mana: loadout.combat.maxMana,
+      baseDamage: loadout.combat.baseDamage,
+      critChance: loadout.combat.critChance,
+      // Engine treats this as seconds between basic attacks.
+      attackSpeed: loadout.combat.attackInterval,
+    };
+  }, [playerStats, loadout]);
+
+  const ready = enemyTemplates.length > 0 && !!combatStats;
 
   useEffect(() => {
-    if (!mountRef.current || !ready || !playerStats) return;
+    if (!mountRef.current || !ready || !combatStats) return;
 
     const c = char as unknown as Record<string, unknown>;
     const charId = c.id as string | number;
-    const charClass = String(c.class ?? "warrior").toLowerCase();
-    const equipMainCategory = CLASS_STARTER_WEAPON[charClass]?.category;
     const skinId =
       getActiveFighter()?.skinId ?? (charId != null ? getSelectedSkin(charId) : null);
 
@@ -264,8 +266,15 @@ function Game() {
       });
       setBagTick((t) => t + 1);
     };
-    engine.init(mountRef.current, { ...playerStats, skinId, equipMainCategory }, enemyTemplates);
-    engine.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
+    engine.init(
+      mountRef.current,
+      {
+        ...combatStats,
+        skinId,
+        equipMainCategory: loadout.weapon.style,
+      },
+      enemyTemplates,
+    );
     engineRef.current = engine;
 
     return () => {
@@ -274,11 +283,6 @@ function Game() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
-
-  // Keep the engine's archetype mapping in sync with resolved class skills.
-  useEffect(() => {
-    engineRef.current?.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
-  }, [hudClassSkills]);
 
   useEffect(() => {
     const t = setTimeout(() => setShowControls(false), 6000);
@@ -509,33 +513,34 @@ function Game() {
         </div>
       ))}
 
-      {/* Fighter skill bar — 1-5 select (AoE needs second LMB to place) · R special */}
-      {gameState && fighterHudSkills.length > 0 && (
+      {/* Independent skill bar — fighter kit only (no Warlords class trees) */}
+      {gameState && skillBar.length > 0 && (
         <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 flex items-end gap-3">
           <div className="flex flex-col items-center gap-1">
             <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>
-              {getActiveFighter().name} · Skills
+              {loadout.fighter.name} · {loadout.weapon.glyph} {loadout.weapon.name}
             </span>
             <div className="flex gap-1.5">
-              {fighterHudSkills.slice(0, 5).map((s, i) => {
-                const pending = gameState.pendingSkillIdx === i;
-                const kitSkill = fighterKit.skills[i];
-                const isAoe = kitSkill?.targeting === "ground_aoe";
+              {skillBar.map((s) => {
+                const pending = gameState.pendingSkillIdx === s.index;
                 return (
                   <div
                     key={s.id}
-                    onClick={() => engineRef.current?.selectSkill(i)}
-                    title={`${s.name}${isAoe ? " · press then LMB place" : ""}\n${s.description}`}
+                    onClick={() => engineRef.current?.selectSkill(s.index)}
+                    title={`${s.name}${s.isAoe ? " · key then LMB place" : s.isSlash ? " · slash wave" : ""}\n${s.description}\nMP ${s.manaCost} · CD ${s.cooldown}s`}
                     className="relative w-11 h-11 rounded flex items-center justify-center text-lg bg-black border-2 hover:scale-105 transition-all overflow-hidden cursor-pointer active:scale-95"
                     style={{
-                      borderColor: pending ? "#66ccff" : GOLD + "99",
+                      borderColor: pending ? "#66ccff" : `${GOLD}99`,
                       boxShadow: pending ? "0 0 12px #66ccff" : "inset 0 0 5px #000",
                     }}
                   >
                     <span className="text-lg leading-none">{s.glyph}</span>
-                    <span className="absolute top-0.5 left-1 text-[9px] font-serif text-neutral-400">{i + 1}</span>
-                    {isAoe && (
+                    <span className="absolute top-0.5 left-1 text-[9px] font-serif text-neutral-400">{s.index + 1}</span>
+                    {s.isAoe && (
                       <span className="absolute bottom-0.5 right-0.5 text-[7px] text-cyan-300">AoE</span>
+                    )}
+                    {s.isSlash && !s.isAoe && (
+                      <span className="absolute bottom-0.5 right-0.5 text-[7px] text-amber-300">〜</span>
                     )}
                   </div>
                 );
@@ -546,7 +551,7 @@ function Game() {
             <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>Special</span>
             <button
               onClick={() => engineRef.current?.useSpecial()}
-              title={`${fighterKit.special.name}\n${fighterKit.special.description}`}
+              title={`${loadout.special.name}\n${loadout.special.description}`}
               className="relative w-12 h-12 rounded flex flex-col items-center justify-center bg-black border-2 border-amber-500/70 hover:border-amber-400 transition-all"
               style={{
                 opacity: 0.55 + 0.45 * (gameState.specialReadyPct ?? 1),
@@ -554,7 +559,7 @@ function Game() {
               }}
             >
               <span className="text-sm font-serif" style={{ color: GOLD }}>R</span>
-              <span className="text-[8px] text-amber-200/90 truncate max-w-[44px]">{fighterKit.special.name.split(" ")[0]}</span>
+              <span className="text-[8px] text-amber-200/90 truncate max-w-[44px]">{loadout.special.name.split(" ")[0]}</span>
             </button>
           </div>
         </div>

@@ -1,19 +1,17 @@
 /**
- * T0 starter loadout — given to every new warlord.
+ * Starter bag for Flare Boss Arena (independent game — not Warlords T0 trees).
  *
- * Each class starts with:
- *   • 1× class weapon (Mainhand, T0)
- *   • 1× Hatchet (harvest wood, off-combat tool)
- *   • 1× Pickaxe (harvest stone, off-combat tool)
- *   • 2× Lesser Healing Potion (consumable)
- *   • 1× Hearthstone (home-bound portal, 30-minute cooldown)
+ * Each fighter gets:
+ *   • Signature weapon (from gameCombat)
+ *   • Hatchet + Pickaxe (harvest wood/stone by attacking nodes)
+ *   • Healing potions
  *
- * These are CLIENT-AUTHORED items (the R2 master files start at T1). They share
- * the same `AnyItem` shape used elsewhere in the inventory grid so the equip
- * flow, tooltip, and hotbar render them without special-casing.
+ * Virtual inventory items for MainPanel only.
  */
 
 import type { ReactNode } from "react";
+import { getWeaponForFighter } from "./gameCombat";
+import { getFighter } from "./fighters";
 
 export interface StarterItem {
   id: string;
@@ -90,7 +88,10 @@ export const HEARTHSTONE: StarterItem = {
   abilities: ["Recall: Camp", "Bind: Sanctuary"],
 };
 
-/** Per-class starting Mainhand weapon. */
+/**
+ * @deprecated Prefer getWeaponForFighter / getGameLoadout from gameCombat.
+ * Kept so existing pages that key by warrior/mage still render a weapon.
+ */
 export const CLASS_STARTER_WEAPON: Record<string, StarterItem> = {
   warrior: {
     id: "weapon.shortsword.t0",
@@ -147,18 +148,35 @@ export const CLASS_STARTER_WEAPON: Record<string, StarterItem> = {
 };
 
 /**
- * Build the full starting inventory for a class. Returns a fresh array each
- * call so callers can safely mutate.  Consumables that stack are split into
- * `count` field (the inventory slot renders the count badge).
+ * Build inventory for a class OR fighter id. Prefer fighter weapons from
+ * gameCombat when the id matches a known fighter.
  */
-export function starterLoadout(charClass: string): StarterItem[] {
-  const weapon = CLASS_STARTER_WEAPON[charClass.toLowerCase()] ?? CLASS_STARTER_WEAPON.warrior;
+export function starterLoadout(charClassOrFighterId: string): StarterItem[] {
+  let weapon: StarterItem | undefined;
+  const f = getFighter(charClassOrFighterId);
+  if (f) {
+    const w = getWeaponForFighter(f.id);
+    weapon = {
+      id: w.id,
+      uuid: `starter-${w.id}`,
+      name: w.name,
+      tier: 0,
+      type: "weapon",
+      category: w.style,
+      slotType: "Mainhand",
+      glyph: w.glyph,
+      stats: { damage: w.damageBonus },
+      description: w.description,
+    };
+  }
+  if (!weapon) {
+    weapon = CLASS_STARTER_WEAPON[charClassOrFighterId.toLowerCase()] ?? CLASS_STARTER_WEAPON.warrior;
+  }
   return [
     { ...weapon },
     { ...HATCHET },
     { ...PICKAXE },
     { ...HEALING_POTION },
-    { ...HEARTHSTONE },
   ];
 }
 
