@@ -178,6 +178,7 @@ export class CampScene {
   private currentNearbyId: CampStationId | null = null;
   private loaded = false;
   private disposed = false;
+  private resizeObserver: ResizeObserver | null = null;
   private stateAccum = 0;
   private readonly stateInterval = 1 / 30; // throttle HUD updates to ~30 Hz
 
@@ -199,11 +200,19 @@ export class CampScene {
     this.critChance = options.critChance ?? 0.12;
   }
 
+  private getContainerSize(): { w: number; h: number } {
+    if (!this.container) {
+      return { w: window.innerWidth, h: window.innerHeight };
+    }
+    const w = this.container.clientWidth || window.innerWidth;
+    const h = this.container.clientHeight || window.innerHeight;
+    return { w, h };
+  }
+
   init(container: HTMLElement) {
     this.container = container;
-    const w = container.clientWidth;
-    const h = container.clientHeight;
-    const aspect = w / h;
+    const { w, h } = this.getContainerSize();
+    const aspect = w / Math.max(h, 1);
     const d = 11;
 
     this.scene = new THREE.Scene();
@@ -241,6 +250,9 @@ export class CampScene {
     window.addEventListener("keydown", this._keyDown);
     window.addEventListener("keyup", this._keyUp);
     container.addEventListener("click", this._click);
+
+    this.resizeObserver = new ResizeObserver(() => this.applyResize());
+    this.resizeObserver.observe(container);
 
     this.animFrameId = requestAnimationFrame(this.animate);
   }
@@ -750,15 +762,23 @@ export class CampScene {
 
   private loadPlayer() {
     const loader = new GLTFLoader();
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled || this.disposed) return;
+      settled = true;
+      this.loadFallbackPlayer();
+    }, 12_000);
     // Prefer the globally-selected fighter skin; fall back to the KayKit hero.
     loadActiveFighterModel(
       loader,
       2.6,
       (root, anim) => {
-        if (this.disposed) {
+        window.clearTimeout(timer);
+        if (this.disposed || settled) {
           disposeObject3D(root);
           return;
         }
+        settled = true;
         root.position.copy(this.playerPos);
         this.scene.add(root);
         this.playerGroup = root;
@@ -766,7 +786,12 @@ export class CampScene {
         this.loaded = true;
         this.emitState();
       },
-      () => this.loadFallbackPlayer(),
+      () => {
+        window.clearTimeout(timer);
+        if (settled || this.disposed) return;
+        settled = true;
+        this.loadFallbackPlayer();
+      },
     );
   }
 
@@ -1359,10 +1384,10 @@ export class CampScene {
     });
   }
 
-  private onResize = () => {
-    if (!this.container) return;
-    const w = this.container.clientWidth;
-    const h = this.container.clientHeight;
+  private applyResize() {
+    if (!this.container || !this.renderer || !this.camera) return;
+    const { w, h } = this.getContainerSize();
+    if (w <= 0 || h <= 0) return;
     const aspect = w / h;
     const d = 11;
     this.camera.left = -d * aspect;
@@ -1373,10 +1398,16 @@ export class CampScene {
     this.renderer.setSize(w, h);
     this.bloom?.composer.setSize(w, h);
     this.bloom?.bloomPass.resolution.set(w, h);
+  }
+
+  private onResize = () => {
+    this.applyResize();
   };
 
   dispose() {
     this.disposed = true;
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     cancelAnimationFrame(this.animFrameId);
     window.removeEventListener("resize", this.onResize);
     window.removeEventListener("keydown", this._keyDown);

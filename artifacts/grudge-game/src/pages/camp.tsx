@@ -1,6 +1,7 @@
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 import { useLocation } from "wouter";
 import { getPlayableCharacter } from "@/data/playableIdentity";
+import { getActiveFighterId, DEFAULT_FIGHTER_ID } from "@/data/fighters";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Flame, LayoutGrid, Loader2, Skull, Swords } from "lucide-react";
 import { CampScene, type CampStateUpdate, type CampStationId } from "@/game/CampScene";
@@ -108,7 +109,8 @@ function Camp() {
     },
   );
 
-  const char = getPlayableCharacter();
+  const fighterId = getActiveFighterId() ?? DEFAULT_FIGHTER_ID;
+  const char = useMemo(() => getPlayableCharacter(), [fighterId]);
 
   // Resolve class + weapon skills for the camp HUD skill bar.
   const hudClass = String(char.class ?? "warrior").toLowerCase();
@@ -171,7 +173,7 @@ function Camp() {
       sceneRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [char, handleState, handleEngage]);
+  }, [fighterId]);
 
   // Keep the scene's archetype mapping in sync with resolved class skills.
   useEffect(() => {

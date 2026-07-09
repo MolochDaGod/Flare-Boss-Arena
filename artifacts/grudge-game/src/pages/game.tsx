@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, Component, useMemo, type Reac
 import { useLocation } from "wouter";
 import { useGetEnemies, useGetClasses, useGetWeapons } from "@workspace/api-client-react";
 import { GameEngine, type GameState, type EnemyTemplate, type PlayerInitStats } from "@/game/GameEngine";
+import { MONSTER_TEMPLATES } from "@/game/MonsterModels";
 import { Loader2, ArrowLeft, Swords, Zap, Shield, Crosshair, LayoutGrid } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type PanelKey } from "@/components/MainPanel";
@@ -220,8 +221,11 @@ function Game() {
     setGameState(state);
   }, []);
 
-  // Build enemy templates from real R2 data
-  const enemyTemplates = useMemo(() => buildEnemyTemplates(enemiesData), [enemiesData]);
+  // Build enemy templates from R2 API; fall back to built-in monster roster if API is empty/invalid
+  const enemyTemplates = useMemo(() => {
+    const fromApi = buildEnemyTemplates(enemiesData);
+    return fromApi.length > 0 ? fromApi : MONSTER_TEMPLATES;
+  }, [enemiesData]);
 
   // Compute player stats from real class/weapon data
   const playerStats = useMemo(() => {

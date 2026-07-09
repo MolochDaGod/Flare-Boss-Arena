@@ -175,6 +175,9 @@ importers:
 
   .:
     devDependencies:
+      '@rollup/rollup-win32-x64-msvc':
+        specifier: ^4.62.2
+        version: 4.62.2
       playwright:
         specifier: ^1.61.1
         version: 1.61.1
@@ -1762,6 +1765,11 @@ packages:
     cpu: [x64]
     os: [linux]
     libc: [glibc]
+
+  '@rollup/rollup-win32-x64-msvc@4.62.2':
+    resolution: {integrity: sha512-BfzEnDJOt9T8M989/lA37EcJgat01wLRnoi5dQf3QzOH7jzpqTAzdDbVfRljVr5r+jzKqpbHeyOfAaXxAd0PAA==}
+    cpu: [x64]
+    os: [win32]
 
   '@scalar/helpers@0.5.2':
     resolution: {integrity: sha512-Pi1GAl8jO6ungmGj2sjDfCfqiBNrKW6HXDZmminV94ybGU/KtRLOqHwd0n9FIhY3j0RYGpGC0VCuniCICfQPHg==}
@@ -4666,6 +4674,8 @@ snapshots:
 
   '@rollup/rollup-linux-x64-gnu@4.60.3':
     optional: true
+
+  '@rollup/rollup-win32-x64-msvc@4.62.2': {}
 
   '@scalar/helpers@0.5.2': {}
 
