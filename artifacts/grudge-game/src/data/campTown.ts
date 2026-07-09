@@ -2,8 +2,30 @@
  * Grudge Harbor — the expanded camp hub layout (5× the original training yard).
  * Positions, districts, station metadata, NPC anchors, and prop scatter.
  */
-import type { CampStationId } from "@/game/CampScene";
-import { PERK_COLORS } from "./worldProps";
+
+export type CampStationId =
+  | "anvil"
+  | "skills"
+  | "stats"
+  | "quests"
+  | "stash"
+  | "portal_dungeon"
+  | "portal_boss"
+  | "perk_machines"
+  | "gumball"
+  | "perk_firebug"
+  | "perk_medic"
+  | "perk_support"
+  | "perk_gunslinger"
+  | "weapon_panel";
+
+/** Perk station marker colors — kept local to avoid campTown ↔ worldProps cycle. */
+const PERK_COLORS = {
+  firebug: 0xff5522,
+  medic: 0xff3366,
+  support: 0x3388ff,
+  gunslinger: 0xffcc33,
+} as const;
 
 export const CAMP_SCALE = 5;
 export const CAMP_BOUNDS = 90;

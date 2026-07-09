@@ -25,25 +25,12 @@ import {
   CAMP_STATION_PROXIMITY,
   campStationMarkers,
   type CampStationCategory,
+  type CampStationId,
 } from "../data/campTown";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
 import { FighterTownsperson } from "./FighterTownsperson";
 
-export type CampStationId =
-  | "anvil"
-  | "skills"
-  | "stats"
-  | "quests"
-  | "stash"
-  | "portal_dungeon"
-  | "portal_boss"
-  | "perk_machines"
-  | "gumball"
-  | "perk_firebug"
-  | "perk_medic"
-  | "perk_support"
-  | "perk_gunslinger"
-  | "weapon_panel";
+export type { CampStationId };
 
 export interface CampStation {
   id: CampStationId;
