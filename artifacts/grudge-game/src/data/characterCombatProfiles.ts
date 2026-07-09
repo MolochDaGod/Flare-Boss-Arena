@@ -95,12 +95,18 @@ export const COMBAT_PROFILES: CombatProfile[] = [
     ab("jet", "Jet Stamp", ["skill_a", "jump"], "physical", "nova", 6.5, 3.0, "Leap nova — use when player clusters"),
     ab("bazooka", "Bazooka Wave", ["skill_a", "skill_b"], "physical", "slash", 8.5, 4.0, "Special slash wave"),
   ]),
-  P("shanks", "skirmisher", "arcane", "mon_medusa", 4, [
+  P("shanks", "skirmisher", "physical", "mon_medusa", 3, [
+    ab("haki", "Haki Slash", ["combo_a"], "physical", "slash", 1.6, 3.5, "Quick sword wave"),
+    ab("kamusari", "Kamusari", ["combo_b"], "physical", "slash", 4.0, 4.5, "Horizontal cut"),
+    ab("feint", "Observation Feint", ["dodge", "combo_a"], "physical", "cone", 3.5, 2.8, "Dodge then cut"),
+    ab("slash_r", "Conqueror Slash", ["combo_a", "skill_a"], "physical", "slash", 7.0, 5.0, "Tier-1 R wave"),
+  ]),
+  P("shanks_yonko", "skirmisher", "arcane", "mon_medusa", 5, [
     ab("haki", "Haki Slash", ["combo_a"], "physical", "slash", 1.6, 3.5, "Quick sword wave"),
     ab("kamusari", "Kamusari", ["combo_b", "skill_a"], "arcane", "slash", 4.2, 5.0, "Long horizontal cut"),
     ab("feint", "Observation Feint", ["dodge", "combo_a"], "physical", "cone", 3.5, 2.8, "Dodge then cut"),
     ab("aura", "Emperor Aura", ["skill_b", "boost"], "arcane", "circle", 7.0, 4.0, "Pressure zone"),
-    ab("storm", "Red-Hair Storm", ["skill_a", "combo_c"], "physical", "nova", 9.5, 3.5, "Wide nova ultimate"),
+    ab("storm", "Divine Departure", ["skill_a", "combo_c"], "arcane", "slash", 9.5, 6.0, "Ultimate R wave"),
   ], true),
   P("law", "caster", "lightning", "kit_skel_mage", 4, [
     ab("room", "ROOM", ["skill_b", "boost"], "arcane", "circle", 5.5, 7.0, "Place control circle first"),
@@ -109,13 +115,19 @@ export const COMBAT_PROFILES: CombatProfile[] = [
     ab("takt", "Takt", ["skill_b", "combo_c"], "physical", "circle", 6.5, 6.5, "Debris slam"),
     ab("gamma", "Gamma Knife", ["skill_a", "combo_c"], "lightning", "circle", 9.0, 5.5, "High burst point AoE"),
   ]),
-  P("lucci", "assassin", "physical", "kit_skel_rogue", 4, [
+  P("lucci", "assassin", "physical", "kit_skel_rogue", 3, [
     ab("shigan", "Shigan", ["combo_a"], "physical", "line", 2.0, 3.0, "Finger pistol poke"),
-    ab("rankyaku", "Rankyaku", ["combo_b", "skill_a"], "physical", "slash", 3.6, 4.5, "Kick slash wave"),
+    ab("rankyaku", "Rankyaku", ["combo_b"], "physical", "slash", 3.6, 4.0, "Kick slash wave"),
     ab("geppo", "Geppo", ["jump", "combo_c"], "physical", "nova", 5.2, 3.5, "Air-step nova"),
-    ab("tekkai", "Tekkai", ["boost", "skill_b"], "physical", "nova", 4.5, 2.0, "Counter explode when player close"),
-    ab("leopard", "Life Return", ["skill_b", "combo_e"], "physical", "circle", 8.5, 2.8, "Beast form AoE"),
+    ab("rokuogan", "Rokuogan", ["skill_a", "combo_e"], "physical", "slash", 7.5, 4.0, "Tier-1 R shock"),
   ]),
+  P("lucci_awakened", "assassin", "physical", "kit_skel_rogue", 5, [
+    ab("shigan", "Awakened Shigan", ["combo_a"], "physical", "line", 1.8, 3.0, "Piercing finger pistols"),
+    ab("rankyaku", "Leopard Rankyaku", ["combo_b", "skill_a"], "physical", "slash", 3.2, 4.5, "Beast kick wave"),
+    ab("geppo", "Geppo", ["jump", "combo_c"], "physical", "nova", 5.0, 3.5, "Air-step nova"),
+    ab("tekkai", "Iron Body", ["boost", "skill_b"], "physical", "nova", 4.5, 2.0, "Counter explode"),
+    ab("leopard", "Awakened Rokuogan", ["skill_b", "combo_e"], "physical", "slash", 9.0, 4.5, "Ultimate R beast shock"),
+  ], true),
   P("smoker", "tank", "physical", "mon_cultist", 3, [
     ab("whiteout", "White Out", ["skill_b", "boost"], "physical", "nova", 5.0, 3.5, "Smoke nova"),
     ab("jitte", "Jitte Slam", ["combo_b", "combo_c"], "physical", "cone", 3.5, 2.5, "Heavy melee cone"),
@@ -147,12 +159,18 @@ export const COMBAT_PROFILES: CombatProfile[] = [
     ab("talon", "Talon Dive", ["jump", "combo_b"], "fire", "circle", 5.0, 4.0, "Dive-bomb"),
     ab("storm", "Phoenix Storm", ["skill_b", "skill_a"], "fire", "nova", 9.0, 3.5, "Wide regenerative nova"),
   ]),
-  P("shiryu", "assassin", "physical", "kit_skel_rogue", 4, [
+  P("shiryu", "assassin", "physical", "kit_skel_rogue", 3, [
+    ab("rain", "Rain Cut", ["combo_b"], "physical", "line", 2.0, 3.5, "Vertical pierce"),
+    ab("ambush", "Ambush", ["combo_a", "dodge"], "physical", "cone", 3.5, 3.0, "Sudden cone"),
+    ab("blood", "Blood Mist", ["combo_c"], "poison", "cone", 4.0, 3.0, "Poison cone"),
+    ab("rain_r", "Rain Blade Wave", ["combo_b", "skill_a"], "physical", "slash", 7.0, 4.5, "Tier-1 R wave"),
+  ]),
+  P("shiryu_clear", "assassin", "physical", "kit_skel_rogue", 5, [
     ab("vanish", "Clear Step", ["dodge", "combo_a"], "physical", "slash", 2.6, 3.5, "Invisible approach slash"),
     ab("ambush", "Ambush", ["skill_b", "combo_c"], "physical", "circle", 6.0, 4.5, "From nowhere AoE"),
     ab("blood", "Blood Mist", ["combo_c", "skill_a"], "poison", "cone", 4.2, 3.0, "Poison cone"),
-    ab("exec", "Silent Execution", ["skill_a", "skill_b"], "physical", "slash", 9.0, 5.0, "Huge invisible slash"),
-  ]),
+    ab("exec", "Clear-Clear Annihilation", ["skill_a", "skill_b"], "physical", "slash", 9.5, 5.5, "Ultimate R invisible erase"),
+  ], true),
   P("marine_mullet", "gunner", "fire", "kit_skel_mage", 2, [
     ab("bayonet", "Bayonet", ["combo_b"], "physical", "cone", 2.0, 2.5, "Melee when closed"),
     ab("smoke", "Smoke Bomb", ["combo_c", "boost"], "physical", "circle", 5.0, 5.0, "Disengage tool"),
@@ -162,9 +180,16 @@ export const COMBAT_PROFILES: CombatProfile[] = [
   P("koby", "brawler", "lightning", "kit_skel_minion", 2, [
     ab("jab", "Marine Jab", ["0062", "combo"], "physical", "cone", 1.4, 2.0, "Basic punch"),
     ab("shock", "Fist Shock", ["0063", "0062"], "lightning", "circle", 5.0, 3.0, "Ground shock"),
-    ab("rally", "Rally Cry", ["0011", "boost"], "arcane", "nova", 6.5, 0, "Self buff"),
-    ab("rising", "Rising Star", ["0063", "0062_Low"], "physical", "nova", 7.0, 3.0, "Leap smash"),
+    ab("rally", "Rally Cry", ["0011"], "arcane", "nova", 6.5, 0, "Self buff"),
+    ab("honesty", "Honesty Impact", ["0062", "0063"], "physical", "slash", 7.0, 4.0, "Tier-1 R wave"),
   ]),
+  P("koby_hero", "brawler", "lightning", "kit_skel_warrior", 4, [
+    ab("jab", "Marine Jab", ["0062", "combo"], "physical", "cone", 1.4, 2.0, "Power punch"),
+    ab("shock", "Fist Shock", ["0063", "0062"], "lightning", "circle", 5.0, 3.0, "Ground shock"),
+    ab("rally", "Rally Cry", ["0011", "boost"], "arcane", "nova", 6.0, 0, "Self buff"),
+    ab("rising", "Rising Star", ["0063", "0062_Low"], "physical", "nova", 7.5, 3.5, "Leap smash"),
+    ab("justice", "Hero's Justice", ["0062", "0063", "0062_Low"], "lightning", "slash", 9.0, 5.0, "Ultimate R shockwave"),
+  ], true),
   P("ace_sabo_luffy", "skirmisher", "fire", "mon_cultist", 4, [
     ab("hiken", "Hiken", ["combo_a", "skill_a"], "fire", "cone", 2.5, 3.5, "Fire fist"),
     ab("rain", "Hiken Rain", ["skill_b", "combo_b"], "fire", "circle", 5.0, 5.0, "Fireball zone"),
@@ -172,6 +197,21 @@ export const COMBAT_PROFILES: CombatProfile[] = [
     ab("barrage", "Gum Barrage", ["combo_c", "combo_a"], "physical", "cone", 3.2, 2.8, "Luffy punches"),
     ab("cross", "Crossfire", ["skill_b", "skill_a"], "fire", "nova", 10.0, 4.0, "Triple elemental nova"),
   ]),
+  P("mihawk", "skirmisher", "physical", "kit_skel_warrior", 5, [
+    ab("cross", "Cross Cut", ["combo_a", "skill_a"], "physical", "slash", 1.6, 4.5, "Dual-blade wave"),
+    ab("green", "Green Slash", ["combo_b"], "physical", "line", 3.2, 5.5, "Long line cut"),
+    ab("void", "Black Blade Void", ["skill_a", "skill_b"], "arcane", "slash", 9.5, 6.5, "Ultimate horizon cut"),
+  ], true),
+  P("kizaru", "gunner", "lightning", "kit_skel_mage", 5, [
+    ab("kick", "Light Kick", ["combo_a"], "lightning", "cone", 1.6, 3.0, "Photon kick"),
+    ab("beam", "Laser Beam", ["skill_a", "combo_b"], "lightning", "line", 3.5, 7.0, "Piercing laser"),
+    ab("jewel", "Sacred Jewel", ["skill_a", "skill_b"], "lightning", "slash", 9.0, 6.0, "Ultimate laser barrage"),
+  ], true),
+  P("hybrid_kaido", "tank", "lightning", "mon_dante_beast", 5, [
+    ab("club", "Club Smash", ["combo_a"], "physical", "cone", 2.2, 3.0, "Kanabo smash"),
+    ab("thunder", "Thunder Bagua", ["skill_a", "combo_b"], "lightning", "circle", 5.5, 4.0, "Lightning circle"),
+    ab("boro", "Boro Breath", ["skill_b", "combo_c"], "lightning", "slash", 10.0, 5.5, "Ultimate dragon breath"),
+  ], true),
   P(
     "racalvin",
     "tank",

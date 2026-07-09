@@ -47,6 +47,10 @@ export const SKINS: SkinDef[] = [
   { id: "vista",          name: "Vista",             file: "vista",          scheme: "bountyrush" },
   { id: "charlotte_oven", name: "Charlotte Oven",    file: "charlotte_oven", scheme: "bountyrush" },
   { id: "hybrid_kaido",   name: "Kaido",             file: "hybrid_kaido",   scheme: "bountyrush", height: 2.35 },
+  { id: "shanks_yonko",   name: "Shanks — Yonko",    file: "shanks_yonko",   scheme: "bountyrush" },
+  { id: "shiryu_clear",   name: "Shiryu — Clear",    file: "shiryu_clear",   scheme: "bountyrush" },
+  { id: "lucci_awakened", name: "Lucci — Awakened",  file: "lucci_awakened", scheme: "bountyrush" },
+  { id: "koby_hero",      name: "Koby — Hero",       file: "koby_hero",      scheme: "koby" },
 ];
 
 /**
