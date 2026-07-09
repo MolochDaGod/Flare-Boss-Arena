@@ -9,6 +9,7 @@ import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateH
 import { Townsperson } from "./Townsfolk";
 import {
   buildHarvestField,
+  attachRockFieldNodes,
   hideHarvestNode,
   showHarvestNode,
   nearestHarvestNode,
@@ -407,11 +408,15 @@ export class GameEngine {
     this.scene.add(terrain);
     this.terrainMesh = terrain;
 
-    // Hundreds of scattered rocks in a single InstancedMesh draw call (fills
-    // the now-much-larger map without tanking performance).
-    const rocks = makeRockField(220, D * 0.35, D - 4);
-    this.scene.add(rocks);
-    this.rockField = rocks;
+    // Scattered boulders — visual + minable stone (wired in buildHarvestables).
+    const rocks = makeRockField(180, D * 0.28, D - 4);
+    this.scene.add(rocks.mesh);
+    this.rockField = rocks.mesh;
+    // Stash for harvest wiring (positions live until buildHarvestables runs).
+    (this as unknown as { _rockFieldMeta?: { positions: THREE.Vector3[]; scales: number[] } })._rockFieldMeta = {
+      positions: rocks.positions,
+      scales: rocks.scales,
+    };
 
     // Invisible click plane — covers the playable area for click-to-move
     // raycasting. Sits just above the visible ground so floor picks are stable.
@@ -514,7 +519,7 @@ export class GameEngine {
     this.buildTownsfolk();
   }
 
-  /** Tall generative trees (2–4× character height) + stone harvest nodes. */
+  /** Tall generative trees (2–4× character height) + stone piles + island rocks. */
   private buildHarvestables() {
     if (this.harvestField) {
       this.scene.remove(this.harvestField.root);
@@ -523,9 +528,15 @@ export class GameEngine {
     }
     this.harvestField = buildHarvestField(this.mapSeed, this.DUNGEON, {
       treeCount: 52,
-      stoneCount: 30,
+      stoneCount: 36,
     });
     this.scene.add(this.harvestField.root);
+
+    // Wire decorative rock field into minable stone nodes.
+    const meta = (this as unknown as { _rockFieldMeta?: { positions: THREE.Vector3[]; scales: number[] } })._rockFieldMeta;
+    if (this.rockField && meta) {
+      attachRockFieldNodes(this.harvestField, this.rockField, meta.positions, meta.scales);
+    }
   }
 
   /** Scatter extra pirate-kit props as generative dungeon flavor. */
@@ -1733,12 +1744,14 @@ export class GameEngine {
     }
 
     if (this.harvestField) {
-      const n = nearestHarvestNode(this.harvestField.nodes, this.playerPos, 3.2, now);
+      const n = nearestHarvestNode(this.harvestField.nodes, this.playerPos, 3.5, now);
       if (n) {
         this.nearbyHarvestLabel =
           n.kind === "wood"
-            ? `Tree (${Math.ceil(n.hp)} HP) — attack to chop wood`
-            : `Stone (${Math.ceil(n.hp)} HP) — attack to quarry`;
+            ? `Tree (${Math.ceil(n.hp)} HP) — F/RMB chop wood`
+            : n.meshBank === "rock"
+              ? `Rock (${Math.ceil(n.hp)} HP) — F/RMB mine stone`
+              : `Stone pile (${Math.ceil(n.hp)} HP) — F/RMB quarry`;
       }
     }
   }
@@ -1869,7 +1882,8 @@ export class GameEngine {
         showHarvestNode(this.harvestField, n);
       }
     }
-    const node = nearestHarvestNode(this.harvestField.nodes, this.playerPos, 3.0, now);
+    // Rocks are bulky — slightly longer reach so mining feels fair.
+    const node = nearestHarvestNode(this.harvestField.nodes, this.playerPos, 3.4, now);
     if (!node) return;
 
     this.playerAttackCooldown = this.playerMaxAttackCooldown * 0.85;

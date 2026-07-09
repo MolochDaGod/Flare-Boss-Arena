@@ -20,6 +20,16 @@ export interface HarvestNode {
   maxHp: number;
   /** Instance index into the shared InstancedMesh (or -1 if solo mesh). */
   instanceIndex: number;
+  /**
+   * For stone clusters: first instance index and count (default 1).
+   * Field stones use rocksPerNode=3; island rock field uses 1 per boulder.
+   */
+  instanceStart?: number;
+  instanceCount?: number;
+  /** Which mesh bank: "stone" (harvest pile) or "rock" (island rock field). */
+  meshBank?: "stone" | "rock" | "wood";
+  /** Original scale for rock-field respawn. */
+  rockScale?: number;
   respawnAt: number;
   yieldMin: number;
   yieldMax: number;
@@ -32,6 +42,10 @@ export interface HarvestField {
   treeMesh: THREE.InstancedMesh | null;
   canopyMesh: THREE.InstancedMesh | null;
   stoneMesh: THREE.InstancedMesh | null;
+  /** Island decorative rocks (also minable). */
+  rockMesh: THREE.InstancedMesh | null;
+  rockScales: number[];
+  rocksPerNode: number;
   root: THREE.Group;
   dispose: () => void;
 }
@@ -172,6 +186,7 @@ export function buildHarvestField(
       stoneMesh.setMatrixAt(stoneInst++, dummy.matrix);
     }
 
+    const start = i * rocksPerNode;
     nodes.push({
       id: `stone_${idCounter++}`,
       kind: "stone",
@@ -179,22 +194,31 @@ export function buildHarvestField(
       hp: 50 + Math.floor(rng() * 40),
       maxHp: 0,
       instanceIndex: i,
+      instanceStart: start,
+      instanceCount: rocksPerNode,
+      meshBank: "stone",
       respawnAt: 0,
       yieldMin: 2,
-      yieldMax: 4,
+      yieldMax: 5,
     });
     nodes[nodes.length - 1]!.maxHp = nodes[nodes.length - 1]!.hp;
   }
   stoneMesh.instanceMatrix.needsUpdate = true;
   root.add(stoneMesh);
 
-  const hideMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+  // Also mark tree nodes with meshBank
+  for (const n of nodes) {
+    if (n.kind === "wood") n.meshBank = "wood";
+  }
 
   const field: HarvestField = {
     nodes,
     treeMesh,
     canopyMesh,
     stoneMesh,
+    rockMesh: null,
+    rockScales: [],
+    rocksPerNode,
     root,
     dispose: () => {
       root.removeFromParent();
@@ -207,72 +231,114 @@ export function buildHarvestField(
       treeMesh.dispose();
       canopyMesh.dispose();
       stoneMesh.dispose();
+      // rockMesh is owned by GameEngine scene dispose
     },
-  };
-
-  // Helpers attached via closure for hide/show on harvest
-  (field as HarvestField & { hideNode: (n: HarvestNode) => void; showNode: (n: HarvestNode) => void }).hideNode =
-    (n: HarvestNode) => {
-      if (n.kind === "wood" && treeMesh && canopyMesh && n.instanceIndex >= 0) {
-        treeMesh.setMatrixAt(n.instanceIndex, hideMatrix);
-        canopyMesh.setMatrixAt(n.instanceIndex, hideMatrix);
-        treeMesh.instanceMatrix.needsUpdate = true;
-        canopyMesh.instanceMatrix.needsUpdate = true;
-      }
-      // Stone nodes stay as rubble (scale down cluster) — leave visible small
-    };
-
-  (field as HarvestField & { showNode: (n: HarvestNode) => void }).showNode = (n: HarvestNode) => {
-    // Respawn handled by rebuild or re-apply stored matrices — simple full respawn:
-    // regenerate matrices from node position for trees.
-    if (n.kind === "wood" && treeMesh && canopyMesh && n.instanceIndex >= 0) {
-      const h = TREE_HEIGHT_MIN + ((n.instanceIndex * 17) % 100) / 100 * (TREE_HEIGHT_MAX - TREE_HEIGHT_MIN);
-      const trunkH = h * 0.42;
-      const canopyH = h * 0.62;
-      dummy.position.copy(n.position);
-      dummy.rotation.set(0, n.instanceIndex, 0);
-      dummy.scale.set(1, trunkH, 1);
-      dummy.updateMatrix();
-      treeMesh.setMatrixAt(n.instanceIndex, dummy.matrix);
-      dummy.position.set(n.position.x, trunkH * 0.72, n.position.z);
-      dummy.scale.set(1.4, canopyH, 1.4);
-      dummy.updateMatrix();
-      canopyMesh.setMatrixAt(n.instanceIndex, dummy.matrix);
-      treeMesh.instanceMatrix.needsUpdate = true;
-      canopyMesh.instanceMatrix.needsUpdate = true;
-    }
   };
 
   return field;
 }
 
+/**
+ * Register island rock-field boulders as minable stone nodes (1 instance each).
+ * Call after makeRockField; attaches mesh reference on the harvest field.
+ */
+export function attachRockFieldNodes(
+  field: HarvestField,
+  rockMesh: THREE.InstancedMesh,
+  positions: THREE.Vector3[],
+  scales: number[],
+) {
+  field.rockMesh = rockMesh;
+  field.rockScales = scales;
+  let id = field.nodes.length;
+  for (let i = 0; i < positions.length; i++) {
+    const p = positions[i]!;
+    const s = scales[i] ?? 1;
+    const hp = 35 + Math.floor(s * 28);
+    field.nodes.push({
+      id: `rock_${id++}`,
+      kind: "stone",
+      position: p.clone(),
+      hp,
+      maxHp: hp,
+      instanceIndex: i,
+      instanceStart: i,
+      instanceCount: 1,
+      meshBank: "rock",
+      rockScale: s,
+      respawnAt: 0,
+      yieldMin: 1,
+      yieldMax: 3 + Math.floor(s),
+    });
+  }
+}
+
+const _hide = new THREE.Matrix4().makeScale(0.001, 0.001, 0.001);
+const _dummy = new THREE.Object3D();
+
 export function hideHarvestNode(field: HarvestField, n: HarvestNode) {
-  const hideMatrix = new THREE.Matrix4().makeScale(0.001, 0.001, 0.001);
   if (n.kind === "wood" && field.treeMesh && field.canopyMesh && n.instanceIndex >= 0) {
-    field.treeMesh.setMatrixAt(n.instanceIndex, hideMatrix);
-    field.canopyMesh.setMatrixAt(n.instanceIndex, hideMatrix);
+    field.treeMesh.setMatrixAt(n.instanceIndex, _hide);
+    field.canopyMesh.setMatrixAt(n.instanceIndex, _hide);
     field.treeMesh.instanceMatrix.needsUpdate = true;
     field.canopyMesh.instanceMatrix.needsUpdate = true;
+    return;
+  }
+  if (n.kind === "stone") {
+    const bank = n.meshBank === "rock" ? field.rockMesh : field.stoneMesh;
+    if (!bank) return;
+    const start = n.instanceStart ?? n.instanceIndex;
+    const count = n.instanceCount ?? 1;
+    for (let k = 0; k < count; k++) {
+      bank.setMatrixAt(start + k, _hide);
+    }
+    bank.instanceMatrix.needsUpdate = true;
   }
 }
 
 export function showHarvestNode(field: HarvestField, n: HarvestNode) {
-  if (n.kind !== "wood" || !field.treeMesh || !field.canopyMesh || n.instanceIndex < 0) return;
-  const dummy = new THREE.Object3D();
-  const h = TREE_HEIGHT_MIN + ((n.instanceIndex * 17) % 100) / 100 * (TREE_HEIGHT_MAX - TREE_HEIGHT_MIN);
-  const trunkH = h * 0.42;
-  const canopyH = h * 0.62;
-  dummy.position.copy(n.position);
-  dummy.rotation.set(0, n.instanceIndex * 0.7, 0);
-  dummy.scale.set(1, trunkH, 1);
-  dummy.updateMatrix();
-  field.treeMesh.setMatrixAt(n.instanceIndex, dummy.matrix);
-  dummy.position.set(n.position.x, trunkH * 0.72, n.position.z);
-  dummy.scale.set(1.4, canopyH, 1.4);
-  dummy.updateMatrix();
-  field.canopyMesh.setMatrixAt(n.instanceIndex, dummy.matrix);
-  field.treeMesh.instanceMatrix.needsUpdate = true;
-  field.canopyMesh.instanceMatrix.needsUpdate = true;
+  if (n.kind === "wood" && field.treeMesh && field.canopyMesh && n.instanceIndex >= 0) {
+    const h = TREE_HEIGHT_MIN + ((n.instanceIndex * 17) % 100) / 100 * (TREE_HEIGHT_MAX - TREE_HEIGHT_MIN);
+    const trunkH = h * 0.42;
+    const canopyH = h * 0.62;
+    _dummy.position.copy(n.position);
+    _dummy.rotation.set(0, n.instanceIndex * 0.7, 0);
+    _dummy.scale.set(1, trunkH, 1);
+    _dummy.updateMatrix();
+    field.treeMesh.setMatrixAt(n.instanceIndex, _dummy.matrix);
+    _dummy.position.set(n.position.x, trunkH * 0.72, n.position.z);
+    _dummy.scale.set(1.4, canopyH, 1.4);
+    _dummy.updateMatrix();
+    field.canopyMesh.setMatrixAt(n.instanceIndex, _dummy.matrix);
+    field.treeMesh.instanceMatrix.needsUpdate = true;
+    field.canopyMesh.instanceMatrix.needsUpdate = true;
+    return;
+  }
+  if (n.kind === "stone" && n.meshBank === "rock" && field.rockMesh) {
+    const s = n.rockScale ?? 1;
+    _dummy.position.set(n.position.x, s * 0.45 - 0.05, n.position.z);
+    _dummy.rotation.set(0.3, n.instanceIndex * 0.9, 0.2);
+    _dummy.scale.set(s, s * 0.8, s);
+    _dummy.updateMatrix();
+    field.rockMesh.setMatrixAt(n.instanceIndex, _dummy.matrix);
+    field.rockMesh.instanceMatrix.needsUpdate = true;
+    return;
+  }
+  if (n.kind === "stone" && field.stoneMesh) {
+    const start = n.instanceStart ?? n.instanceIndex * field.rocksPerNode;
+    const count = n.instanceCount ?? field.rocksPerNode;
+    for (let k = 0; k < count; k++) {
+      const ox = ((k * 0.7) % 1.1) - 0.55;
+      const oz = ((k * 0.5) % 1.1) - 0.55;
+      const s = 0.75 + k * 0.15;
+      _dummy.position.set(n.position.x + ox, s * 0.35, n.position.z + oz);
+      _dummy.rotation.set(0.4, k, 0.2);
+      _dummy.scale.setScalar(s);
+      _dummy.updateMatrix();
+      field.stoneMesh.setMatrixAt(start + k, _dummy.matrix);
+    }
+    field.stoneMesh.instanceMatrix.needsUpdate = true;
+  }
 }
 
 export function resourceForKind(kind: HarvestKind): ResourceId {

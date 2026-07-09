@@ -173,26 +173,41 @@ export function makeTerrainSkirt(arenaHalf: number, size = 460, seg = 220, baseY
   return mesh;
 }
 
-export function makeRockField(count: number, inner: number, outer: number): THREE.InstancedMesh {
+export interface RockFieldResult {
+  mesh: THREE.InstancedMesh;
+  /** World XZ centers — one per instance (for mining nodes). */
+  positions: THREE.Vector3[];
+  /** Uniform-ish scale factor per rock (for respawn). */
+  scales: number[];
+}
+
+/** Scatter minable boulders. Returns mesh + positions so combat can treat each as a stone node. */
+export function makeRockField(count: number, inner: number, outer: number): RockFieldResult {
   const geo = new THREE.DodecahedronGeometry(1, 0);
   const mat = new THREE.MeshStandardMaterial({ color: 0x3a352e, roughness: 1.0, metalness: 0.0, flatShading: true });
   const mesh = new THREE.InstancedMesh(geo, mat, count);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  mesh.name = "RockField";
+  mesh.frustumCulled = false;
 
+  const positions: THREE.Vector3[] = [];
+  const scales: number[] = [];
   const dummy = new THREE.Object3D();
   for (let i = 0; i < count; i++) {
     const ang = Math.random() * Math.PI * 2;
     const r = inner + Math.random() * (outer - inner);
     const x = Math.cos(ang) * r;
     const z = Math.sin(ang) * r;
-    const s = 0.35 + Math.random() * 1.25;
-    dummy.position.set(x, s * 0.45 - 0.1, z);
+    const s = 0.45 + Math.random() * 1.35;
+    dummy.position.set(x, s * 0.45 - 0.05, z);
     dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-    dummy.scale.set(s, s * (0.6 + Math.random() * 0.5), s);
+    dummy.scale.set(s, s * (0.65 + Math.random() * 0.45), s);
     dummy.updateMatrix();
     mesh.setMatrixAt(i, dummy.matrix);
+    positions.push(new THREE.Vector3(x, 0, z));
+    scales.push(s);
   }
   mesh.instanceMatrix.needsUpdate = true;
-  return mesh;
+  return { mesh, positions, scales };
 }

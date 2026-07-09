@@ -16,6 +16,7 @@ import {
   getResources,
   addResource,
   spendResource,
+  spendResources,
 } from "@/data/resources";
 import { getGameLoadout, loadoutSkillBar } from "@/data/gameCombat";
 import { toast } from "sonner";
@@ -643,39 +644,35 @@ function Game() {
                   Anne&apos;s Trade Chest
                 </h2>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Buy timber &amp; stone, or sell your harvest. Gold:{" "}
-                  <span style={{ color: GOLD }}>{getWallet().gold}</span>
+                  Sell harvest for gold, or buy with gold / wood / stone.
+                </p>
+                <p className="text-xs mt-1">
+                  <span style={{ color: GOLD }}>🪙 {getWallet().gold}</span>
                   {" · "}🪵 {getResources().wood} · 🪨 {getResources().stone}
                 </p>
               </div>
-              <div className="space-y-2 max-h-72 overflow-y-auto">
-                {VENDOR_GOODS.map((g) => (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {VENDOR_GOODS.map((g) => {
+                  const priceBits: string[] = [];
+                  if (g.kind === "sell") {
+                    priceBits.push(`+${g.gold}g`);
+                    if (g.resource) priceBits.push(`−${g.amount} ${g.resource}`);
+                  } else {
+                    if (g.gold > 0) priceBits.push(`−${g.gold}g`);
+                    if (g.costWood) priceBits.push(`−${g.costWood} wood`);
+                    if (g.costStone) priceBits.push(`−${g.costStone} stone`);
+                    if (g.grant === "wood") priceBits.push(`+${g.amount} wood`);
+                    if (g.grant === "stone") priceBits.push(`+${g.amount} stone`);
+                    if (g.grant === "gold_bag") priceBits.push("+25g");
+                    if (g.grant === "potion") priceBits.push("+potion");
+                  }
+                  return (
                   <button
                     key={g.id + bagTick}
                     className="w-full text-left px-3 py-2 rounded border border-white/10 hover:border-[#c5a059]/60 bg-black/40 transition-colors"
                     onClick={() => {
                       const w = getWallet();
-                      if (g.kind === "buy") {
-                        if (g.id === "buy_potion") {
-                          if (w.gold < g.gold) {
-                            toast.error("Not enough gold.");
-                            return;
-                          }
-                          saveWallet({ ...w, gold: w.gold - g.gold });
-                          // Instant heal via engine log only — HP is engine-owned; toast.
-                          toast.success("Grog of Mending — restored some grit (heal on next regen tick).");
-                          setBagTick((t) => t + 1);
-                          return;
-                        }
-                        if (w.gold < g.gold) {
-                          toast.error("Not enough gold.");
-                          return;
-                        }
-                        if (!g.resource) return;
-                        saveWallet({ ...w, gold: w.gold - g.gold });
-                        addResource(g.resource, g.amount);
-                        toast.success(`Bought ${g.amount} ${g.resource}.`);
-                      } else {
+                      if (g.kind === "sell") {
                         if (!g.resource) return;
                         if (!spendResource(g.resource, g.amount)) {
                           toast.error(`Need ${g.amount} ${g.resource}.`);
@@ -683,20 +680,53 @@ function Game() {
                         }
                         saveWallet({ ...w, gold: w.gold + g.gold });
                         toast.success(`Sold ${g.amount} ${g.resource} for ${g.gold} gold.`);
+                        setBagTick((t) => t + 1);
+                        return;
+                      }
+                      // BUY — pay gold and/or wood/stone
+                      if (g.gold > 0 && w.gold < g.gold) {
+                        toast.error("Not enough gold.");
+                        return;
+                      }
+                      if (!spendResources({ wood: g.costWood ?? 0, stone: g.costStone ?? 0 })) {
+                        toast.error(
+                          `Need ${g.costWood ? g.costWood + " wood" : ""}${g.costWood && g.costStone ? " + " : ""}${g.costStone ? g.costStone + " stone" : ""}`.trim() ||
+                            "Not enough resources.",
+                        );
+                        return;
+                      }
+                      if (g.gold > 0) saveWallet({ ...w, gold: w.gold - g.gold });
+                      if (g.grant === "potion") {
+                        toast.success("Healing brew acquired — feel the grit return.");
+                      } else if (g.grant === "wood") {
+                        addResource("wood", g.amount);
+                        toast.success(`Bought ${g.amount} wood.`);
+                      } else if (g.grant === "stone") {
+                        addResource("stone", g.amount);
+                        toast.success(`Bought ${g.amount} stone.`);
+                      } else if (g.grant === "gold_bag") {
+                        const ww = getWallet();
+                        saveWallet({ ...ww, gold: ww.gold + 25 });
+                        toast.success("Anne counts out 25 gold.");
+                      } else if (g.resource && g.amount) {
+                        addResource(g.resource, g.amount);
+                        toast.success(`Bought ${g.amount} ${g.resource}.`);
+                      } else {
+                        toast.success(`Traded: ${g.name}`);
                       }
                       setBagTick((t) => t + 1);
                     }}
                   >
-                    <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center gap-2">
                       <span className="font-serif text-sm tracking-wide">{g.name}</span>
-                      <span className="text-xs font-mono" style={{ color: GOLD }}>
-                        {g.kind === "buy" ? `−${g.gold}g` : `+${g.gold}g`}
-                        {g.resource ? ` · ${g.kind === "buy" ? "+" : "−"}${g.amount} ${g.resource}` : ""}
+                      <span className="text-[10px] font-mono shrink-0" style={{ color: GOLD }}>
+                        {priceBits.join(" · ")}
                       </span>
                     </div>
                     <p className="text-[10px] text-muted-foreground mt-0.5">{g.blurb}</p>
                   </button>
-                ))}
+                  );
+                })}
               </div>
               <button
                 className="w-full h-10 font-serif tracking-widest uppercase rounded"
