@@ -1,20 +1,85 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { getSkin, skinUrl, SKIN_CLIP_SUFFIX } from "@/data/skins";
 import { disposeObject3D } from "@/game/kaykitHero";
 import { RACALVIN_ID } from "@/data/fighters";
-import { RACALVIN_BASE_URL, attachRacalvinWeapons, loadRacalvinClips } from "@/game/racalvinHero";
+import {
+  RACALVIN_BASE_URL,
+  RACALVIN_ANIMS,
+  applyRacalvinAssetTuning,
+  attachRacalvinWeapons,
+  getRacalvinWeapons,
+  loadRacalvinClips,
+} from "@/game/racalvinHero";
+import { getFighterAssetTuning, type FighterAssetTuning } from "@/data/fighterAssetTuning";
+import { applyHiddenMeshRules, collectMeshNames, syncHiddenMeshesForClip } from "@/game/assetVisibility";
+
+export interface FighterPreviewHandle {
+  previewClip: (name: string) => void;
+  setWeaponPreview: (mode: "sword" | "pistol") => void;
+}
+
+export interface FighterPreviewProps {
+  skinId: string;
+  /** Defaults to `skinId` when omitted (home/units roster cards). */
+  fighterId?: string;
+  /** Defaults to persisted tuning for `fighterId` when omitted. */
+  tuning?: FighterAssetTuning;
+  pauseRotation?: boolean;
+  onMeshesReady?: (names: string[]) => void;
+  onClipsReady?: (names: string[]) => void;
+}
 
 /**
- * Rotating 3D portrait of a fighter's skin GLB for the Choose Fighter lobby.
- * One WebGL canvas (re-loads when `skinId` changes). Plays the skin's native
- * idle clip when present; otherwise stands in its first clip / static bind pose.
- * Falls back to a placeholder when WebGL is unavailable (headless/screenshot).
+ * Rotating 3D portrait for Choose Fighter. Supports live weapon placement and
+ * mesh visibility rules from the cog Asset Tuner panel.
  */
-export function FighterPreview({ skinId }: { skinId: string }) {
+export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewProps>(function FighterPreview(
+  { skinId, fighterId: fighterIdProp, tuning: tuningProp, pauseRotation = false, onMeshesReady, onClipsReady },
+  ref,
+) {
+  const fighterId = fighterIdProp ?? skinId;
+  const tuning = tuningProp ?? getFighterAssetTuning(fighterId);
   const mountRef = useRef<HTMLDivElement>(null);
+  const sceneRef = useRef<{
+    model: THREE.Object3D | null;
+    mixer: THREE.AnimationMixer | null;
+    clips: THREE.AnimationClip[];
+    activeAction: THREE.AnimationAction | null;
+  }>({ model: null, mixer: null, clips: [], activeAction: null });
   const [failed, setFailed] = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    previewClip(name: string) {
+      const s = sceneRef.current;
+      if (!s.mixer || !s.model) return;
+      const clip = s.clips.find((c) => c.name === name) ?? s.clips[0];
+      if (!clip) return;
+      s.activeAction?.fadeOut(0.15);
+      const action = s.mixer.clipAction(clip);
+      action.reset().setLoop(THREE.LoopRepeat, Infinity).fadeIn(0.15).play();
+      s.activeAction = action;
+      syncHiddenMeshesForClip(s.model, name);
+    },
+    setWeaponPreview(mode: "sword" | "pistol") {
+      const rig = sceneRef.current.model ? getRacalvinWeapons(sceneRef.current.model) : null;
+      rig?.setMode(mode);
+    },
+  }));
+
+  // Live tuning updates without reloading the GLB.
+  useEffect(() => {
+    const model = sceneRef.current.model;
+    if (!model) return;
+    if (fighterId === RACALVIN_ID) {
+      applyRacalvinAssetTuning(model, tuning);
+    } else {
+      applyHiddenMeshRules(model, tuning.hiddenMeshes);
+    }
+    const active = sceneRef.current.activeAction?.getClip().name;
+    if (active) syncHiddenMeshesForClip(model, active);
+  }, [tuning, fighterId]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -51,9 +116,13 @@ export function FighterPreview({ skinId }: { skinId: string }) {
 
     let model: THREE.Object3D | null = null;
     let mixer: THREE.AnimationMixer | null = null;
+    let activeAction: THREE.AnimationAction | null = null;
+    let clips: THREE.AnimationClip[] = [];
     let disposed = false;
     const clock = new THREE.Clock();
     const loader = new GLTFLoader();
+
+    sceneRef.current = { model: null, mixer: null, clips: [], activeAction: null };
 
     const def = getSkin(skinId);
     const url = skinId === RACALVIN_ID ? RACALVIN_BASE_URL() : def ? skinUrl(def) : null;
@@ -66,7 +135,6 @@ export function FighterPreview({ skinId }: { skinId: string }) {
             return;
           }
           const m = gltf.scene;
-          // Uniform fit-to-height + center on origin (feet at y=0).
           const box = new THREE.Box3().setFromObject(m);
           const size = new THREE.Vector3();
           const center = new THREE.Vector3();
@@ -80,29 +148,50 @@ export function FighterPreview({ skinId }: { skinId: string }) {
           m.position.y = -box.min.y * scale;
           scene.add(m);
           model = m;
+          sceneRef.current.model = m;
+
+          onMeshesReady?.(collectMeshNames(m));
 
           if (skinId === RACALVIN_ID) {
-            // Racalvin's base GLB ships no clips and no weapon: attach sword +
-            // pistol and play idle from the skeleton-only anim library.
-            attachRacalvinWeapons(m, loader, () => disposed);
+            attachRacalvinWeapons(m, loader, { tuning, isDisposed: () => disposed });
             mixer = new THREE.AnimationMixer(m);
-            loadRacalvinClips(loader).then((clips) => {
+            loadRacalvinClips(loader).then((loaded) => {
               if (disposed || !mixer) return;
-              const idle = clips.find((c) => c.name === "idle") ?? clips[0];
-              if (idle) mixer.clipAction(idle).reset().play();
+              clips = loaded;
+              sceneRef.current.clips = loaded;
+              onClipsReady?.([...RACALVIN_ANIMS]);
+              const idle = loaded.find((c) => c.name === "idle") ?? loaded[0];
+              if (idle) {
+                activeAction = mixer.clipAction(idle).reset().play();
+                sceneRef.current.activeAction = activeAction;
+                syncHiddenMeshesForClip(m, idle.name);
+              }
             });
           } else if (gltf.animations.length) {
+            clips = gltf.animations;
+            sceneRef.current.clips = clips;
+            const clipNames = clips.map((c) => c.name);
+            onClipsReady?.(clipNames);
             mixer = new THREE.AnimationMixer(m);
             const idle =
               gltf.animations.find((a) =>
                 SKIN_CLIP_SUFFIX.idle.some((suf) => a.name.toLowerCase().endsWith(suf)),
               ) ?? gltf.animations[0];
-            if (idle) mixer.clipAction(idle).reset().play();
+            if (idle) {
+              activeAction = mixer.clipAction(idle).reset().play();
+              sceneRef.current.activeAction = activeAction;
+              applyHiddenMeshRules(m, tuning.hiddenMeshes);
+              syncHiddenMeshesForClip(m, idle.name);
+            }
+          } else {
+            onClipsReady?.([]);
+            applyHiddenMeshRules(m, tuning.hiddenMeshes);
           }
+          sceneRef.current.mixer = mixer;
         },
         undefined,
         () => {
-          /* missing model — leave empty stage */
+          /* missing model */
         },
       );
     }
@@ -112,7 +201,7 @@ export function FighterPreview({ skinId }: { skinId: string }) {
       raf = requestAnimationFrame(render);
       const d = clock.getDelta();
       mixer?.update(d);
-      if (model) model.rotation.y += d * 0.5;
+      if (model && !pauseRotation) model.rotation.y += d * 0.5;
       renderer.render(scene, camera);
     };
     render();
@@ -135,10 +224,11 @@ export function FighterPreview({ skinId }: { skinId: string }) {
         scene.remove(model);
         disposeObject3D(model);
       }
+      sceneRef.current = { model: null, mixer: null, clips: [], activeAction: null };
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
-  }, [skinId]);
+  }, [skinId, fighterId]);
 
   if (failed) {
     return (
@@ -150,4 +240,4 @@ export function FighterPreview({ skinId }: { skinId: string }) {
     );
   }
   return <div ref={mountRef} className="h-full w-full" />;
-}
+});

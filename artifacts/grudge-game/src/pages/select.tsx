@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { Flame, Check, ArrowRight, Sparkles } from "lucide-react";
 import {
@@ -7,6 +7,7 @@ import {
   getActiveFighterId,
   setActiveFighterId,
   DEFAULT_FIGHTER_ID,
+  RACALVIN_ID,
   type FighterDef,
   type AttrKey,
 } from "@/data/fighters";
@@ -17,7 +18,13 @@ import {
   tiersInFamily,
 } from "@/data/fighterEvolutions";
 import { getFighterKit } from "@/data/fighterSkills";
-import { FighterPreview } from "@/components/FighterPreview";
+import { FighterPreview, type FighterPreviewHandle } from "@/components/FighterPreview";
+import { FighterAssetTuner } from "@/components/FighterAssetTuner";
+import {
+  getFighterAssetTuning,
+  type FighterAssetTuning,
+} from "@/data/fighterAssetTuning";
+import { RACALVIN_ANIMS } from "@/game/racalvinHero";
 import { useToast } from "@/hooks/use-toast";
 
 const ATTR_LABEL: Record<AttrKey, string> = {
@@ -122,6 +129,14 @@ export default function Select() {
   const selected: FighterDef = FIGHTERS.find((f) => f.id === selectedId) ?? FIGHTERS[0];
   const selectedKit = getFighterKit(selected.id);
   const selectedEvo = getEvolutionMeta(selected.id);
+  const previewRef = useRef<FighterPreviewHandle>(null);
+  const [assetTuning, setAssetTuning] = useState<FighterAssetTuning>(() =>
+    getFighterAssetTuning(selectedId),
+  );
+  const [meshNames, setMeshNames] = useState<string[]>([]);
+  const [clipNames, setClipNames] = useState<string[]>([...RACALVIN_ANIMS]);
+  const [weaponPreview, setWeaponPreview] = useState<"sword" | "pistol">("sword");
+  const [tunerOpen, setTunerOpen] = useState(false);
 
   const { evolutionGroups, standalone } = useMemo(() => {
     const inFamily = new Set<string>();
@@ -139,6 +154,14 @@ export default function Select() {
     const solo = FIGHTERS.filter((f) => !inFamily.has(f.id) && !isEvolutionFighter(f.id));
     return { evolutionGroups: groups, standalone: solo };
   }, []);
+
+  const onSelectFighter = (id: string) => {
+    setSelectedId(id);
+    setAssetTuning(getFighterAssetTuning(id));
+    setMeshNames([]);
+    setClipNames(id === RACALVIN_ID ? [...RACALVIN_ANIMS] : []);
+    setWeaponPreview("sword");
+  };
 
   const confirm = () => {
     setActiveFighterId(selected.id);
@@ -169,7 +192,30 @@ export default function Select() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr_1fr]">
         <div className="overflow-hidden rounded-lg border border-[#c5a059]/20 bg-gradient-to-b from-[#1a1410]/80 to-black/60">
           <div className="relative h-[420px] w-full bg-[radial-gradient(ellipse_at_center,_rgba(197,160,89,0.12),_transparent_70%)]">
-            <FighterPreview skinId={selected.skinId} />
+            <FighterPreview
+              ref={previewRef}
+              skinId={selected.skinId}
+              fighterId={selected.id}
+              tuning={assetTuning}
+              pauseRotation={tunerOpen}
+              onMeshesReady={setMeshNames}
+              onClipsReady={(clips) => setClipNames(clips.length ? clips : [...RACALVIN_ANIMS])}
+            />
+            <FighterAssetTuner
+              fighterId={selected.id}
+              fighterName={selected.name}
+              tuning={assetTuning}
+              meshNames={meshNames}
+              clipNames={clipNames}
+              weaponPreview={weaponPreview}
+              onTuningChange={setAssetTuning}
+              onWeaponPreviewChange={(mode) => {
+                setWeaponPreview(mode);
+                previewRef.current?.setWeaponPreview(mode);
+              }}
+              onPreviewClip={(clip) => previewRef.current?.previewClip(clip)}
+              onOpenChange={setTunerOpen}
+            />
             {selected.featured && (
               <span className="absolute left-4 top-4 rounded-full border border-[#c5a059]/50 bg-black/50 px-3 py-1 font-serif text-[10px] uppercase tracking-widest text-[#c5a059]">
                 Featured
@@ -235,7 +281,7 @@ export default function Select() {
                     key={f.id}
                     f={f}
                     active={f.id === selectedId}
-                    onSelect={() => setSelectedId(f.id)}
+                    onSelect={() => onSelectFighter(f.id)}
                   />
                 ))}
               </div>
@@ -251,7 +297,7 @@ export default function Select() {
                   key={f.id}
                   f={f}
                   active={f.id === selectedId}
-                  onSelect={() => setSelectedId(f.id)}
+                  onSelect={() => onSelectFighter(f.id)}
                 />
               ))}
             </div>

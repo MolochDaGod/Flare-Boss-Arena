@@ -60,6 +60,7 @@ import { getActiveCombatProfile, brainTuning, type BrainArchetype } from "../dat
 import { pickHeroEnemies, heroEnemyAsTemplate } from "../data/heroEnemyLibrary";
 import { CDN_MONSTER_TEMPLATES } from "../data/cdnMonsters";
 import { BOSS_MONSTER_BY_ID, isBossMonsterId, pickDungeonBossId } from "../data/bossMonsters";
+import { syncHiddenMeshesForClip } from "./assetVisibility";
 import { getStoneCombatMods, addStone, rollStoneDrop, STONE_META } from "../data/stones";
 import { resolveSkillBoost } from "../data/abilityUpgrades";
 import {
@@ -878,6 +879,13 @@ export class GameEngine {
     this.racalvinWeapons?.setMode("sword");
   }
 
+  private syncPlayerMeshVisibility(clipNames: string[]) {
+    const model = this.playerGroup?.children[0];
+    if (!model) return;
+    const name = clipNames[0];
+    if (name) syncHiddenMeshesForClip(model, name);
+  }
+
   /** One Piece champion skin — fully rigged GLB, plays its own labelled clips. */
   private loadSkinModel(skin: SkinDef) {
     this.loader.load(
@@ -1515,6 +1523,7 @@ export class GameEngine {
     this.syncRacalvinWeaponForSkill(sp);
     this.playerFacing = Math.atan2(this.resolveAimDir().x, this.resolveAimDir().z);
     this.playerAnimator?.triggerNamed(sp.anim);
+    this.syncPlayerMeshVisibility(sp.anim);
     if (!this.playerAnimator?.isRootMotionActive()) {
       const f = this.resolveAimDir();
       this.playerPos.x += f.x * 1.2;
@@ -1569,6 +1578,7 @@ export class GameEngine {
     this.playerFacing = Math.atan2(dir.x, dir.z);
     this.syncRacalvinWeaponForSkill(skill);
     this.playerAnimator?.triggerNamed(skill.anim);
+    this.syncPlayerMeshVisibility(skill.anim);
     if (!this.playerAnimator?.isRootMotionActive() && skill.targeting !== "self" && skill.targeting !== "ground_aoe") {
       this.playerPos.x += dir.x * 1.1;
       this.playerPos.z += dir.z * 1.1;
@@ -2064,6 +2074,7 @@ export class GameEngine {
     this.playerFacing = Math.atan2(dx, dz);
     this.syncRacalvinWeaponMelee();
     this.playerAnimator?.triggerAttack();
+    this.syncPlayerMeshVisibility(["attack", "combo"]);
 
     if (mods.autoAttackSlash) {
       const dir = new THREE.Vector3(dx, 0, dz);

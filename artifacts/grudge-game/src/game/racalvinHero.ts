@@ -9,6 +9,10 @@ import * as THREE from "three";
 import type { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { PlayerAnimator } from "./PlayerAnimator";
 import type { FighterSkillDef, FighterSpecialDef } from "../data/fighterSkills";
+import type { FighterAssetTuning, WeaponMountTuning } from "../data/fighterAssetTuning";
+import { DEFAULT_RACALVIN_TUNING, getFighterAssetTuning } from "../data/fighterAssetTuning";
+import { RACALVIN_ID } from "../data/fighters";
+import { applyHiddenMeshRules } from "./assetVisibility";
 
 export const RACALVIN_DIR = "models/racalvin";
 export const RACALVIN_PSYCHIC_COLOR = 0x44ff88;
@@ -49,23 +53,21 @@ interface PropTuning {
   gripYOffset?: number;
 }
 
-/**
- * Greatsword rest pose — blade hangs straight down along the right thigh
- * (matches roster back-view reference). Mesh long axis is ~Z; rotate to -Y.
- */
-const SWORD_TUNING: PropTuning = {
-  targetLength: 1.36,
-  position: new THREE.Vector3(0.04, 0.04, -0.02),
-  rotation: new THREE.Euler(Math.PI / 2, 0.06, Math.PI / 2),
-  gripYOffset: 0.03,
-};
+function weaponToProp(w: WeaponMountTuning): PropTuning {
+  const d2r = Math.PI / 180;
+  return {
+    targetLength: w.targetLength,
+    position: new THREE.Vector3(w.position[0], w.position[1], w.position[2]),
+    rotation: new THREE.Euler(w.rotation[0] * d2r, w.rotation[1] * d2r, w.rotation[2] * d2r),
+    gripYOffset: w.gripYOffset,
+  };
+}
 
-const PISTOL_TUNING: PropTuning = {
-  targetLength: 0.3,
-  position: new THREE.Vector3(0.04, 0.07, -0.02),
-  rotation: new THREE.Euler(-Math.PI / 2, Math.PI, 0.12),
-  gripYOffset: 0,
-};
+function propToMount(holder: THREE.Object3D, w: WeaponMountTuning) {
+  holder.position.set(w.position[0], w.position[1], w.position[2]);
+  const d2r = Math.PI / 180;
+  holder.rotation.set(w.rotation[0] * d2r, w.rotation[1] * d2r, w.rotation[2] * d2r);
+}
 
 export class RacalvinWeapons {
   private mode: RacalvinWeaponMode = "sword";
@@ -86,6 +88,16 @@ export class RacalvinWeapons {
     this.swordMount.visible = mode === "sword";
     this.pistolMount.visible = mode === "pistol";
   }
+
+  applyMountTuning(tuning: FighterAssetTuning["weapons"]) {
+    propToMount(this.swordMount, tuning.sword);
+    propToMount(this.pistolMount, tuning.pistol);
+  }
+}
+
+export function applyRacalvinAssetTuning(root: THREE.Object3D, tuning: FighterAssetTuning) {
+  getRacalvinWeapons(root)?.applyMountTuning(tuning.weapons);
+  applyHiddenMeshRules(root, tuning.hiddenMeshes);
 }
 
 export function getRacalvinWeapons(root: THREE.Object3D): RacalvinWeapons | null {
@@ -240,21 +252,30 @@ function handCompensation(hand: THREE.Object3D): number {
   return sc.x > 1e-6 ? 1 / sc.x : 1;
 }
 
+export interface RacalvinAttachOpts {
+  tuning?: FighterAssetTuning;
+  isDisposed?: () => boolean;
+}
+
 /** @deprecated Alias — use attachRacalvinWeapons. */
 export function attachSword(
   root: THREE.Object3D,
   loader: GLTFLoader,
   isDisposed?: () => boolean,
 ) {
-  attachRacalvinWeapons(root, loader, isDisposed);
+  attachRacalvinWeapons(root, loader, { isDisposed });
 }
 
 /** Brothers' Keeper + Corsair pistol on the right hand. */
 export function attachRacalvinWeapons(
   root: THREE.Object3D,
   loader: GLTFLoader,
-  isDisposed?: () => boolean,
+  opts?: RacalvinAttachOpts | (() => boolean),
 ): RacalvinWeapons | null {
+  const options: RacalvinAttachOpts =
+    typeof opts === "function" ? { isDisposed: opts } : (opts ?? {});
+  const tuning = options.tuning ?? DEFAULT_RACALVIN_TUNING;
+  const isDisposed = options.isDisposed;
   const hand = findRightHand(root);
   if (!hand) return null;
 
@@ -271,6 +292,8 @@ export function attachRacalvinWeapons(
 
   const rig = new RacalvinWeapons(swordMount, pistolMount);
   root.userData[USERDATA_KEY] = rig;
+  rig.applyMountTuning(tuning.weapons);
+  applyHiddenMeshRules(root, tuning.hiddenMeshes);
 
   loader.load(swordUrl(), (gltf) => {
     if (isDisposed?.()) {
@@ -279,7 +302,8 @@ export function attachRacalvinWeapons(
     }
     steelMaterial(gltf.scene);
     swordMount.clear();
-    swordMount.add(buildPropHolder(gltf.scene, SWORD_TUNING));
+    swordMount.add(buildPropHolder(gltf.scene, weaponToProp(tuning.weapons.sword)));
+    propToMount(swordMount, tuning.weapons.sword);
   });
 
   loader.load(pistolUrl(), (gltf) => {
@@ -289,7 +313,8 @@ export function attachRacalvinWeapons(
     }
     pistolMaterial(gltf.scene);
     pistolMount.clear();
-    pistolMount.add(buildPropHolder(gltf.scene, PISTOL_TUNING));
+    pistolMount.add(buildPropHolder(gltf.scene, weaponToProp(tuning.weapons.pistol)));
+    propToMount(pistolMount, tuning.weapons.pistol);
   });
 
   return rig;
@@ -314,7 +339,9 @@ export function loadRacalvinForDungeon(
         }
       });
       const wrapper = fitWrapper(model, targetHeight);
-      const weapons = attachRacalvinWeapons(model, loader);
+      const weapons = attachRacalvinWeapons(model, loader, {
+        tuning: getFighterAssetTuning(RACALVIN_ID),
+      });
       loadRacalvinClips(loader).then((clips) => {
         const by = (n: string) => clips.find((c) => c.name === n);
         const anim = new PlayerAnimator(model, {
@@ -349,7 +376,9 @@ export function loadRacalvinBase(
         }
       });
       const wrapper = fitWrapper(model, targetHeight);
-      const weapons = attachRacalvinWeapons(model, loader);
+      const weapons = attachRacalvinWeapons(model, loader, {
+        tuning: getFighterAssetTuning(RACALVIN_ID),
+      });
       onReady(wrapper, model, gltf.animations, weapons);
     },
     undefined,
