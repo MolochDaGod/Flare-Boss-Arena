@@ -462,7 +462,7 @@ export function loadRacalvinHero(
   loadRacalvinBase(
     loader,
     targetHeight,
-    (wrapper, root, baseClips) => {
+    (wrapper, root, baseClips, _weapons) => {
       const hero = new HeroAnimator(root, baseClips);
       loadRacalvinClips(loader).then((clips) => hero.addLibraryClips(clips));
       onReady(wrapper, hero);

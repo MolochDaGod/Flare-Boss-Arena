@@ -6,7 +6,8 @@
  */
 
 import { useMemo } from "react";
-import { getGameLoadout, type GameLoadout, type GameWeapon } from "./gameCombat";
+import { getGameLoadout, RACALVIN_PISTOL_WEAPON, type GameLoadout, type GameWeapon } from "./gameCombat";
+import { RACALVIN_ID } from "./fighters";
 import type { ClassSkill, ClassSkillSet } from "./classSkills";
 import { getActiveFighterId } from "./fighters";
 
@@ -44,26 +45,32 @@ export interface ResolvedSkills {
   loadout: GameLoadout;
 }
 
-function weaponAsType(w: GameWeapon): WeaponTypeDef {
+function weaponSlot(w: GameWeapon, slotType: "primary" | "secondary"): WeaponSlot {
+  return {
+    type: slotType,
+    label: w.name,
+    unlockTier: 0,
+    skills: [
+      {
+        id: w.id,
+        name: w.name,
+        description: w.description,
+        cooldown: 0,
+        damage: w.damageBonus,
+      },
+    ],
+  };
+}
+
+function weaponAsType(w: GameWeapon, fighterId?: string): WeaponTypeDef {
+  const slots = [weaponSlot(w, "primary")];
+  if (fighterId === RACALVIN_ID) {
+    slots.push(weaponSlot(RACALVIN_PISTOL_WEAPON, "secondary"));
+  }
   return {
     id: w.style.toUpperCase(),
     name: w.name,
-    slots: [
-      {
-        type: "primary",
-        label: w.name,
-        unlockTier: 0,
-        skills: [
-          {
-            id: w.id,
-            name: w.name,
-            description: w.description,
-            cooldown: 0,
-            damage: w.damageBonus,
-          },
-        ],
-      },
-    ],
+    slots,
   };
 }
 
@@ -89,12 +96,12 @@ function kitAsClassSet(loadout: GameLoadout): ClassSkillSet {
     name: loadout.special.name + " [R]",
     description: loadout.special.description,
     glyph: "★",
-    type: "physical",
+    type: loadout.special.element === "physical" ? "physical" : "magical",
     damage: loadout.special.damageMult,
     manaCost: loadout.special.manaCost,
     cooldown: Math.round(loadout.special.cooldown),
     target: "enemy",
-    effects: ["Special", "Slash wave"],
+    effects: ["Special", loadout.special.element],
     isSignature: true,
   });
   return {
@@ -110,7 +117,7 @@ function kitAsClassSet(loadout: GameLoadout): ClassSkillSet {
 export function resolveSkillsFrom(_data: unknown, opts: { charClass: string; mainCategory?: string | null }): ResolvedSkills {
   // Prefer active fighter; fall back to class-named fighter if any.
   const loadout = getGameLoadout(getActiveFighterId());
-  const weaponType = weaponAsType(loadout.weapon);
+  const weaponType = weaponAsType(loadout.weapon, loadout.fighter.id);
   return {
     classSkills: kitAsClassSet(loadout),
     weaponType,

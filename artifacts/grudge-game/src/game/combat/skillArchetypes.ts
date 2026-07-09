@@ -39,6 +39,7 @@ function hasTag(s: ClassSkill | undefined, ...tags: string[]): boolean {
 
 /** Classify a skill's damage element from its name/effects/type. */
 function classifyElement(s: ClassSkill | undefined): SkillElement {
+  if (hasTag(s, "psychic", "mind", "psi", "telepath", "soul", "astral")) return "psychic";
   if (hasTag(s, "frost", "ice", "cold", "freeze", "glacial", "blizzard", "chill", "winter", "shatter")) return "ice";
   if (hasTag(s, "lightning", "shock", "thunder", "spark", "volt", "tempest", "storm", "electro")) return "lightning";
   if (hasTag(s, "poison", "venom", "toxic", "plague", "acid", "pestilence", "blight", "rot", "corrosive", "disease")) return "poison";

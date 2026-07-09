@@ -35,6 +35,18 @@ export interface GameWeapon {
   description: string;
 }
 
+/** Racalvin's sidearm — drawn automatically on psychic skills and Mind Shot. */
+export const RACALVIN_PISTOL_WEAPON: GameWeapon = {
+  id: "wpn_corsair_pistol",
+  name: "Corsair Pistol",
+  glyph: "🔫",
+  style: "gun",
+  damageBonus: 8,
+  critBonus: 0.06,
+  range: 5.5,
+  description: "Psymic sidearm — auto-draws on Mind Shot and psychic abilities.",
+};
+
 const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
   [RACALVIN_ID]: {
     id: "wpn_brothers_keeper",
@@ -44,7 +56,7 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     damageBonus: 18,
     critBonus: 0.04,
     range: 3.4,
-    description: "The Corsair King's greatblade.",
+    description: "Greatsword melee — swap to pistol for psymic skills (Mind Shot).",
   },
   nightmare_luffy: {
     id: "wpn_rubber_fists",

@@ -105,7 +105,7 @@ export class FighterTownsperson {
     loadRacalvinBase(
       loader,
       height,
-      (wrapper, root, baseClips) => {
+      (wrapper, root, baseClips, _weapons) => {
         if (this.disposed) {
           disposeObject3D(wrapper);
           return;

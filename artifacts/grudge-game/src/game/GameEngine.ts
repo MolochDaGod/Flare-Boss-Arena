@@ -22,6 +22,8 @@ import { getWallet, saveWallet } from "../data/wallet";
 import {
   getActiveFighterKit,
   type FighterKit,
+  type FighterSkillDef,
+  type FighterSpecialDef,
 } from "../data/fighterSkills";
 import { getActiveFighter, RACALVIN_ID } from "../data/fighters";
 import {
@@ -36,7 +38,12 @@ import { PlayerAnimator, buildAuthoredClips, buildSkinAnim } from "./PlayerAnima
 import { DungeonMap } from "./DungeonMap";
 import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "../data/characterMeshes";
 import { getSkin, skinUrl, type SkinDef } from "../data/skins";
-import { loadRacalvinForDungeon } from "./racalvinHero";
+import {
+  loadRacalvinForDungeon,
+  type RacalvinWeapons,
+  racalvinWeaponModeForSkill,
+} from "./racalvinHero";
+
 import { skillAnimCandidates } from "./kaykitHero";
 import { SkillVfx } from "./skillVfx";
 import type { ClassSkill } from "../data/classSkills";
@@ -322,6 +329,8 @@ export class GameEngine {
   /** fighterId → brain for hero-rival enemies. */
   private enemyBrains = new Map<string, BrainArchetype>();
   private playerAuraElement = getActiveCombatProfile().auraElement;
+  /** Racalvin sword/pistol rig — null for other fighters. */
+  private racalvinWeapons: RacalvinWeapons | null = null;
   /** Party allies (max 2) — Grudge6 units with AI brains. */
   private allies: AllyAgent[] = [];
   private grudge6Factory = new Grudge6Factory();
@@ -840,14 +849,26 @@ export class GameEngine {
     else this.loadRaceModel();
   }
 
-  /** Racalvin (Corsair King) — bespoke base model + library clips + sword. */
+  /** Racalvin (Corsair King) — bespoke base model + library clips + sword/pistol. */
   private loadRacalvinModel() {
     loadRacalvinForDungeon(
       this.loader,
       1.9,
-      (wrapper, animator) => this.finalizePlayer(wrapper, animator),
+      (wrapper, animator, weapons) => {
+        this.racalvinWeapons = weapons;
+        this.finalizePlayer(wrapper, animator);
+      },
       () => this.loadRaceModel(),
     );
+  }
+
+  private syncRacalvinWeaponForSkill(skill: FighterSkillDef | FighterSpecialDef) {
+    if (!this.racalvinWeapons) return;
+    this.racalvinWeapons.setMode(racalvinWeaponModeForSkill(skill));
+  }
+
+  private syncRacalvinWeaponMelee() {
+    this.racalvinWeapons?.setMode("sword");
   }
 
   /** One Piece champion skin — fully rigged GLB, plays its own labelled clips. */
@@ -1474,6 +1495,7 @@ export class GameEngine {
     }
     this.playerMana -= sp.manaCost;
     this.specialCdUntil = now + sp.cooldown * 1000;
+    this.syncRacalvinWeaponForSkill(sp);
     this.playerFacing = Math.atan2(this.resolveAimDir().x, this.resolveAimDir().z);
     this.playerAnimator?.triggerNamed(sp.anim);
     if (!this.playerAnimator?.isRootMotionActive()) {
@@ -1528,6 +1550,7 @@ export class GameEngine {
 
     const dir = this.resolveAimDir();
     this.playerFacing = Math.atan2(dir.x, dir.z);
+    this.syncRacalvinWeaponForSkill(skill);
     this.playerAnimator?.triggerNamed(skill.anim);
     if (!this.playerAnimator?.isRootMotionActive() && skill.targeting !== "self" && skill.targeting !== "ground_aoe") {
       this.playerPos.x += dir.x * 1.1;
@@ -2022,6 +2045,7 @@ export class GameEngine {
     const dx = enemy.position.x - this.playerPos.x;
     const dz = enemy.position.z - this.playerPos.z;
     this.playerFacing = Math.atan2(dx, dz);
+    this.syncRacalvinWeaponMelee();
     this.playerAnimator?.triggerAttack();
 
     if (mods.autoAttackSlash) {

@@ -40,6 +40,7 @@ export type SkillElement =
   | "lightning"
   | "poison"
   | "arcane"
+  | "psychic"
   | "physical";
 
 type TexKind = "glow" | "spark" | "smoke" | "shard";
@@ -59,6 +60,7 @@ const STYLES: Record<SkillElement, ElementStyle> = {
   lightning: { core: 0xffffff, edge: 0x7db8ff, tint: 0x9ad8ff },
   poison: { core: 0xe6ff8a, edge: 0x4fae1f, tint: 0x7fe04a },
   arcane: { core: 0xf0dcff, edge: 0x7a4bff, tint: 0x8a6bff },
+  psychic: { core: 0xccffee, edge: 0x22cc66, tint: 0x44ff88 },
   physical: { core: 0xffe9c4, edge: 0x9a7b44, tint: 0xc5a059 },
 };
 
@@ -345,6 +347,11 @@ export class ParticleVfx {
         // swirling violet motes + fine sparks
         this.emit({ tex: "glow", pos: p, count: n(16), duration: 0.8, life: [0.4, 0.8], speed: [2 * scale, 5 * scale], size: [0.3 * scale, 0.7 * scale], core: s.core, edge: s.edge, emit: 0.35, force: [0, 1, 0], forceMag: 2.5, max: 1.1 });
         this.emit({ tex: "spark", pos: p, count: n(8), duration: 0.7, life: [0.3, 0.6], speed: [3 * scale, 6 * scale], size: [0.2 * scale, 0.45 * scale], core: 0xffffff, edge: s.edge, max: 1.0 });
+        break;
+      case "psychic":
+        // green mind-motes + sharp psychic sparks
+        this.emit({ tex: "glow", pos: p, count: n(18), duration: 0.75, life: [0.35, 0.75], speed: [2.5 * scale, 5.5 * scale], size: [0.35 * scale, 0.75 * scale], core: s.core, edge: s.edge, emit: 0.3, force: [0, 0.6, 0], forceMag: 2, max: 1.1 });
+        this.emit({ tex: "spark", pos: p, count: n(12), duration: 0.55, life: [0.2, 0.45], speed: [4 * scale, 8 * scale], size: [0.18 * scale, 0.4 * scale], core: 0xeafff5, edge: s.edge, emit: 0.2, max: 0.95 });
         break;
       case "physical":
         // gritty debris flung out + a dust kick
