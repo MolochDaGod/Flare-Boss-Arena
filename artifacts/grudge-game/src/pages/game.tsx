@@ -12,6 +12,14 @@ import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { useResolvedSkills } from "@/data/skillsResolver";
 import { SkillIcon } from "@/components/SkillIcon";
 import { BarGauge, OrbGauge, Separator, WarningBanner } from "@/components/CraftpixUI";
+import { getWallet, saveWallet } from "@/data/wallet";
+import {
+  VENDOR_GOODS,
+  getResources,
+  addResource,
+  spendResource,
+} from "@/data/resources";
+import { toast } from "sonner";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
 class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -191,6 +199,8 @@ function Game() {
   const [showControls, setShowControls] = useState(true);
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<PanelKey>("equipment");
+  const [vendorOpen, setVendorOpen] = useState(false);
+  const [bagTick, setBagTick] = useState(0);
   useMainPanelHotkeys(
     () => setPanelOpen((v) => !v),
     () => setPanelOpen(false),
@@ -240,6 +250,13 @@ function Game() {
 
     const engine = new GameEngine();
     engine.onStateUpdate = handleStateUpdate;
+    engine.onOpenVendor = () => setVendorOpen(true);
+    engine.onMapReseed = (seed) => {
+      toast.message("New island charted", {
+        description: `Generative seed #${seed.toString(16)} — fresh woods, stone, and a Colossus.`,
+      });
+      setBagTick((t) => t + 1);
+    };
     engine.init(mountRef.current, { ...playerStats, skinId, equipMainCategory }, enemyTemplates);
     engine.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
     engineRef.current = engine;
@@ -322,9 +339,19 @@ function Game() {
 
         <div className="text-center">
           <p className="text-[10px] font-serif uppercase tracking-[0.2em] text-muted-foreground/60">{gameState?.zone ?? ""}</p>
+          {gameState?.bossAlive && gameState.bossName && (
+            <div className="mt-1 min-w-[220px] mx-auto">
+              <p className="text-[10px] font-serif uppercase tracking-widest text-destructive">{gameState.bossName}</p>
+              <BarGauge
+                pct={(gameState.bossHp / Math.max(1, gameState.bossMaxHp)) * 100}
+                color="#e23b3b"
+                height={10}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Mini stats top-right */}
+        {/* Mini stats top-right + resources */}
         {playerStats && gameState && (
           <div className="pointer-events-auto bg-black/60 border border-white/10 backdrop-blur-sm rounded px-3 py-1.5 text-right">
             <p className="text-[10px] font-serif uppercase tracking-widest text-primary">{playerStats.charName}</p>
@@ -332,11 +359,34 @@ function Game() {
               Lv {gameState.playerLevel} · {playerStats.charRace} {playerStats.charClass}
             </p>
             <p className="text-[9px] font-mono text-muted-foreground/70">
-              DMG {playerStats.baseDamage} · DEF {playerStats.defense} · CRIT {Math.round(playerStats.critChance * 100)}%
+              🪙 {gameState.gold} · 🪵 {gameState.resources?.wood ?? 0} · 🪨 {gameState.resources?.stone ?? 0}
             </p>
           </div>
         )}
       </div>
+
+      {/* Interact prompts (pirate / harvest) */}
+      {gameState?.nearbyPirate && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 z-20 pointer-events-none" style={{ marginTop: 80 }}>
+          <div className="px-4 py-2 rounded text-center" style={{ ...stonePanel, minWidth: 260 }}>
+            <p className="font-serif text-sm tracking-widest uppercase" style={{ color: GOLD }}>
+              {gameState.nearbyPirate.name}
+            </p>
+            <p className="text-[10px] text-muted-foreground">{gameState.nearbyPirate.title}</p>
+            <p className="text-[11px] mt-1 text-amber-200/90">{gameState.nearbyPirate.prompt}</p>
+            <p className="text-[10px] font-mono mt-1 tracking-widest uppercase" style={{ color: GOLD }}>
+              Press [E]
+            </p>
+          </div>
+        </div>
+      )}
+      {!gameState?.nearbyPirate && gameState?.nearbyHarvest && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+          <p className="text-[11px] font-mono tracking-wide px-3 py-1 rounded bg-black/70 border border-white/10 text-emerald-200/90">
+            {gameState.nearbyHarvest}
+          </p>
+        </div>
+      )}
 
       {/* Player HUD — bottom left */}
       {gameState && (
@@ -550,6 +600,94 @@ function Game() {
         } satisfies CharSummary}
       />
 
+      {/* Anne Bonny — Pirate Cove vendor */}
+      <AnimatePresence>
+        {vendorOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-4"
+            onClick={() => setVendorOpen(false)}
+          >
+            <div
+              className="relative max-w-md w-full p-6 space-y-4"
+              style={stonePanel}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Rivets />
+              <div className="text-center">
+                <h2 className="font-serif text-xl tracking-widest uppercase" style={{ color: GOLD }}>
+                  Anne&apos;s Trade Chest
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Buy timber &amp; stone, or sell your harvest. Gold:{" "}
+                  <span style={{ color: GOLD }}>{getWallet().gold}</span>
+                  {" · "}🪵 {getResources().wood} · 🪨 {getResources().stone}
+                </p>
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {VENDOR_GOODS.map((g) => (
+                  <button
+                    key={g.id + bagTick}
+                    className="w-full text-left px-3 py-2 rounded border border-white/10 hover:border-[#c5a059]/60 bg-black/40 transition-colors"
+                    onClick={() => {
+                      const w = getWallet();
+                      if (g.kind === "buy") {
+                        if (g.id === "buy_potion") {
+                          if (w.gold < g.gold) {
+                            toast.error("Not enough gold.");
+                            return;
+                          }
+                          saveWallet({ ...w, gold: w.gold - g.gold });
+                          // Instant heal via engine log only — HP is engine-owned; toast.
+                          toast.success("Grog of Mending — restored some grit (heal on next regen tick).");
+                          setBagTick((t) => t + 1);
+                          return;
+                        }
+                        if (w.gold < g.gold) {
+                          toast.error("Not enough gold.");
+                          return;
+                        }
+                        if (!g.resource) return;
+                        saveWallet({ ...w, gold: w.gold - g.gold });
+                        addResource(g.resource, g.amount);
+                        toast.success(`Bought ${g.amount} ${g.resource}.`);
+                      } else {
+                        if (!g.resource) return;
+                        if (!spendResource(g.resource, g.amount)) {
+                          toast.error(`Need ${g.amount} ${g.resource}.`);
+                          return;
+                        }
+                        saveWallet({ ...w, gold: w.gold + g.gold });
+                        toast.success(`Sold ${g.amount} ${g.resource} for ${g.gold} gold.`);
+                      }
+                      setBagTick((t) => t + 1);
+                    }}
+                  >
+                    <div className="flex justify-between items-center">
+                      <span className="font-serif text-sm tracking-wide">{g.name}</span>
+                      <span className="text-xs font-mono" style={{ color: GOLD }}>
+                        {g.kind === "buy" ? `−${g.gold}g` : `+${g.gold}g`}
+                        {g.resource ? ` · ${g.kind === "buy" ? "+" : "−"}${g.amount} ${g.resource}` : ""}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{g.blurb}</p>
+                  </button>
+                ))}
+              </div>
+              <button
+                className="w-full h-10 font-serif tracking-widest uppercase rounded"
+                style={{ background: GOLD, color: "#1a1208" }}
+                onClick={() => setVendorOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Controls hint */}
       <AnimatePresence>
         {showControls && (
@@ -566,7 +704,9 @@ function Game() {
               </div>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">WASD / Arrow Keys — Move</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Left Click Enemy — Target &amp; Chase</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F / Space — Attack Nearest</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F / Space — Attack foes · chop trees · quarry stone</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">E — Talk (vendor Anne / Capt. Barbarossa sails new island)</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">East: Pirate Cove · West: Island Colossus boss</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Left Click Ground — Move To</p>
             </div>
           </motion.div>

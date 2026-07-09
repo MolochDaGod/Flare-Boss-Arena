@@ -5,8 +5,19 @@ import { isMonsterId, loadMonsterModel, disposeMonsterModel, ANIMATED_MONSTER_TE
 import { isKitMonsterId, loadKitMonster, disposeKitModel, KIT_TEMPLATES } from "./KayKitCharacter";
 import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
-import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle } from "./PirateNPC";
+import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle, type PirateRole } from "./PirateNPC";
 import { Townsperson } from "./Townsfolk";
+import {
+  buildHarvestField,
+  hideHarvestNode,
+  showHarvestNode,
+  nearestHarvestNode,
+  resourceForKind,
+  type HarvestField,
+  type HarvestNode,
+} from "./Harvestables";
+import { addResource, getResources, type ResourceBag } from "../data/resources";
+import { getWallet, saveWallet } from "../data/wallet";
 import { PlayerAnimator, buildAuthoredClips, buildSkinAnim } from "./PlayerAnimator";
 import { DungeonMap } from "./DungeonMap";
 import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "../data/characterMeshes";
@@ -28,6 +39,17 @@ import { DUNGEON_COLLECTABLES } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
 
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
+
+function mulberry(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 const CLASS_MODEL: Record<string, string> = {
   warrior: "Knight",
@@ -90,6 +112,14 @@ export interface DamageNumber {
   isCrit: boolean;
 }
 
+export interface NearbyPirateInfo {
+  id: string;
+  name: string;
+  title: string;
+  role: PirateRole;
+  prompt: string;
+}
+
 export interface GameState {
   playerHp: number;
   playerMaxHp: number;
@@ -98,13 +128,27 @@ export interface GameState {
   playerLevel: number;
   playerXp: number;
   playerAttackCooldown: number;
-  enemies: Array<{ id: string; name: string; hp: number; maxHp: number; screenX: number; screenY: number; tier: number }>;
+  enemies: Array<{ id: string; name: string; hp: number; maxHp: number; screenX: number; screenY: number; tier: number; isBoss?: boolean }>;
   damageNumbers: Array<{ id: string; value: number; x: number; y: number; age: number; isPlayer: boolean; isCrit: boolean }>;
   combatLog: string[];
   zone: string;
   loaded: boolean;
   /** True once the dungeon GLB + collision BVH are built (or load failed). */
   mapReady: boolean;
+  /** Gathered resources (wood / stone). */
+  resources: ResourceBag;
+  gold: number;
+  /** Nearby pirate for E-key interact (vendor / captain / crew). */
+  nearbyPirate: NearbyPirateInfo | null;
+  /** Nearby harvest node label for HUD. */
+  nearbyHarvest: string | null;
+  /** Island generation seed (captain re-sails change this). */
+  mapSeed: number;
+  /** True while a dungeon boss is alive. */
+  bossAlive: boolean;
+  bossName: string | null;
+  bossHp: number;
+  bossMaxHp: number;
 }
 
 export interface PlayerInitStats {
@@ -208,6 +252,15 @@ export class GameEngine {
   private coveLabel: THREE.Sprite | null = null;
   private coveCenter = new THREE.Vector3(70, 0, -14);
   private disposed = false;
+  private harvestField: HarvestField | null = null;
+  private mapSeed = (Math.random() * 0xffffffff) >>> 0;
+  private bossEnemyId: string | null = null;
+  private nearbyPirate: NearbyPirateInfo | null = null;
+  private nearbyHarvestLabel: string | null = null;
+  /** Callback when captain sails — React can hard-refresh or show toast. */
+  public onMapReseed: ((seed: number) => void) | null = null;
+  public onOpenVendor: (() => void) | null = null;
+  public onSailBoss: (() => void) | null = null;
   private hoveredEnemy: EnemyInstance | null = null;
   private hoverEmissive = new Map<THREE.MeshStandardMaterial, { hex: number; intensity: number }>();
   private _moveHandler!: (e: MouseEvent) => void;
@@ -275,10 +328,13 @@ export class GameEngine {
     this.loadEnvironment();
     this.camp = buildOrcCamp(this.loader, this.scene, `${import.meta.env.BASE_URL}models/buildings/orc_camp_set.glb`);
     this.buildPirateCove();
+    this.buildHarvestables();
     this.buildWorldCollectables();
+    this.scatterGenerativeProps();
     this.setupLighting();
     this.loadPlayerModel();
     this.spawnInitialEnemies();
+    this.spawnDungeonBoss();
     this.setupInput(container);
 
     this.fx = new FX2D(container);
@@ -385,23 +441,28 @@ export class GameEngine {
    */
   private buildPirateCove() {
     const c = this.coveCenter;
-    // Boat assistance: a docked ship as the cove landmark + a jetty + loot.
+    // Boat assistance: docked ships as the cove landmark + jetty + loot.
     this.loadCoveProp("world/Ship_Small.gltf", new THREE.Vector3(c.x + 7, 0, c.z - 4), 16, Math.PI * 0.18);
+    this.loadCoveProp("world/Ship_Large.gltf", new THREE.Vector3(c.x + 14, 0, c.z - 8), 22, Math.PI * 0.08);
     this.loadCoveProp("world/Environment_Dock.gltf", new THREE.Vector3(c.x + 1, 0, c.z), 11, 0);
+    this.loadCoveProp("world/Environment_Dock_Pole.gltf", new THREE.Vector3(c.x - 4, 0, c.z + 4), 2.2, 0.3);
     this.loadCoveProp("world/Prop_Chest_Gold.gltf", new THREE.Vector3(c.x - 2.5, 0, c.z + 2.5), 1.3, 0.6);
     this.loadCoveProp("world/Prop_Barrel.gltf", new THREE.Vector3(c.x - 3.5, 0, c.z + 1), 1.1, 0);
     this.loadCoveProp("world/Prop_Anchor.gltf", new THREE.Vector3(c.x - 1.5, 0, c.z + 3.5), 1.4, -0.4);
+    this.loadCoveProp("world/Prop_Coins.gltf", new THREE.Vector3(c.x - 2, 0, c.z + 1.5), 0.9, 0.2);
 
-    // Three neutral pirate allies standing around the cove.
-    const trio = PIRATE_DEFS.slice(0, 3);
-    trio.forEach((def, i) => {
-      const angle = (i / trio.length) * Math.PI * 0.8 - Math.PI * 0.4;
-      const px = c.x - 2 + Math.cos(angle) * 3.2;
-      const pz = c.z + 2 + Math.sin(angle) * 3.2;
+    // Full crew: vendor (Anne), captain (Barbarossa), + crew for atmosphere.
+    PIRATE_DEFS.forEach((def, i) => {
+      const angle = (i / PIRATE_DEFS.length) * Math.PI * 1.1 - Math.PI * 0.55;
+      const r = def.role === "captain" ? 4.2 : def.role === "vendor" ? 3.0 : 3.6;
+      const px = c.x - 1.5 + Math.cos(angle) * r;
+      const pz = c.z + 1.5 + Math.sin(angle) * r;
       const handle = loadPirate(def, this.loader);
       handle.group.position.set(px, 0, pz);
-      handle.group.rotation.y = Math.atan2(-px, -pz); // face the map centre
+      handle.group.rotation.y = Math.atan2(c.x - px, c.z - pz);
       handle.group.userData.waveTimer = 1.5 + Math.random() * 4;
+      handle.group.userData.pirateId = def.id;
+      handle.group.userData.pirateRole = def.role ?? "crew";
       this.scene.add(handle.group);
       this.pirates.push(handle);
     });
@@ -409,6 +470,41 @@ export class GameEngine {
     this.addCoveLabel(new THREE.Vector3(c.x + 1, 4.6, c.z));
 
     this.buildTownsfolk();
+  }
+
+  /** Tall generative trees (2–4× character height) + stone harvest nodes. */
+  private buildHarvestables() {
+    if (this.harvestField) {
+      this.scene.remove(this.harvestField.root);
+      this.harvestField.dispose();
+      this.harvestField = null;
+    }
+    this.harvestField = buildHarvestField(this.mapSeed, this.DUNGEON, {
+      treeCount: 52,
+      stoneCount: 30,
+    });
+    this.scene.add(this.harvestField.root);
+  }
+
+  /** Scatter extra pirate-kit props as generative dungeon flavor. */
+  private scatterGenerativeProps() {
+    const rng = mulberry(this.mapSeed ^ 0x9e3779b9);
+    const props: Array<{ rel: string; extent: number }> = [
+      { rel: "world/Prop_Barrel.gltf", extent: 1.0 },
+      { rel: "world/Prop_Chest_Gold.gltf", extent: 1.1 },
+      { rel: "world/Prop_Anchor.gltf", extent: 1.2 },
+      { rel: "world/Prop_Coins.gltf", extent: 0.85 },
+    ];
+    for (let i = 0; i < 14; i++) {
+      const p = props[i % props.length]!;
+      const a = rng() * Math.PI * 2;
+      const r = 18 + rng() * (this.DUNGEON - 28);
+      let x = Math.cos(a) * r;
+      let z = Math.sin(a) * r;
+      // Keep clear of cove cluster.
+      if (x > 55 && Math.abs(z + 14) < 20) x -= 25;
+      this.loadCoveProp(p.rel, new THREE.Vector3(x, 0, z), p.extent * (0.85 + rng() * 0.4), rng() * Math.PI * 2);
+    }
   }
 
   /** Neutral KayKit townsfolk wandering near the cove — ambient population only,
@@ -752,19 +848,46 @@ export class GameEngine {
     // Spawn the KayKit skeleton minions (real shared-library skeletal animation).
     for (const m of KIT_TEMPLATES) configs.push({ template: m, count: m.tier === 1 ? 3 : 2 });
 
+    const rng = mulberry(this.mapSeed ^ 0x51aced);
     for (const { template, count } of configs) {
       for (let i = 0; i < count; i++) {
         const D = this.DUNGEON - 3;
         let x = 0, z = 0;
         let attempts = 0;
         do {
-          x = (Math.random() * 2 - 1) * D;
-          z = (Math.random() * 2 - 1) * D;
+          x = (rng() * 2 - 1) * D;
+          z = (rng() * 2 - 1) * D;
           attempts++;
         } while (Math.sqrt(x * x + z * z) < 6 && attempts < 20);
         this.createEnemy(template, new THREE.Vector3(x, 0, z));
       }
     }
+  }
+
+  /**
+   * One generative dungeon boss far from spawn (opposite the cove). Uses the
+   * largest monster GLB when available; does not soft-respawn on death.
+   */
+  private spawnDungeonBoss() {
+    const bossPos = new THREE.Vector3(-52, 0, 38);
+    const template: EnemyTemplate = {
+      id: "mon_big_scary_t3",
+      name: "Island Colossus",
+      type: "titan",
+      tier: 5,
+      hp: 1400,
+      damage: 38,
+    };
+    // Prefer animated medusa/dante if t3 fails resolution — createEnemy maps mon_*.
+    const boss = this.createEnemy(template, bossPos);
+    boss.aggroRange = 14;
+    boss.attackRange = 4.2;
+    boss.speed = 1.7;
+    boss.model.group.scale.multiplyScalar(1.35);
+    boss.model.height *= 1.35;
+    this.bossEnemyId = boss.id;
+    boss.model.group.userData.isBoss = true;
+    this.log(`${template.name} stirs in the western ruins…`);
   }
 
   /** FNV-1a hash → deterministic per-template model pick. */
@@ -862,6 +985,10 @@ export class GameEngine {
       if (e.code === "KeyF" || e.code === "Space") {
         e.preventDefault();
         this.attackNearest();
+      }
+      if (e.code === "KeyE") {
+        e.preventDefault();
+        this.tryEngagePirate();
       }
       const n = Number(e.key);
       if (n >= 1 && n <= 5) {
@@ -1030,7 +1157,12 @@ export class GameEngine {
       const d = en.position.distanceTo(this.playerPos);
       if (d < nearestDist) { nearestDist = d; nearest = en; }
     }
-    if (nearest && nearestDist < 4.5) this.doAttack(nearest);
+    if (nearest && nearestDist < 4.5) {
+      this.doAttack(nearest);
+      return;
+    }
+    // No foe in melee — chop trees / quarry stone by attacking harvest nodes.
+    this.tryHarvestAttack();
   }
 
   /** Nearest live enemy within `maxDist` (used by the RMB hold-to-attack lock). */
@@ -1189,6 +1321,89 @@ export class GameEngine {
     }
   }
 
+  /**
+   * Engage nearby pirate: vendor opens shop, captain re-seeds the generative
+   * island (new trees/stones/enemy layout) and can sail to the boss arena.
+   */
+  tryEngagePirate() {
+    this.refreshNearbyInteractables();
+    const np = this.nearbyPirate;
+    if (!np) {
+      this.log("No pirate nearby — head to Pirate Cove (east).");
+      return;
+    }
+    const pirate = this.pirates.find((p) => p.def.id === np.id);
+    pirate?.animator?.wave();
+
+    if (np.role === "vendor") {
+      this.log(`${np.name}: "Wood, stone, grog — fair prices for a corsair."`);
+      this.onOpenVendor?.();
+      return;
+    }
+    if (np.role === "captain") {
+      this.log(`${np.name}: "The wind shifts — I chart a new island!"`);
+      this.reseedGenerativeMap();
+      return;
+    }
+    this.log(`${np.name}: "${np.prompt}"`);
+  }
+
+  /** Captain re-sails: new seed → fresh forest/stones + enemy layout + boss. */
+  reseedGenerativeMap() {
+    this.mapSeed = (Math.random() * 0xffffffff) >>> 0;
+    // Clear non-boss enemies and respawn from seed.
+    for (const en of [...this.enemies]) {
+      this.scene.remove(en.model.group);
+      en.model.group.userData.disposed = true;
+      if (en.model.kit) disposeKitModel(en.model);
+      else if (en.model.isGLB) disposeMonsterModel(en.model);
+    }
+    this.enemies = [];
+    this.bossEnemyId = null;
+    this.buildHarvestables();
+    this.spawnInitialEnemies();
+    this.spawnDungeonBoss();
+    this.playerPos.set(0, 0, 0);
+    if (this.playerGroup) this.playerGroup.position.set(0, 0, 0);
+    this.log(`Sailed to island seed #${this.mapSeed.toString(16)} — new woods, stone, and a Colossus await.`);
+    this.onMapReseed?.(this.mapSeed);
+    this.notifyState();
+  }
+
+  private refreshNearbyInteractables() {
+    this.nearbyPirate = null;
+    this.nearbyHarvestLabel = null;
+    const now = performance.now() / 1000;
+
+    let bestPirateDist = 3.6;
+    for (const p of this.pirates) {
+      if (!p.ready) continue;
+      const d = Math.hypot(p.group.position.x - this.playerPos.x, p.group.position.z - this.playerPos.z);
+      if (d < bestPirateDist) {
+        bestPirateDist = d;
+        const role = (p.def.role ?? "crew") as PirateRole;
+        this.nearbyPirate = {
+          id: p.def.id,
+          name: p.def.name,
+          title: p.def.title,
+          role,
+          prompt: p.def.prompt ?? "Talk",
+        };
+      }
+    }
+
+    if (this.harvestField) {
+      const n = nearestHarvestNode(this.harvestField.nodes, this.playerPos, 3.2, now);
+      if (n) {
+        this.nearbyHarvestLabel =
+          n.kind === "wood"
+            ? `Tree (${Math.ceil(n.hp)} HP) — attack to chop wood`
+            : `Stone (${Math.ceil(n.hp)} HP) — attack to quarry`;
+      }
+    }
+  }
+
+  /** Attack nearest enemy, or harvest a tree/stone node if no foe is in reach. */
   private doAttack(enemy: EnemyInstance) {
     if (this.playerAttackCooldown > 0) return;
     if (enemy.state === "dead" || enemy.state === "death") return;
@@ -1251,9 +1466,19 @@ export class GameEngine {
       this.hoveredEnemy = null;
     }
 
-    const xp = enemy.template.tier * 50 + 25;
+    const isBoss = enemy.id === this.bossEnemyId || !!enemy.model.group.userData.isBoss;
+    const xp = enemy.template.tier * 50 + 25 + (isBoss ? 400 : 0);
     this.playerXp += xp;
     this.log(`${enemy.template.name} defeated! +${xp} XP`);
+
+    if (isBoss) {
+      this.bossEnemyId = null;
+      const w = getWallet();
+      const goldLoot = 180 + enemy.template.tier * 40;
+      const soulsLoot = 2 + Math.floor(enemy.template.tier / 2);
+      saveWallet({ ...w, gold: w.gold + goldLoot, souls: w.souls + soulsLoot });
+      this.log(`Boss spoils: +${goldLoot} gold, +${soulsLoot} souls.`);
+    }
 
     setTimeout(() => {
       enemy.state = "dead";
@@ -1262,8 +1487,6 @@ export class GameEngine {
       if (enemy.model.kit) {
         disposeKitModel(enemy.model);
       } else if (enemy.model.isGLB) {
-        // Thorough GLB cleanup (mixer + geometry + materials + textures), and
-        // releases resources even if the GLB is still streaming in.
         disposeMonsterModel(enemy.model);
       } else {
         enemy.model.group.traverse((c) => {
@@ -1274,14 +1497,74 @@ export class GameEngine {
       }
     }, 1400);
 
-    setTimeout(() => {
-      const idx = this.enemies.indexOf(enemy);
-      if (idx !== -1) this.enemies.splice(idx, 1);
-      const spawnPos = enemy.spawnPos.clone();
-      spawnPos.x += (Math.random() - 0.5) * 4;
-      spawnPos.z += (Math.random() - 0.5) * 4;
-      this.createEnemy(enemy.template, spawnPos);
-    }, 14000);
+    // Dungeon boss does not soft-respawn; trash mobs do.
+    if (!isBoss) {
+      setTimeout(() => {
+        if (this.disposed) return;
+        const idx = this.enemies.indexOf(enemy);
+        if (idx !== -1) this.enemies.splice(idx, 1);
+        const spawnPos = enemy.spawnPos.clone();
+        spawnPos.x += (Math.random() - 0.5) * 4;
+        spawnPos.z += (Math.random() - 0.5) * 4;
+        this.createEnemy(enemy.template, spawnPos);
+      }, 14000);
+    } else {
+      setTimeout(() => {
+        if (this.disposed) return;
+        const idx = this.enemies.indexOf(enemy);
+        if (idx !== -1) this.enemies.splice(idx, 1);
+      }, 1400);
+    }
+  }
+
+  /** Chop / quarry: attack nearest harvest node (tree or stone). */
+  private tryHarvestAttack() {
+    if (this.playerAttackCooldown > 0 || !this.harvestField) return;
+    const now = performance.now() / 1000;
+    // Respawn elapsed nodes.
+    for (const n of this.harvestField.nodes) {
+      if (n.hp <= 0 && n.respawnAt > 0 && now >= n.respawnAt) {
+        n.hp = n.maxHp;
+        n.respawnAt = 0;
+        showHarvestNode(this.harvestField, n);
+      }
+    }
+    const node = nearestHarvestNode(this.harvestField.nodes, this.playerPos, 3.0, now);
+    if (!node) return;
+
+    this.playerAttackCooldown = this.playerMaxAttackCooldown * 0.85;
+    this.playerFacing = Math.atan2(node.position.x - this.playerPos.x, node.position.z - this.playerPos.z);
+    this.playerAnimator?.triggerAttack();
+
+    const dmg = Math.max(8, Math.floor(this.playerBaseDamage * 0.55 * (0.85 + Math.random() * 0.3)));
+    node.hp = Math.max(0, node.hp - dmg);
+    const wp = node.position.clone();
+    wp.y = node.kind === "wood" ? 2.5 : 1.2;
+    this.damageNumbers.push({
+      id: `d${this.idCounter++}`,
+      value: dmg,
+      worldPos: wp,
+      age: 0,
+      isPlayer: false,
+      isCrit: false,
+    });
+    this.log(
+      node.kind === "wood"
+        ? `You chop the tree (−${dmg}).`
+        : `You strike the stone (−${dmg}).`,
+    );
+
+    if (node.hp <= 0) {
+      const yMin = node.yieldMin;
+      const yMax = node.yieldMax;
+      const amount = yMin + Math.floor(Math.random() * (yMax - yMin + 1));
+      const res = resourceForKind(node.kind);
+      addResource(res, amount);
+      hideHarvestNode(this.harvestField, node);
+      node.respawnAt = now + 45 + Math.random() * 30;
+      this.log(`Harvested ${amount} ${res}!`);
+    }
+    this.notifyState();
   }
 
   private takeDamage(amount: number, source: string) {
@@ -1359,7 +1642,10 @@ export class GameEngine {
         this.targetEnemy && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death"
           ? this.targetEnemy
           : this.nearestEnemy(14);
-      if (locked) {
+      if (!locked) {
+        // RMB with no foe: harvest nearby tree / stone.
+        this.tryHarvestAttack();
+      } else if (locked) {
         this.targetEnemy = locked;
         const toFoe = new THREE.Vector3().subVectors(locked.position, this.playerPos);
         const dist = toFoe.length();
@@ -1432,8 +1718,7 @@ export class GameEngine {
       log: (m) => this.log(m),
     });
 
-    // Neutral pirate allies at the cove: idle anim, plus turn-to-face and an
-    // occasional wave when the player wanders close.
+    // Neutral pirate allies at the cove: idle anim, turn-to-face, wave.
     for (const t of this.townsfolk) t.update(delta);
     for (const p of this.pirates) {
       if (!p.ready || !p.animator) continue;
@@ -1450,6 +1735,21 @@ export class GameEngine {
         if (p.group.userData.waveTimer <= 0) {
           p.animator.wave();
           p.group.userData.waveTimer = 5 + Math.random() * 5;
+        }
+      }
+    }
+
+    // Proximity prompts for cove + harvest nodes.
+    this.refreshNearbyInteractables();
+
+    // Soft-respawn harvest nodes on timer.
+    if (this.harvestField) {
+      const now = performance.now() / 1000;
+      for (const n of this.harvestField.nodes) {
+        if (n.hp <= 0 && n.respawnAt > 0 && now >= n.respawnAt) {
+          n.hp = n.maxHp;
+          n.respawnAt = 0;
+          showHarvestNode(this.harvestField, n);
         }
       }
     }
@@ -1584,6 +1884,8 @@ export class GameEngine {
       return { id: d.id, value: d.value, x: sc.x, y: sc.y, age: d.age, isPlayer: d.isPlayer, isCrit: d.isCrit };
     });
 
+    const boss = this.enemies.find((e) => e.id === this.bossEnemyId && e.state !== "dead" && e.state !== "death");
+    const w = getWallet();
     this.onStateUpdate({
       playerHp: Math.round(this.playerHp),
       playerMaxHp: this.playerMaxHp,
@@ -1592,12 +1894,21 @@ export class GameEngine {
       playerLevel: this.playerLevel,
       playerXp: this.playerXp,
       playerAttackCooldown: Math.max(0, this.playerAttackCooldown / this.playerMaxAttackCooldown),
-      enemies: enemyUI,
+      enemies: enemyUI.map((e) => ({ ...e, isBoss: e.id === this.bossEnemyId })),
       damageNumbers: dmgUI,
       combatLog: [...this.combatLog],
-      zone: "Grudge Dungeon — Starter Island",
+      zone: `Pirate Island · seed ${this.mapSeed.toString(16)}`,
       loaded: this.loaded,
       mapReady: this.mapReady,
+      resources: getResources(),
+      gold: w.gold,
+      nearbyPirate: this.nearbyPirate,
+      nearbyHarvest: this.nearbyHarvestLabel,
+      mapSeed: this.mapSeed,
+      bossAlive: !!boss,
+      bossName: boss?.template.name ?? null,
+      bossHp: boss?.hp ?? 0,
+      bossMaxHp: boss?.maxHp ?? 0,
     });
   }
 
@@ -1654,6 +1965,8 @@ export class GameEngine {
       (this.terrainMesh.material as THREE.Material).dispose();
     }
     this.camp?.dispose();
+    this.harvestField?.dispose();
+    this.harvestField = null;
     this.dungeonMap?.dispose();
     this.dungeonMap = null;
     for (const p of this.pirates) {

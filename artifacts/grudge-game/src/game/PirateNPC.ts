@@ -20,20 +20,67 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 const PIRATE_BASE = `${import.meta.env.BASE_URL}models/pirates`;
 
+/** Interaction role at Pirate Cove (neutral NPCs). */
+export type PirateRole = "vendor" | "captain" | "crew";
+
 export interface PirateDef {
   id: string;
   name: string;
   title: string;
   file: string; // under chars/
   height: number; // target world height in units
+  /** Cove interaction — vendor buys/sells, captain sails to a new map. */
+  role?: PirateRole;
+  /** Short prompt shown when the player is nearby (E to engage). */
+  prompt?: string;
 }
 
 export const PIRATE_DEFS: PirateDef[] = [
-  { id: "anne", name: "Anne Bonny", title: "Corsair Quartermaster", file: "Anne.gltf", height: 1.9 },
-  { id: "barbarossa", name: "Capt. Barbarossa", title: "Dread Admiral", file: "Captain_Barbarossa.gltf", height: 2.05 },
-  { id: "henry", name: "Henry Morgan", title: "Privateer", file: "Henry.gltf", height: 1.95 },
-  { id: "sharky", name: "Sharky", title: "Master Gunner", file: "Sharky.gltf", height: 1.9 },
-  { id: "mako", name: "Mako", title: "Bosun", file: "Mako.gltf", height: 1.95 },
+  {
+    id: "anne",
+    name: "Anne Bonny",
+    title: "Corsair Quartermaster",
+    file: "Anne.gltf",
+    height: 1.9,
+    role: "vendor",
+    prompt: "Trade goods (buy / sell wood & stone)",
+  },
+  {
+    id: "barbarossa",
+    name: "Capt. Barbarossa",
+    title: "Dread Admiral",
+    file: "Captain_Barbarossa.gltf",
+    height: 2.05,
+    role: "captain",
+    prompt: "Sail to a new generative island",
+  },
+  {
+    id: "henry",
+    name: "Henry Morgan",
+    title: "Privateer",
+    file: "Henry.gltf",
+    height: 1.95,
+    role: "crew",
+    prompt: "Share cove rumors",
+  },
+  {
+    id: "sharky",
+    name: "Sharky",
+    title: "Master Gunner",
+    file: "Sharky.gltf",
+    height: 1.9,
+    role: "crew",
+    prompt: "Inspect the cannons",
+  },
+  {
+    id: "mako",
+    name: "Mako",
+    title: "Bosun",
+    file: "Mako.gltf",
+    height: 1.95,
+    role: "crew",
+    prompt: "Talk shop",
+  },
 ];
 
 export type PirateAction = "idle" | "walk" | "wave" | "attack" | "hit" | "death";
