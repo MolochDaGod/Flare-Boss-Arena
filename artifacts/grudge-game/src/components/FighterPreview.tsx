@@ -94,17 +94,31 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     }
     setFailed(false);
 
-    const w = mount.clientWidth || 360;
-    const h = mount.clientHeight || 480;
+    const w = Math.max(mount.clientWidth, 1);
+    const h = Math.max(mount.clientHeight, 1);
     renderer.setSize(w, h);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.domElement.style.display = "block";
+    renderer.domElement.style.width = "100%";
+    renderer.domElement.style.height = "100%";
     mount.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(32, w / h, 0.1, 100);
-    camera.position.set(0, 1.25, 4.6);
-    camera.lookAt(0, 1.05, 0);
+    const fitCamera = (nw: number, nh: number) => {
+      const aspect = nw / nh;
+      camera.aspect = aspect;
+      camera.updateProjectionMatrix();
+      if (aspect > 1.15) {
+        camera.position.set(0, 1.05, 5.4);
+        camera.lookAt(0, 0.92, 0);
+      } else {
+        camera.position.set(0, 1.25, 4.6);
+        camera.lookAt(0, 1.05, 0);
+      }
+    };
+    fitCamera(w, h);
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.85));
     const key = new THREE.DirectionalLight(0xfff1d6, 1.5);
@@ -207,17 +221,20 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     render();
 
     const onResize = () => {
-      const nw = mount.clientWidth || w;
-      const nh = mount.clientHeight || h;
+      const nw = Math.max(mount.clientWidth, 1);
+      const nh = Math.max(mount.clientHeight, 1);
       renderer.setSize(nw, nh);
-      camera.aspect = nw / nh;
-      camera.updateProjectionMatrix();
+      fitCamera(nw, nh);
     };
+    const resizeObserver = new ResizeObserver(onResize);
+    resizeObserver.observe(mount);
     window.addEventListener("resize", onResize);
+    requestAnimationFrame(onResize);
 
     return () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      resizeObserver.disconnect();
       window.removeEventListener("resize", onResize);
       mixer?.stopAllAction();
       if (model) {

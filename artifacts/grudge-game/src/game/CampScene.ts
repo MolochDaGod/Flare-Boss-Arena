@@ -17,6 +17,12 @@ import type { ClassSkill } from "../data/classSkills";
 import { CAMP_PROP_PLACEMENTS } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
 import { canDodge } from "./combatInput";
+import {
+  CAMP_BOUNDS,
+  CAMP_STATION_BY_ID,
+  campStationMarkers,
+  type CampStationCategory,
+} from "../data/campTown";
 
 export type CampStationId =
   | "anvil"
@@ -65,10 +71,24 @@ export interface CampDamageNumber {
   age: number;
 }
 
+export interface CampMapMarker {
+  id: string;
+  nx: number;
+  nz: number;
+  color: number;
+  category: CampStationCategory;
+}
+
 export interface CampStateUpdate {
   nearbyStationId: CampStationId | null;
   nearbyStationLabel: string | null;
   nearbyStationHint: string | null;
+  nearbyStationCategory: CampStationCategory | null;
+  nearbyStationDistrict: string | null;
+  nearbyStationAction: string | null;
+  playerMapX: number;
+  playerMapZ: number;
+  mapMarkers: CampMapMarker[];
   promptKey: string;
   loaded: boolean;
   // ── Combat / testing-ground state ──
@@ -1322,11 +1342,25 @@ export class CampScene {
   private emitState() {
     if (this.disposed || !this.options.onStateUpdate) return;
     const st = this.stations.find((s) => s.id === this.currentNearbyId) ?? null;
+    const layout = this.currentNearbyId ? CAMP_STATION_BY_ID.get(this.currentNearbyId) : undefined;
+    const bounds = CAMP_BOUNDS;
     const now = performance.now();
     this.options.onStateUpdate({
       nearbyStationId: this.currentNearbyId,
       nearbyStationLabel: st?.label ?? null,
       nearbyStationHint: st?.hint ?? null,
+      nearbyStationCategory: layout?.category ?? null,
+      nearbyStationDistrict: layout?.district ?? null,
+      nearbyStationAction: layout?.action ?? null,
+      playerMapX: bounds > 0 ? this.playerPos.x / bounds : 0,
+      playerMapZ: bounds > 0 ? this.playerPos.z / bounds : 0,
+      mapMarkers: campStationMarkers().map((m) => ({
+        id: m.id,
+        nx: bounds > 0 ? m.x / bounds : 0,
+        nz: bounds > 0 ? m.z / bounds : 0,
+        color: m.color,
+        category: m.category,
+      })),
       promptKey: "E",
       loaded: this.loaded,
       playerHp: this.playerHp,

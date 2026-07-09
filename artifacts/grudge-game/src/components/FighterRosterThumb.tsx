@@ -3,28 +3,33 @@ import { FighterPreview } from "@/components/FighterPreview";
 import type { FighterDef } from "@/data/fighters";
 import { getEvolutionMeta } from "@/data/fighterEvolutions";
 
-/** Browsers cap active WebGL contexts (~8–16). The roster grid must not mount one per card. */
-const MAX_LIVE_PREVIEWS = 2;
+/** Browsers cap active WebGL contexts (~8–16). Queue roster previews instead of one per card. */
+const MAX_LIVE_PREVIEWS = 6;
 let livePreviews = 0;
-const previewWaiters: Array<() => void> = [];
+const previewWaiters: Array<{ priority: number; grant: () => void }> = [];
 
-function acquirePreviewSlot(): Promise<void> {
+function acquirePreviewSlot(priority: number): Promise<void> {
   if (livePreviews < MAX_LIVE_PREVIEWS) {
     livePreviews++;
     return Promise.resolve();
   }
   return new Promise((resolve) => {
-    previewWaiters.push(() => {
-      livePreviews++;
-      resolve();
-    });
+    const entry = {
+      priority,
+      grant: () => {
+        livePreviews++;
+        resolve();
+      },
+    };
+    previewWaiters.push(entry);
+    previewWaiters.sort((a, b) => b.priority - a.priority);
   });
 }
 
 function releasePreviewSlot() {
   livePreviews = Math.max(0, livePreviews - 1);
   const next = previewWaiters.shift();
-  if (next) next();
+  if (next) next.grant();
 }
 
 const ROLE_ACCENT: Record<string, string> = {
@@ -43,7 +48,7 @@ const ROLE_ACCENT: Record<string, string> = {
   "Phoenix Guardian": "#22d3ee",
 };
 
-function StaticThumb({ fighter }: { fighter: FighterDef }) {
+function StaticThumb({ fighter, waiting }: { fighter: FighterDef; waiting: boolean }) {
   const evo = getEvolutionMeta(fighter.id);
   const accent = ROLE_ACCENT[fighter.role] ?? "#c5a059";
   const initial = fighter.name.replace(/[^A-Za-z]/g, "").charAt(0) || "?";
@@ -61,6 +66,9 @@ function StaticThumb({ fighter }: { fighter: FighterDef }) {
       >
         {initial}
       </div>
+      <p className="font-serif text-[11px] uppercase tracking-[0.15em] text-foreground/90 line-clamp-1">
+        {fighter.name}
+      </p>
       <p className="font-serif text-[10px] uppercase tracking-[0.2em] text-muted-foreground line-clamp-1">
         {fighter.role}
       </p>
@@ -72,7 +80,9 @@ function StaticThumb({ fighter }: { fighter: FighterDef }) {
           {evo.isFinalForm ? "Final" : `T${evo.tier}`}
         </span>
       )}
-      <p className="text-[9px] font-mono text-muted-foreground/60 animate-pulse">Loading preview…</p>
+      {waiting && (
+        <p className="text-[9px] font-mono text-muted-foreground/60 animate-pulse">Summoning model…</p>
+      )}
     </div>
   );
 }
@@ -84,6 +94,7 @@ function StaticThumb({ fighter }: { fighter: FighterDef }) {
 export function FighterRosterThumb({ fighter }: { fighter: FighterDef }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState(false);
+  const [visibleRatio, setVisibleRatio] = useState(0);
   const [hasSlot, setHasSlot] = useState(false);
   const slotHeldRef = useRef(false);
 
@@ -91,15 +102,18 @@ export function FighterRosterThumb({ fighter }: { fighter: FighterDef }) {
     const el = rootRef.current;
     if (!el) return;
     const io = new IntersectionObserver(
-      ([entry]) => setInView(entry.isIntersecting),
-      { rootMargin: "64px", threshold: 0.08 },
+      ([entry]) => {
+        setInView(entry.isIntersecting);
+        setVisibleRatio(entry.intersectionRatio);
+      },
+      { rootMargin: "80px", threshold: [0, 0.08, 0.25, 0.5, 0.75, 1] },
     );
     io.observe(el);
     return () => io.disconnect();
   }, []);
 
   useEffect(() => {
-    if (!inView) {
+    if (!inView || visibleRatio < 0.08) {
       if (slotHeldRef.current) {
         releasePreviewSlot();
         slotHeldRef.current = false;
@@ -109,7 +123,7 @@ export function FighterRosterThumb({ fighter }: { fighter: FighterDef }) {
     }
 
     let cancelled = false;
-    acquirePreviewSlot().then(() => {
+    acquirePreviewSlot(visibleRatio).then(() => {
       if (cancelled) {
         releasePreviewSlot();
         return;
@@ -126,14 +140,14 @@ export function FighterRosterThumb({ fighter }: { fighter: FighterDef }) {
       }
       setHasSlot(false);
     };
-  }, [inView]);
+  }, [inView, visibleRatio]);
 
   return (
     <div ref={rootRef} className="absolute inset-0">
       {hasSlot ? (
         <FighterPreview skinId={fighter.skinId} fighterId={fighter.id} pauseRotation />
       ) : (
-        <StaticThumb fighter={fighter} />
+        <StaticThumb fighter={fighter} waiting={inView && visibleRatio >= 0.08} />
       )}
     </div>
   );

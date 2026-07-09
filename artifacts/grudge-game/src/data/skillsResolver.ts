@@ -10,24 +10,14 @@ import { getGameLoadout, RACALVIN_PISTOL_WEAPON, type GameLoadout, type GameWeap
 import { RACALVIN_ID } from "./fighters";
 import type { ClassSkill, ClassSkillSet } from "./classSkills";
 import { getActiveFighterId } from "./fighters";
+import type { WeaponSlot } from "@/game/weaponSkills";
 
-export interface WeaponSlot {
-  type: string;
-  label: string;
-  unlockTier?: number;
-  skills: Array<{
-    id: string;
-    name: string;
-    description: string;
-    icon?: string;
-    cooldown?: number;
-    damage?: number;
-  }>;
-}
+export type { WeaponSlot };
 
 export interface WeaponTypeDef {
   id: string;
   name: string;
+  icon?: string;
   slots: WeaponSlot[];
 }
 
@@ -55,8 +45,11 @@ function weaponSlot(w: GameWeapon, slotType: "primary" | "secondary"): WeaponSlo
         id: w.id,
         name: w.name,
         description: w.description,
+        icon: "⚔",
+        tier: 0,
         cooldown: 0,
         damage: w.damageBonus,
+        effects: [],
       },
     ],
   };

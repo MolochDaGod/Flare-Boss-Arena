@@ -319,8 +319,8 @@ export class GameEngine {
     // Hundreds of scattered rocks in a single InstancedMesh draw call (fills
     // the now-much-larger map without tanking performance).
     const rocks = makeRockField(220, D * 0.35, D - 4);
-    this.scene.add(rocks);
-    this.rockField = rocks;
+    this.scene.add(rocks.mesh);
+    this.rockField = rocks.mesh;
 
     // Invisible click plane — covers the playable area for click-to-move
     // raycasting. Sits just above the visible ground so floor picks are stable.
