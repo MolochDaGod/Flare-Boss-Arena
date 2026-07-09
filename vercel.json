@@ -5,6 +5,38 @@
   "outputDirectory": "artifacts/grudge-game/dist/public",
   "framework": "vite",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/api/gamedata/weapons",
+      "destination": "https://pub-e7fcf1fd4c9946ecb84b3766bbc7b50d.r2.dev/api/v1/weapons.json"
+    },
+    {
+      "source": "/api/gamedata/armor",
+      "destination": "https://pub-e7fcf1fd4c9946ecb84b3766bbc7b50d.r2.dev/api/v1/armor.json"
+    },
+    {
+      "source": "/api/gamedata/classes",
+      "destination": "https://pub-e7fcf1fd4c9946ecb84b3766bbc7b50d.r2.dev/api/v1/classes.json"
+    },
+    {
+      "source": "/api/gamedata/races",
+      "destination": "https://pub-e7fcf1fd4c9946ecb84b3766bbc7b50d.r2.dev/api/v1/races.json"
+    },
+    {
+      "source": "/api/gamedata/enemies",
+      "destination": "https://pub-e7fcf1fd4c9946ecb84b3766bbc7b50d.r2.dev/api/v1/enemies.json"
+    },
+    {
+      "source": "/api/gamedata/sprites",
+      "destination": "https://pub-e7fcf1fd4c9946ecb84b3766bbc7b50d.r2.dev/api/v1/sprites2d.json"
+    },
+    {
+      "source": "/api/gamedata/skillTrees",
+      "destination": "https://pub-e7fcf1fd4c9946ecb84b3766bbc7b50d.r2.dev/api/v1/skillTrees.json"
+    },
+    {
+      "source": "/api/gamedata/weaponSkills",
+      "destination": "https://pub-e7fcf1fd4c9946ecb84b3766bbc7b50d.r2.dev/api/v1/weaponSkills.json"
+    },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

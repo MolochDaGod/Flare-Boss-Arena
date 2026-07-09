@@ -350,6 +350,11 @@ export class SkinHeroAdapter implements HeroLike {
       this.inner.triggerAttack();
       return true;
     }
+    // Bounty-rush skins ship labelled dodge / jump / damage clips — play them
+    // instead of silently returning false (which forced a procedural lunge only).
+    if (state === "dodge") return this.inner.triggerRole("dodge");
+    if (state === "jump") return this.inner.triggerRole("jump");
+    if (state === "hit") return this.inner.triggerRole("hit");
     return false;
   }
 

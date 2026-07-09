@@ -21,7 +21,7 @@ import { RootMotion } from "./rootMotion";
  * exporter's per-bone axis convention.
  */
 
-type PAction = "idle" | "walk" | "attack";
+type PAction = "idle" | "walk" | "attack" | "dodge" | "jump" | "hit";
 
 export class PlayerAnimator {
   private mixer: THREE.AnimationMixer;
@@ -87,6 +87,26 @@ export class PlayerAnimator {
   /** True when a dedicated attack clip resolved (a labelled attack OR a blend). */
   get canAttack(): boolean {
     return !!this.actions.attack || this.attackBlend.length > 0;
+  }
+
+  /** Play a one-shot role clip (dodge / jump / hit / attack). Returns false if missing. */
+  triggerRole(role: Exclude<PAction, "idle" | "walk">): boolean {
+    if (this.attacking) return role === "attack" || role === "dodge";
+    if (role === "attack") {
+      this.triggerAttack();
+      return this.canAttack;
+    }
+    const a = this.actions[role];
+    if (!a) return false;
+    this.attacking = true;
+    this.oneShot = a;
+    a.reset();
+    a.setLoop(THREE.LoopOnce, 1);
+    a.clampWhenFinished = true;
+    a.fadeIn(0.06).play();
+    this.actions[this.current]?.fadeOut(0.06);
+    this.rm.begin();
+    return true;
   }
 
   triggerAttack() {
@@ -191,6 +211,9 @@ export function pickSkinClips(
     idle: findBySuffix(clips, SKIN_CLIP_SUFFIX.idle) ?? clips[0],
     walk: findBySuffix(clips, SKIN_CLIP_SUFFIX.walk),
     attack: findBySuffix(clips, SKIN_CLIP_SUFFIX.attack),
+    dodge: findBySuffix(clips, SKIN_CLIP_SUFFIX.dodge),
+    jump: findBySuffix(clips, SKIN_CLIP_SUFFIX.jump),
+    hit: findBySuffix(clips, SKIN_CLIP_SUFFIX.hit),
   };
 }
 

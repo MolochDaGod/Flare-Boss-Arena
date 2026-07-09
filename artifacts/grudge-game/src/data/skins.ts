@@ -74,6 +74,10 @@ export const SKIN_CLIP_SUFFIX = {
   idle: ["_idle_a", "_idlehome_a"],
   walk: ["_run"],
   attack: ["_combo_a", "_combo_b", "_skill_a"],
+  /** One-shot locomotion / reaction clips (present on most bounty-rush skins). */
+  dodge: ["_dodge"],
+  jump: ["_jump"],
+  hit: ["_damage", "_hit"],
 } as const;
 
 /* ── Per-character selected skin (localStorage) ───────────────────────────── */

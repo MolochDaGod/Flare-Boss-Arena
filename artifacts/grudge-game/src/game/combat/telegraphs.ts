@@ -4,9 +4,10 @@ import type { ShapeQuery } from "./damageShapes";
 /**
  * Native-shader ground telegraphs: a flat plane per cast with a custom GLSL
  * fragment shader that masks the exact hit shape (circle / nova / cone / line),
- * draws a bright edge + a forward/radial fill sweep, and fades in/out. The plane
- * stays world-axis-aligned (lying flat); the forward direction is passed as a
- * uniform, so no rotation bookkeeping is needed and cone/line orient correctly.
+ * draws a bright edge + a forward/radial fill sweep, and fades in/out.
+ *
+ * Circles also support a "danger ring" mode (hollow ring) used for boss AoE /
+ * phase bursts so the safe/unsafe zone reads clearly under the iso camera.
  */
 
 const VERT = /* glsl */ `
@@ -28,8 +29,10 @@ uniform float uHalfAngle;
 uniform float uLength;
 uniform float uHalfWidth;
 uniform vec3  uColor;
-uniform float uProgress;   // 0..1 fill sweep
+uniform float uProgress;   // 0..1 fill sweep / wind-up
 uniform float uAlpha;      // overall fade
+uniform float uRing;       // 1 = hollow ring (inner hole), 0 = filled disc
+uniform float uPulse;      // 0..1 extra edge pulse
 
 void main() {
   // Plane is rotated flat (rotation.x = -PI/2): local +x -> world +x,
@@ -37,15 +40,26 @@ void main() {
   vec2 c = (vUv - 0.5) * uSize;
   vec2 o = vec2(c.x, -c.y);
   float fwd  = dot(o, uDir);
-  float side = o.x * uDir.y - o.y * uDir.x; // perpendicular (uDir is unit)
+  float side = o.x * uDir.y - o.y * uDir.x;
   float dist = length(o);
 
   float inside = 0.0;
   float edge = 0.0;
+  float ringW = max(0.22, uRadius * 0.08);
 
   if (uKind == 0 || uKind == 1) {
-    inside = step(dist, uRadius);
-    edge = smoothstep(uRadius - 0.2, uRadius, dist) * step(dist, uRadius + 0.03);
+    float outer = step(dist, uRadius + 0.04);
+    float innerHole = uRing > 0.5 ? step(uRadius - ringW * 1.6, dist) : 1.0;
+    inside = outer * innerHole;
+    // Thick outer rim so the danger circle reads from the iso camera.
+    edge = smoothstep(uRadius - ringW, uRadius, dist)
+         * smoothstep(uRadius + 0.08, uRadius - 0.02, dist);
+    // Cross-hair ticks at cardinals (small bright notches).
+    float tick = max(
+      step(abs(o.x), 0.08) * step(abs(o.y), uRadius) * step(uRadius * 0.72, abs(o.y)),
+      step(abs(o.y), 0.08) * step(abs(o.x), uRadius) * step(uRadius * 0.72, abs(o.x))
+    );
+    edge = max(edge, tick * outer);
   } else if (uKind == 2) {
     float ang = acos(clamp(fwd / max(dist, 1e-4), -1.0, 1.0));
     float inAng = step(ang, uHalfAngle);
@@ -63,10 +77,12 @@ void main() {
   float sweep = (uKind == 3)
     ? step(fwd, uProgress * uLength)
     : step(dist, uProgress * uRadius);
-  float fill = inside * (0.16 + 0.24 * sweep);
-  float a = max(fill, clamp(edge, 0.0, 1.0) * 0.95) * uAlpha;
+  float fill = inside * (0.12 + 0.28 * sweep + 0.1 * uPulse);
+  float a = max(fill, clamp(edge, 0.0, 1.0) * (0.85 + 0.4 * uPulse)) * uAlpha;
   if (a < 0.01) discard;
-  gl_FragColor = vec4(uColor, a);
+  // Hot edge near impact.
+  vec3 col = mix(uColor, vec3(1.0, 0.95, 0.7), edge * uProgress * 0.55);
+  gl_FragColor = vec4(col, a);
 }
 `;
 
@@ -77,6 +93,13 @@ function kindToInt(kind: ShapeQuery["kind"]): number {
     case "cone": return 2;
     case "line": return 3;
   }
+}
+
+export interface TelegraphShowOpts {
+  /** Hollow ring instead of filled disc (circle/nova only). */
+  ring?: boolean;
+  /** Y lift so stacked circles don't z-fight. */
+  y?: number;
 }
 
 interface Tele {
@@ -97,15 +120,16 @@ export class TelegraphField {
     this.geo = new THREE.PlaneGeometry(1, 1);
   }
 
-  show(q: ShapeQuery, duration: number, color: number) {
+  show(q: ShapeQuery, duration: number, color: number, opts?: TelegraphShowOpts) {
     if (this.disposed) return;
     const reach = q.kind === "line" ? q.length ?? 8 : q.radius ?? 5;
-    const size = 2 * (reach + 0.6);
+    const size = 2 * (reach + 0.9);
     const mat = new THREE.ShaderMaterial({
       vertexShader: VERT,
       fragmentShader: FRAG,
       transparent: true,
       depthWrite: false,
+      blending: THREE.AdditiveBlending,
       uniforms: {
         uSize: { value: size },
         uDir: { value: new THREE.Vector2(q.dir.x, q.dir.z).normalize() },
@@ -117,24 +141,45 @@ export class TelegraphField {
         uColor: { value: new THREE.Color(color) },
         uProgress: { value: 0 },
         uAlpha: { value: 0 },
+        uRing: { value: opts?.ring ? 1 : 0 },
+        uPulse: { value: 0 },
       },
     });
     const mesh = new THREE.Mesh(this.geo, mat);
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(q.origin.x, 0.06, q.origin.z);
+    mesh.position.set(q.origin.x, opts?.y ?? 0.07, q.origin.z);
     mesh.scale.set(size, size, 1);
-    mesh.renderOrder = 3;
+    mesh.renderOrder = 4;
     this.scene.add(mesh);
     this.active.push({ mesh, mat, age: 0, dur: Math.max(0.12, duration) });
   }
 
+  /** Convenience: danger circle / ring on the ground. */
+  showCircle(
+    origin: THREE.Vector3,
+    radius: number,
+    duration: number,
+    color: number,
+    opts?: TelegraphShowOpts,
+  ) {
+    this.show(
+      { kind: "circle", origin, dir: new THREE.Vector3(1, 0, 0), radius },
+      duration,
+      color,
+      opts,
+    );
+  }
+
   update(delta: number) {
     for (let i = this.active.length - 1; i >= 0; i--) {
-      const t = this.active[i];
+      const t = this.active[i]!;
       t.age += delta;
       const p = Math.min(1, t.age / t.dur);
       t.mat.uniforms.uProgress.value = p;
-      t.mat.uniforms.uAlpha.value = p < 0.8 ? Math.min(1, p / 0.15) : 1 - (p - 0.8) / 0.2;
+      // Pulse harder as impact approaches so the circle "beats" before detonation.
+      t.mat.uniforms.uPulse.value = p * p * (0.55 + 0.45 * Math.sin(t.age * 18));
+      t.mat.uniforms.uAlpha.value =
+        p < 0.12 ? Math.min(1, p / 0.12) : p < 0.85 ? 1 : Math.max(0, 1 - (p - 0.85) / 0.15);
       if (t.age >= t.dur) {
         this.scene.remove(t.mesh);
         t.mat.dispose();
