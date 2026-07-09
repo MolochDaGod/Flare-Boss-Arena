@@ -106,7 +106,7 @@ function FighterStage({ fighter }: { fighter: FighterDef }) {
 
       {/* Live 3D fighter */}
       <div className="absolute inset-0">
-        <FighterPreview skinId={fighter.skinId} />
+        <FighterPreview skinId={fighter.skinId} fighterId={fighter.id} />
       </div>
 
       {/* Name plate */}

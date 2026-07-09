@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { PageHeader } from "@/components/PageChrome";
-import { FighterPreview } from "@/components/FighterPreview";
+import { FighterRosterThumb } from "@/components/FighterRosterThumb";
 import {
   FIGHTERS,
   ATTR_ORDER,
@@ -75,8 +75,8 @@ export default function Units() {
                     f.id === activeId ? "ring-1 ring-primary/60 border-primary/40" : ""
                   }`}
                 >
-                  <div className="h-44 relative bg-gradient-to-b from-black/60 to-background/80">
-                    <FighterPreview skinId={f.skinId} />
+                  <div className="h-44 relative overflow-hidden bg-gradient-to-b from-black/60 to-background/80">
+                    <FighterRosterThumb fighter={f} />
                     {f.featured && (
                       <span className="absolute top-2 left-2 text-[9px] font-serif uppercase tracking-widest px-2 py-0.5 rounded bg-primary/20 text-primary border border-primary/30">
                         Featured
