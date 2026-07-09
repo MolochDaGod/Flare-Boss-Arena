@@ -63,10 +63,16 @@ function weaponToProp(w: WeaponMountTuning): PropTuning {
   };
 }
 
-function propToMount(holder: THREE.Object3D, w: WeaponMountTuning) {
-  holder.position.set(w.position[0], w.position[1], w.position[2]);
+function propToMount(mount: THREE.Object3D, w: WeaponMountTuning) {
+  mount.position.set(w.position[0], w.position[1], w.position[2]);
   const d2r = Math.PI / 180;
-  holder.rotation.set(w.rotation[0] * d2r, w.rotation[1] * d2r, w.rotation[2] * d2r);
+  mount.rotation.set(w.rotation[0] * d2r, w.rotation[1] * d2r, w.rotation[2] * d2r);
+  const baked = mount.userData.bakedLength as number | undefined;
+  const holder = mount.children[0];
+  if (holder && baked && baked > 1e-6) {
+    const ratio = w.targetLength / baked;
+    holder.scale.setScalar(ratio);
+  }
 }
 
 export class RacalvinWeapons {
@@ -303,6 +309,7 @@ export function attachRacalvinWeapons(
     steelMaterial(gltf.scene);
     swordMount.clear();
     swordMount.add(buildPropHolder(gltf.scene, weaponToProp(tuning.weapons.sword)));
+    swordMount.userData.bakedLength = tuning.weapons.sword.targetLength;
     propToMount(swordMount, tuning.weapons.sword);
   });
 
@@ -314,6 +321,7 @@ export function attachRacalvinWeapons(
     pistolMaterial(gltf.scene);
     pistolMount.clear();
     pistolMount.add(buildPropHolder(gltf.scene, weaponToProp(tuning.weapons.pistol)));
+    pistolMount.userData.bakedLength = tuning.weapons.pistol.targetLength;
     propToMount(pistolMount, tuning.weapons.pistol);
   });
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Copy, RotateCcw, Settings2 } from "lucide-react";
+import { Copy, Move3d, RotateCw, RotateCcw, Scaling, Settings2 } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -34,32 +34,32 @@ export interface FighterAssetTunerProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-function WeaponSliders({
-  label,
-  weapon,
+function AxisSliders({
+  title,
+  values,
+  min,
+  max,
+  step,
+  labels,
   onChange,
+  fmt = (v: number) => String(v),
 }: {
-  label: string;
-  weapon: WeaponMountTuning;
-  onChange: (w: WeaponMountTuning) => void;
+  title: string;
+  values: [number, number, number];
+  min: number;
+  max: number;
+  step: number;
+  labels: [string, string, string];
+  onChange: (next: [number, number, number]) => void;
+  fmt?: (v: number) => string;
 }) {
-  const row = (
-    key: keyof WeaponMountTuning,
-    title: string,
-    min: number,
-    max: number,
-    step: number,
-    fmt: (v: number) => string = (v) => String(v),
-  ) => {
-    const val = weapon[key];
-    const isVec = Array.isArray(val);
-    if (isVec) {
-      return (val as [number, number, number]).map((v, i) => (
-        <div key={`${String(key)}-${i}`} className="space-y-1">
+  return (
+    <div className="space-y-2 rounded border border-white/10 bg-black/30 p-3">
+      <p className="font-serif text-[10px] uppercase tracking-widest text-[#c5a059]/90">{title}</p>
+      {values.map((v, i) => (
+        <div key={labels[i]} className="space-y-1">
           <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
-            <span>
-              {title} {["X", "Y", "Z"][i]}
-            </span>
+            <span>{labels[i]}</span>
             <span>{fmt(v)}</span>
           </div>
           <Slider
@@ -68,38 +68,92 @@ function WeaponSliders({
             step={step}
             value={[v]}
             onValueChange={([nv]) => {
-              const next = [...(val as [number, number, number])] as [number, number, number];
+              const next = [...values] as [number, number, number];
               next[i] = nv;
-              onChange({ ...weapon, [key]: next });
+              onChange(next);
             }}
           />
         </div>
-      ));
-    }
-    return (
-      <div key={String(key)} className="space-y-1">
-        <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
-          <span>{title}</span>
-          <span>{fmt(val as number)}</span>
-        </div>
-        <Slider
-          min={min}
-          max={max}
-          step={step}
-          value={[val as number]}
-          onValueChange={([nv]) => onChange({ ...weapon, [key]: nv })}
-        />
-      </div>
-    );
-  };
+      ))}
+    </div>
+  );
+}
 
+function WeaponEditor({
+  label,
+  weapon,
+  onChange,
+}: {
+  label: string;
+  weapon: WeaponMountTuning;
+  onChange: (w: WeaponMountTuning) => void;
+}) {
   return (
-    <div className="space-y-3 rounded border border-white/10 bg-black/40 p-3">
-      <p className="font-serif text-[10px] uppercase tracking-widest text-[#c5a059]">{label}</p>
-      {row("targetLength", "Length", 0.1, 2.5, 0.01, (v) => v.toFixed(2))}
-      {row("position", "Position", -0.3, 0.3, 0.005, (v) => v.toFixed(3))}
-      {row("rotation", "Rotation°", -180, 180, 0.5, (v) => v.toFixed(1))}
-      {row("gripYOffset", "Grip Y", -0.2, 0.2, 0.005, (v) => v.toFixed(3))}
+    <div className="space-y-3">
+      <p className="font-serif text-xs uppercase tracking-widest text-[#e8c87a]">{label}</p>
+
+      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+        <Move3d className="h-3.5 w-3.5 text-[#c5a059]" />
+        <span className="font-serif uppercase tracking-widest">Move</span>
+      </div>
+      <AxisSliders
+        title="Position (hand local)"
+        values={weapon.position}
+        min={-0.35}
+        max={0.35}
+        step={0.005}
+        labels={["X", "Y", "Z"]}
+        onChange={(position) => onChange({ ...weapon, position })}
+        fmt={(v) => v.toFixed(3)}
+      />
+
+      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+        <RotateCw className="h-3.5 w-3.5 text-[#c5a059]" />
+        <span className="font-serif uppercase tracking-widest">Rotate</span>
+      </div>
+      <AxisSliders
+        title="Rotation (degrees)"
+        values={weapon.rotation}
+        min={-180}
+        max={180}
+        step={0.5}
+        labels={["Pitch X", "Yaw Y", "Roll Z"]}
+        onChange={(rotation) => onChange({ ...weapon, rotation })}
+        fmt={(v) => `${v.toFixed(1)}°`}
+      />
+
+      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+        <Scaling className="h-3.5 w-3.5 text-[#c5a059]" />
+        <span className="font-serif uppercase tracking-widest">Scale</span>
+      </div>
+      <div className="space-y-2 rounded border border-white/10 bg-black/30 p-3">
+        <div className="space-y-1">
+          <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
+            <span>Weapon length</span>
+            <span>{weapon.targetLength.toFixed(2)}</span>
+          </div>
+          <Slider
+            min={0.08}
+            max={2.5}
+            step={0.01}
+            value={[weapon.targetLength]}
+            onValueChange={([targetLength]) => onChange({ ...weapon, targetLength })}
+          />
+        </div>
+        <div className="space-y-1">
+          <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
+            <span>Grip offset Y</span>
+            <span>{weapon.gripYOffset.toFixed(3)}</span>
+          </div>
+          <Slider
+            min={-0.2}
+            max={0.2}
+            step={0.005}
+            value={[weapon.gripYOffset]}
+            onValueChange={([gripYOffset]) => onChange({ ...weapon, gripYOffset })}
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -201,9 +255,7 @@ export function FighterAssetTuner({
   const updateMeshRule = (rule: HiddenMeshRule) => {
     const rest = tuning.hiddenMeshes.filter((r) => r.meshName !== rule.meshName);
     const hiddenMeshes =
-      rule.alwaysVisible && rule.showOnClips.length === 0
-        ? rest
-        : [...rest, rule];
+      rule.alwaysVisible && rule.showOnClips.length === 0 ? rest : [...rest, rule];
     persist({ ...tuning, hiddenMeshes });
   };
 
@@ -225,23 +277,27 @@ export function FighterAssetTuner({
       <SheetTrigger asChild>
         <button
           type="button"
-          title="Asset placement & visibility"
-          className="absolute right-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-[#c5a059]/40 bg-black/70 text-[#c5a059] shadow-lg transition hover:bg-[#c5a059]/15 hover:text-[#e8c87a]"
+          title="Open weapon editor (move, rotate, scale)"
+          aria-label="Open weapon editor"
+          className="absolute right-3 top-3 z-30 flex h-9 w-9 items-center justify-center rounded-full border border-[#c5a059]/50 bg-black/80 text-[#c5a059] shadow-lg backdrop-blur-sm transition hover:scale-105 hover:bg-[#c5a059]/20 hover:text-[#e8c87a]"
         >
           <Settings2 className="h-4 w-4" />
         </button>
       </SheetTrigger>
-      <SheetContent side="right" className="w-[min(420px,92vw)] overflow-y-auto border-[#c5a059]/20 bg-[#0d0b09]">
+      <SheetContent
+        side="right"
+        className="z-50 w-[min(440px,94vw)] overflow-y-auto border-[#c5a059]/25 bg-[#0a0806] text-foreground"
+      >
         <SheetHeader>
           <SheetTitle className="font-serif uppercase tracking-widest text-[#c5a059]">
-            Asset Tuner
+            Weapon Editor
           </SheetTitle>
           <SheetDescription>
-            Place weapons and hide mesh parts until animations call for them — {fighterName}.
+            Move, rotate, and scale {fighterName}&apos;s props. Changes save automatically.
           </SheetDescription>
         </SheetHeader>
 
-        <div className="mt-4 space-y-4">
+        <div className="mt-5 space-y-4">
           {showWeapons && (
             <div className="flex gap-1">
               {(["sword", "pistol", "meshes"] as const).map((t) => (
@@ -249,56 +305,53 @@ export function FighterAssetTuner({
                   key={t}
                   type="button"
                   onClick={() => setTab(t)}
-                  className={`flex-1 rounded px-2 py-1.5 font-serif text-[10px] uppercase tracking-widest ${
+                  className={`flex-1 rounded px-2 py-2 font-serif text-[10px] uppercase tracking-widest ${
                     tab === t
-                      ? "bg-[#c5a059]/20 text-[#e8c87a] ring-1 ring-[#c5a059]/40"
-                      : "bg-black/40 text-muted-foreground"
+                      ? "bg-[#c5a059]/25 text-[#e8c87a] ring-1 ring-[#c5a059]/50"
+                      : "bg-black/50 text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {t === "meshes" ? "Parts" : t}
+                  {t === "meshes" ? "Hidden parts" : t}
                 </button>
               ))}
             </div>
           )}
 
-          {showWeapons && tab !== "meshes" && (() => {
-            const weaponKey = tab as "sword" | "pistol";
-            return (
-              <>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant={weaponPreview === "sword" ? "default" : "outline"}
-                    className="flex-1 text-[10px]"
-                    onClick={() => onWeaponPreviewChange("sword")}
-                  >
-                    Preview sword
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={weaponPreview === "pistol" ? "default" : "outline"}
-                    className="flex-1 text-[10px]"
-                    onClick={() => onWeaponPreviewChange("pistol")}
-                  >
-                    Preview pistol
-                  </Button>
-                </div>
-                <WeaponSliders
-                  label={weaponKey === "sword" ? "Brothers' Keeper" : "Corsair Pistol"}
-                  weapon={tuning.weapons[weaponKey]}
-                  onChange={(w) => updateWeapon(weaponKey, w)}
-                />
-              </>
-            );
-          })()}
+          {showWeapons && tab !== "meshes" && (
+            <>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant={weaponPreview === "sword" ? "default" : "outline"}
+                  className="flex-1 text-[10px]"
+                  onClick={() => onWeaponPreviewChange("sword")}
+                >
+                  Show sword
+                </Button>
+                <Button
+                  size="sm"
+                  variant={weaponPreview === "pistol" ? "default" : "outline"}
+                  className="flex-1 text-[10px]"
+                  onClick={() => onWeaponPreviewChange("pistol")}
+                >
+                  Show pistol
+                </Button>
+              </div>
+              <WeaponEditor
+                label={tab === "sword" ? "Brothers' Keeper" : "Corsair Pistol"}
+                weapon={tuning.weapons[tab]}
+                onChange={(w) => updateWeapon(tab, w)}
+              />
+            </>
+          )}
 
           {(tab === "meshes" || !showWeapons) && (
             <div className="space-y-2">
               <p className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground">
-                Mesh visibility — uncheck &quot;Always visible&quot; then pick clips that reveal the part.
+                Hide parts until an animation reveals them.
               </p>
               {meshRules.length === 0 ? (
-                <p className="text-xs text-muted-foreground">Load the preview to list mesh parts.</p>
+                <p className="text-xs text-muted-foreground">Waiting for model meshes…</p>
               ) : (
                 meshRules.map((rule) => (
                   <MeshRuleRow
@@ -313,9 +366,9 @@ export function FighterAssetTuner({
             </div>
           )}
 
-          <div className="space-y-2">
+          <div className="space-y-2 border-t border-white/10 pt-4">
             <p className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground">
-              Preview animation
+              Preview clip
             </p>
             <div className="flex flex-wrap gap-1">
               {clipNames.map((clip) => (
@@ -331,7 +384,7 @@ export function FighterAssetTuner({
             </div>
           </div>
 
-          <div className="flex gap-2 pt-2">
+          <div className="flex gap-2">
             <Button size="sm" variant="outline" className="flex-1 gap-1 text-[10px]" onClick={copyJson}>
               <Copy className="h-3 w-3" /> Copy JSON
             </Button>
