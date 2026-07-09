@@ -19,6 +19,10 @@ import {
   addResource,
   spendResource,
 } from "@/data/resources";
+import {
+  getActiveFighterKit,
+  fighterSkillsAsClassSkills,
+} from "@/data/fighterSkills";
 import { toast } from "sonner";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
@@ -230,7 +234,10 @@ function Game() {
     );
   }, [char, classesData, weaponsData]);
 
-  // Resolve class + weapon skills for the in-game HUD skill bar.
+  // Fighter-canonical skills (One Piece kits) for the HUD skill bar.
+  const fighterKit = useMemo(() => getActiveFighterKit(), []);
+  const fighterHudSkills = useMemo(() => fighterSkillsAsClassSkills(fighterKit), [fighterKit]);
+  // Keep class/weapon resolver as fallback labels only.
   const hudClass = String(char.class ?? "warrior").toLowerCase();
   const hudMainCategory = hudClass ? CLASS_STARTER_WEAPON[hudClass]?.category : null;
   const { classSkills: hudClassSkills, weaponSlots: hudWeaponSlots } = useResolvedSkills(hudClass, hudMainCategory);
@@ -502,51 +509,54 @@ function Game() {
         </div>
       ))}
 
-      {/* Skill bar — class + weapon skills, above the action buttons */}
-      {gameState && (hudClassSkills || hudWeaponSlots.length > 0) && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 flex items-end gap-4">
-          {hudClassSkills && (
-            <div className="flex flex-col items-center gap-1">
-              <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>Class · {hudClassSkills.name}</span>
-              <div className="flex gap-1.5">
-                {hudClassSkills.skills.slice(0, 5).map((s, i) => (
+      {/* Fighter skill bar — 1-5 select (AoE needs second LMB to place) · R special */}
+      {gameState && fighterHudSkills.length > 0 && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 flex items-end gap-3">
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>
+              {getActiveFighter().name} · Skills
+            </span>
+            <div className="flex gap-1.5">
+              {fighterHudSkills.slice(0, 5).map((s, i) => {
+                const pending = gameState.pendingSkillIdx === i;
+                const kitSkill = fighterKit.skills[i];
+                const isAoe = kitSkill?.targeting === "ground_aoe";
+                return (
                   <div
                     key={s.id}
-                    onClick={() => engineRef.current?.useSkill(i)}
-                    title={`${s.name}${s.cooldown ? ` · CD ${s.cooldown}` : ""}\n${s.description}`}
-                    className="relative w-11 h-11 rounded flex items-center justify-center text-lg bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all overflow-hidden cursor-pointer active:scale-95"
-                    style={{ boxShadow: "inset 0 0 5px #000" }}
+                    onClick={() => engineRef.current?.selectSkill(i)}
+                    title={`${s.name}${isAoe ? " · press then LMB place" : ""}\n${s.description}`}
+                    className="relative w-11 h-11 rounded flex items-center justify-center text-lg bg-black border-2 hover:scale-105 transition-all overflow-hidden cursor-pointer active:scale-95"
+                    style={{
+                      borderColor: pending ? "#66ccff" : GOLD + "99",
+                      boxShadow: pending ? "0 0 12px #66ccff" : "inset 0 0 5px #000",
+                    }}
                   >
-                    <SkillIcon icon={s.icon} glyph={s.glyph} size={40} radius={4} />
+                    <span className="text-lg leading-none">{s.glyph}</span>
                     <span className="absolute top-0.5 left-1 text-[9px] font-serif text-neutral-400">{i + 1}</span>
-                    {s.isSignature && <span className="absolute -bottom-1 -right-1 text-[9px] leading-none" style={{ color: GOLD }}>★</span>}
+                    {isAoe && (
+                      <span className="absolute bottom-0.5 right-0.5 text-[7px] text-cyan-300">AoE</span>
+                    )}
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
-          )}
-          {hudWeaponSlots.length > 0 && (
-            <div className="flex flex-col items-center gap-1">
-              <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>Weapon</span>
-              <div className="flex gap-1.5">
-                {hudWeaponSlots.map((slot, wi) => {
-                  const sk = slot.skills[0];
-                  if (!sk) return null;
-                  return (
-                    <div
-                      key={slot.type}
-                      onClick={() => engineRef.current?.useSkill(wi % 5)}
-                      title={`${slot.label}: ${sk.name}${sk.cooldown ? ` · CD ${sk.cooldown}` : ""}\n${sk.description}`}
-                      className="w-11 h-11 rounded flex items-center justify-center overflow-hidden bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all cursor-pointer active:scale-95"
-                      style={{ boxShadow: "inset 0 0 5px #000" }}
-                    >
-                      <SkillIcon icon={sk.icon} glyph="⚔️" size={28} radius={4} />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>Special</span>
+            <button
+              onClick={() => engineRef.current?.useSpecial()}
+              title={`${fighterKit.special.name}\n${fighterKit.special.description}`}
+              className="relative w-12 h-12 rounded flex flex-col items-center justify-center bg-black border-2 border-amber-500/70 hover:border-amber-400 transition-all"
+              style={{
+                opacity: 0.55 + 0.45 * (gameState.specialReadyPct ?? 1),
+                boxShadow: "0 0 10px rgba(255,180,60,0.35)",
+              }}
+            >
+              <span className="text-sm font-serif" style={{ color: GOLD }}>R</span>
+              <span className="text-[8px] text-amber-200/90 truncate max-w-[44px]">{fighterKit.special.name.split(" ")[0]}</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -559,6 +569,13 @@ function Game() {
         >
           <Swords className="w-4 h-4" />
           <span>Attack [F]</span>
+        </button>
+        <button
+          className="flex flex-col items-center gap-1 px-3 py-2 rounded font-serif text-xs tracking-widest uppercase bg-black/40 border border-amber-500/50 text-amber-300 hover:bg-amber-500/15 transition-all active:scale-95"
+          onClick={() => engineRef.current?.useSpecial()}
+        >
+          <Zap className="w-4 h-4" />
+          <span>Special [R]</span>
         </button>
         <button
           className="flex flex-col items-center gap-1 px-4 py-2 rounded font-serif text-xs tracking-widest uppercase bg-black/40 border border-neutral-700 text-muted-foreground hover:border-[#c5a059]/70 hover:text-[#c5a059] transition-all active:scale-95"
@@ -702,11 +719,10 @@ function Game() {
                 <Crosshair className="w-3 h-3 text-primary" />
                 <p className="text-[10px] font-serif text-primary uppercase tracking-widest">Controls</p>
               </div>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">WASD / Arrow Keys — Move</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Left Click Enemy — Target &amp; Chase</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F / Space — Attack foes · chop trees · quarry stone</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">E — Talk (vendor Anne / Capt. Barbarossa sails new island)</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">East: Pirate Cove · West: Island Colossus boss</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">WASD — Move · LMB move/target · RMB hold attack</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F Attack · Space Jump · Q Block · Shift Dodge</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">E Interact · R Special · 1-5 Skills (AoE: key then LMB place)</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Chop trees / quarry stone with F · Cove east · Colossus west</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Left Click Ground — Move To</p>
             </div>
           </motion.div>

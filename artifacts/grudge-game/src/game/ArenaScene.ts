@@ -586,16 +586,28 @@ export class ArenaScene {
     this.bossWorldHeight = model.height * tierScale;
 
     this.pushLog(`${this.boss.name}${this.boss.title ? ", " + this.boss.title : ""} enters the arena.`);
-    this.pushLog("Tip: red/orange circles detonate — step out or Space-dodge (i-frames).");
-    this.pushLog("Tip: projectiles can be sidestepped or dodged through.");
+    this.pushLog("Tip: red/orange circles detonate — step out or Shift-dodge (i-frames).");
+    this.pushLog("Tip: Space jump · Q block · F attack · R special · 1-5 skills.");
   }
 
   // ── Input ─────────────────────────────────────────────────────────────────
   private _keyDown = (e: KeyboardEvent) => {
     this.keys.add(e.code);
+    // F attack · Space jump · Q block (visual only here) · Shift dodge · R special-as-skill0
     if (e.code === "KeyF") this.attackNearest();
-    if (e.code === "Space") { e.preventDefault(); this.doDodge(); }
-    if (e.code === "KeyQ" || e.code === "ShiftLeft") this.doDodge();
+    if (e.code === "Space") {
+      e.preventDefault();
+      this.heroAnim?.trigger("jump");
+      // short hop via dodge-style dash upward is not available; use dodge clip as fallback
+    }
+    if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+      e.preventDefault();
+      this.doDodge();
+    }
+    if (e.code === "KeyR") {
+      e.preventDefault();
+      this.useSkill(0); // special mapped to strongest slot in arena
+    }
     if (e.code.startsWith("Digit")) {
       const n = Number(e.code.slice(5));
       if (n >= 1 && n <= 5) this.useSkill(n - 1);

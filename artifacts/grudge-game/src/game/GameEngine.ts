@@ -18,11 +18,15 @@ import {
 } from "./Harvestables";
 import { addResource, getResources, type ResourceBag } from "../data/resources";
 import { getWallet, saveWallet } from "../data/wallet";
+import {
+  getActiveFighterKit,
+  type FighterKit,
+} from "../data/fighterSkills";
+import { getActiveFighter, RACALVIN_ID } from "../data/fighters";
 import { PlayerAnimator, buildAuthoredClips, buildSkinAnim } from "./PlayerAnimator";
 import { DungeonMap } from "./DungeonMap";
 import { PORTRAIT_URL, resolveVisibleMeshes, type RaceId } from "../data/characterMeshes";
 import { getSkin, skinUrl, type SkinDef } from "../data/skins";
-import { RACALVIN_ID } from "../data/fighters";
 import { loadRacalvinForDungeon } from "./racalvinHero";
 import { skillAnimCandidates } from "./kaykitHero";
 import { SkillVfx } from "./skillVfx";
@@ -30,10 +34,11 @@ import type { ClassSkill } from "../data/classSkills";
 import { archetypeForSkill, type SkillShapeKind } from "./combat/skillArchetypes";
 import { targetsInShape, type ShapeQuery } from "./combat/damageShapes";
 import type { CombatTarget } from "./combat/types";
-import { ParticleVfx } from "./combat/particles";
+import { ParticleVfx, elementColor } from "./combat/particles";
 import { TelegraphField } from "./combat/telegraphs";
 import { DeployableManager } from "./combat/deployables";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
+import { SlashWaveField } from "./combat/slashVfx";
 import { FX2D } from "./FX2D";
 import { DUNGEON_COLLECTABLES } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
@@ -149,6 +154,14 @@ export interface GameState {
   bossName: string | null;
   bossHp: number;
   bossMaxHp: number;
+  /** Skill targeting mode: -1 none, 0-4 pending ground AoE skill. */
+  pendingSkillIdx: number;
+  /** Special (R) cooldown 0..1 ready. */
+  specialReadyPct: number;
+  /** Block held (Q). */
+  blocking: boolean;
+  /** Jump airborne. */
+  jumping: boolean;
 }
 
 export interface PlayerInitStats {
@@ -261,6 +274,19 @@ export class GameEngine {
   public onMapReseed: ((seed: number) => void) | null = null;
   public onOpenVendor: (() => void) | null = null;
   public onSailBoss: (() => void) | null = null;
+
+  private fighterKit: FighterKit = getActiveFighterKit();
+  private slashField: SlashWaveField | null = null;
+  /** -1 = none; 0-4 = skill awaiting ground placement. */
+  private pendingSkillIdx = -1;
+  private skillCdUntil = [0, 0, 0, 0, 0];
+  private specialCdUntil = 0;
+  private blocking = false;
+  private jumpVel = 0;
+  private playerY = 0;
+  private dodgeIframeUntil = 0;
+  private skillCursor: THREE.Mesh | null = null;
+  private skillCursorMat: THREE.MeshBasicMaterial | null = null;
   private hoveredEnemy: EnemyInstance | null = null;
   private hoverEmissive = new Map<THREE.MeshStandardMaterial, { hex: number; intensity: number }>();
   private _moveHandler!: (e: MouseEvent) => void;
@@ -320,6 +346,22 @@ export class GameEngine {
     this.particles = new ParticleVfx(this.scene);
     this.telegraphs = new TelegraphField(this.scene);
     this.deployables = new DeployableManager(this.scene);
+    this.slashField = new SlashWaveField(this.scene, this.particles);
+    this.fighterKit = getActiveFighterKit();
+    // Ground-AoE placement ring (shown while a skill is pending).
+    this.skillCursorMat = new THREE.MeshBasicMaterial({
+      color: 0x66ccff,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    this.skillCursor = new THREE.Mesh(new THREE.RingGeometry(0.85, 1.0, 48), this.skillCursorMat);
+    this.skillCursor.rotation.x = -Math.PI / 2;
+    this.skillCursor.position.y = 0.12;
+    this.skillCursor.visible = false;
+    this.skillCursor.renderOrder = 6;
+    this.scene.add(this.skillCursor);
     // Selective bloom so the additive particle VFX glow without washing out the
     // dark scene. Null (graceful fallback to direct render) if setup fails headless.
     this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h);
@@ -982,21 +1024,44 @@ export class GameEngine {
 
     this._keyDownHandler = (e: KeyboardEvent) => {
       this.keys.add(e.code);
-      if (e.code === "KeyF" || e.code === "Space") {
+      // F = basic attack | Space = jump | Q = block | Shift = dodge | E = interact | R = special
+      if (e.code === "KeyF") {
         e.preventDefault();
         this.attackNearest();
+      }
+      if (e.code === "Space") {
+        e.preventDefault();
+        this.doJump();
+      }
+      if (e.code === "KeyQ") {
+        e.preventDefault();
+        this.blocking = true;
+      }
+      if (e.code === "ShiftLeft" || e.code === "ShiftRight") {
+        e.preventDefault();
+        this.doDodge();
       }
       if (e.code === "KeyE") {
         e.preventDefault();
         this.tryEngagePirate();
       }
+      if (e.code === "KeyR") {
+        e.preventDefault();
+        this.useSpecial();
+      }
+      if (e.code === "Escape") {
+        this.cancelSkillTargeting();
+      }
       const n = Number(e.key);
       if (n >= 1 && n <= 5) {
         e.preventDefault();
-        this.useSkill(n - 1);
+        this.selectSkill(n - 1);
       }
     };
-    this._keyUpHandler = (e: KeyboardEvent) => this.keys.delete(e.code);
+    this._keyUpHandler = (e: KeyboardEvent) => {
+      this.keys.delete(e.code);
+      if (e.code === "KeyQ") this.blocking = false;
+    };
     this._clickHandler = (e: MouseEvent) => this.handleClick(e, container);
     this._moveHandler = (e: MouseEvent) => this.handleHover(e, container);
     // LEFT button = selection / move (handled by the `click` event) and, while
@@ -1114,6 +1179,18 @@ export class GameEngine {
     );
     this.raycaster.setFromCamera(mouse, this.camera);
 
+    // Ground pick (used for AoE placement and move).
+    const pt = this.dungeonMap?.ready
+      ? this.dungeonMap.floorPickFromRay(this.raycaster.ray)
+      : (this.raycaster.intersectObject(this.floorPlane)[0]?.point ?? null);
+
+    // Skill targeting: first number key selects, this LMB places & casts.
+    if (this.pendingSkillIdx >= 0 && pt) {
+      this.clampToArena(pt);
+      this.castPendingSkillAt(new THREE.Vector3(pt.x, 0, pt.z));
+      return;
+    }
+
     // Raycast against all enemy meshes recursively
     const liveGroups: THREE.Object3D[] = this.enemies
       .filter((en) => en.state !== "dead" && en.state !== "death")
@@ -1131,21 +1208,284 @@ export class GameEngine {
       }
     }
 
-    // Click-to-move: pick the real dungeon floor when the BVH is ready, else
-    // fall back to the flat plane.
-    const pt = this.dungeonMap?.ready
-      ? this.dungeonMap.floorPickFromRay(this.raycaster.ray)
-      : (this.raycaster.intersectObject(this.floorPlane)[0]?.point ?? null);
+    // Click-to-move
     if (pt) {
       this.clampToArena(pt);
       this.playerTarget = new THREE.Vector3(pt.x, 0, pt.z);
       this.targetEnemy = null;
       if (this.indicatorRing) {
-        // Seat the marker on the actually-picked surface (pt.y from the ray hit).
         this.indicatorRing.position.set(this.playerTarget.x, pt.y + 0.08, this.playerTarget.z);
         this.indicatorRing.visible = true;
       }
     }
+  }
+
+  /** Space — jump (clip + hop). */
+  doJump() {
+    if (this.playerY > 0.05 || this.jumpVel > 0) return;
+    this.jumpVel = 7.5;
+    this.playerAnimator?.triggerRole("jump");
+    this.playerAnimator?.triggerNamed(["jump", "jump_full"]);
+  }
+
+  /** Shift — dodge with i-frames via committed dash. */
+  doDodge() {
+    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    if (this.keys.has("KeyA") || this.keys.has("ArrowLeft")) {
+      forward.set(-Math.cos(this.playerFacing), 0, Math.sin(this.playerFacing));
+    } else if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) {
+      forward.set(Math.cos(this.playerFacing), 0, -Math.sin(this.playerFacing));
+    }
+    this.playerPos.x += forward.x * 3.2;
+    this.playerPos.z += forward.z * 3.2;
+    this.clampToArena(this.playerPos);
+    this.playerAnimator?.triggerRole("dodge");
+    this.playerAnimator?.triggerNamed(["dodge", "roll"]);
+    this.playerTarget = null;
+    this.dodgeIframeUntil = performance.now() + 380;
+  }
+
+  private isDodging(): boolean {
+    return performance.now() < this.dodgeIframeUntil;
+  }
+
+  /** 1-5: select skill. Ground-AoE skills wait for LMB; others cast immediately. */
+  selectSkill(idx: number) {
+    const skill = this.fighterKit.skills[idx];
+    if (!skill) {
+      // Fall back to legacy class skill path.
+      this.useSkill(idx);
+      return;
+    }
+    const now = performance.now();
+    if (now < (this.skillCdUntil[idx] ?? 0)) {
+      this.log(`${skill.name} is on cooldown.`);
+      return;
+    }
+    if (this.playerMana < skill.manaCost) {
+      this.log("Not enough mana.");
+      return;
+    }
+    if (skill.targeting === "ground_aoe") {
+      this.pendingSkillIdx = idx;
+      if (this.skillCursor && this.skillCursorMat) {
+        this.skillCursor.visible = true;
+        const r = skill.aoeRadius ?? 4;
+        this.skillCursor.scale.setScalar(r);
+        this.skillCursorMat.color.setHex(skill.color ?? elementColor(skill.element));
+      }
+      this.log(`${skill.name} ready — LMB to place AoE (Esc cancel).`);
+      this.notifyState();
+      return;
+    }
+    this.castFighterSkill(idx, null);
+  }
+
+  cancelSkillTargeting() {
+    this.pendingSkillIdx = -1;
+    if (this.skillCursor) this.skillCursor.visible = false;
+    this.notifyState();
+  }
+
+  private castPendingSkillAt(world: THREE.Vector3) {
+    const idx = this.pendingSkillIdx;
+    if (idx < 0) return;
+    this.pendingSkillIdx = -1;
+    if (this.skillCursor) this.skillCursor.visible = false;
+    this.castFighterSkill(idx, world);
+  }
+
+  /** R — character special attack (skill_a / skill_b wave). */
+  useSpecial() {
+    const now = performance.now();
+    if (now < this.specialCdUntil) {
+      this.log("Special on cooldown.");
+      return;
+    }
+    const sp = this.fighterKit.special;
+    if (this.playerMana < sp.manaCost) {
+      this.log("Not enough mana for special.");
+      return;
+    }
+    this.playerMana -= sp.manaCost;
+    this.specialCdUntil = now + sp.cooldown * 1000;
+    this.playerFacing = Math.atan2(this.resolveAimDir().x, this.resolveAimDir().z);
+    this.playerAnimator?.triggerNamed(sp.anim);
+    if (!this.playerAnimator?.isRootMotionActive()) {
+      const f = this.resolveAimDir();
+      this.playerPos.x += f.x * 1.2;
+      this.playerPos.z += f.z * 1.2;
+      this.clampToArena(this.playerPos);
+    }
+    const dir = this.resolveAimDir();
+    const origin = this.playerPos.clone().setY(1.15);
+    const dmg = this.playerBaseDamage * sp.damageMult * (0.9 + Math.random() * 0.2);
+    if (sp.slashWave) {
+      this.slashField?.spawn(origin, dir, {
+        damage: dmg,
+        range: sp.slashRange,
+        color: sp.color,
+        radius: 1.5,
+      });
+    } else {
+      // Melee special cone
+      const q: ShapeQuery = {
+        kind: "cone",
+        origin: this.playerPos.clone(),
+        dir,
+        radius: 5.5,
+        halfAngle: Math.PI / 4,
+      };
+      this.telegraphs?.show(q, 0.25, sp.color);
+      for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
+        this.damageEnemy(en, dmg, Math.random() < this.playerCritChance + 0.08);
+      }
+    }
+    this.log(`${getActiveFighter().name} — ${sp.name}!`);
+    this.notifyState();
+  }
+
+  /** Cast a fighter skill; `place` is set for ground_aoe. */
+  private castFighterSkill(idx: number, place: THREE.Vector3 | null) {
+    const skill = this.fighterKit.skills[idx];
+    if (!skill) return;
+    const now = performance.now();
+    if (now < (this.skillCdUntil[idx] ?? 0)) return;
+    if (this.playerMana < skill.manaCost) {
+      this.log("Not enough mana.");
+      return;
+    }
+    this.playerMana -= skill.manaCost;
+    this.skillCdUntil[idx] = now + skill.cooldown * 1000;
+
+    const dir = this.resolveAimDir();
+    this.playerFacing = Math.atan2(dir.x, dir.z);
+    this.playerAnimator?.triggerNamed(skill.anim);
+    if (!this.playerAnimator?.isRootMotionActive() && skill.targeting !== "self" && skill.targeting !== "ground_aoe") {
+      this.playerPos.x += dir.x * 1.1;
+      this.playerPos.z += dir.z * 1.1;
+      this.clampToArena(this.playerPos);
+    }
+
+    const dmg = this.playerBaseDamage * skill.damageMult * (0.85 + Math.random() * 0.3);
+    const color = skill.color ?? elementColor(skill.element);
+
+    if (skill.targeting === "self") {
+      // Heal-ish for marco regen style
+      if (skill.damageMult < 0.6) {
+        this.playerHp = Math.min(this.playerMaxHp, this.playerHp + 40 + this.playerLevel * 5);
+        this.log(`${skill.name} — restored vitality.`);
+      } else {
+        const q: ShapeQuery = {
+          kind: "nova",
+          origin: this.playerPos.clone(),
+          dir,
+          radius: skill.aoeRadius ?? 4,
+        };
+        this.telegraphs?.show(q, 0.3, color);
+        this.particles?.castSkillVfx({
+          element: skill.element,
+          shape: "nova",
+          center: this.playerPos.clone(),
+          origin: this.playerPos.clone(),
+          dir,
+          reach: skill.aoeRadius ?? 4,
+        });
+        for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
+          this.damageEnemy(en, dmg, false);
+        }
+      }
+      this.notifyState();
+      return;
+    }
+
+    if (skill.targeting === "slash_wave" || skill.shape === "slash") {
+      this.slashField?.spawn(this.playerPos.clone().setY(1.15), dir, {
+        damage: dmg,
+        range: skill.slashRange ?? 11,
+        color,
+        radius: 1.4,
+      });
+      this.log(`${skill.name}!`);
+      this.notifyState();
+      return;
+    }
+
+    if (skill.targeting === "ground_aoe") {
+      const maxR = skill.placeRange ?? 9;
+      let center = place ?? this.playerPos.clone().add(dir.clone().multiplyScalar(maxR * 0.55));
+      const to = center.clone().sub(this.playerPos);
+      if (to.length() > maxR) {
+        to.setLength(maxR);
+        center = this.playerPos.clone().add(to);
+      }
+      this.clampToArena(center);
+      const radius = skill.aoeRadius ?? 4;
+      const kind = skill.shape === "nova" ? "nova" : "circle";
+      const q: ShapeQuery = {
+        kind,
+        origin: center.clone(),
+        dir,
+        radius,
+      };
+      this.telegraphs?.show(q, 0.4, color);
+      this.skillVfx?.spawn("cloud", center.clone(), radius, 1.1);
+      this.particles?.castSkillVfx({
+        element: skill.element,
+        shape: kind,
+        center: center.clone(),
+        origin: this.playerPos.clone(),
+        dir,
+        reach: radius,
+      });
+      for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
+        const isCrit = Math.random() < this.playerCritChance + 0.05;
+        this.damageEnemy(en, dmg * (isCrit ? 1.75 : 1), isCrit);
+      }
+      this.log(`${skill.name} detonates!`);
+      this.notifyState();
+      return;
+    }
+
+    // Instant cone / line / nova from self (slash shapes already returned above).
+    const shapeKind: ShapeQuery["kind"] =
+      skill.shape === "line" || skill.shape === "cone" || skill.shape === "nova" || skill.shape === "circle"
+        ? skill.shape
+        : "cone";
+    const q: ShapeQuery = {
+      kind: shapeKind,
+      origin: this.playerPos.clone(),
+      dir,
+      radius: skill.aoeRadius ?? 5,
+      halfAngle: Math.PI / 4,
+      length: skill.slashRange ?? 9,
+      halfWidth: 1.3,
+    };
+    this.telegraphs?.show(q, 0.28, color);
+    this.particles?.castSkillVfx({
+      element: skill.element,
+      shape: shapeKind as SkillShapeKind,
+      center: this.playerPos.clone(),
+      origin: this.playerPos.clone(),
+      dir,
+      reach: skill.aoeRadius ?? skill.slashRange ?? 5,
+      halfAngle: Math.PI / 4,
+    });
+    // Also fire a short slash wave so physical cuts travel past the fist.
+    if (skill.element === "physical" || shapeKind === "cone") {
+      this.slashField?.spawn(this.playerPos.clone().setY(1.1), dir, {
+        damage: dmg * 0.55,
+        range: Math.min(8, skill.slashRange ?? 7),
+        color,
+        radius: 1.2,
+      });
+    }
+    for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
+      const isCrit = Math.random() < this.playerCritChance + 0.05;
+      this.damageEnemy(en, dmg * (isCrit ? 1.75 : 1), isCrit);
+    }
+    this.log(`${skill.name}!`);
+    this.notifyState();
   }
 
   attackNearest() {
@@ -1568,12 +1908,21 @@ export class GameEngine {
   }
 
   private takeDamage(amount: number, source: string) {
-    const mitigated = Math.max(1, amount - Math.floor(this.playerDefense * 0.5));
+    if (this.isDodging()) {
+      this.log(`Dodged ${source}!`);
+      return;
+    }
+    let mitigated = Math.max(1, amount - Math.floor(this.playerDefense * 0.5));
+    if (this.blocking) {
+      mitigated = Math.max(1, Math.floor(mitigated * 0.3));
+      this.log(`Blocked ${source} — only ${mitigated} damage.`);
+    } else {
+      this.log(`${source} hits you for ${mitigated}`);
+    }
     this.playerHp = Math.max(0, this.playerHp - mitigated);
     const wp = this.playerPos.clone();
     wp.y += 2.5;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: mitigated, worldPos: wp, age: 0, isPlayer: true, isCrit: false });
-    this.log(`${source} hits you for ${mitigated}`);
     this.notifyState();
   }
 
@@ -1680,11 +2029,21 @@ export class GameEngine {
       }
     }
 
+    // Jump arc (Space).
+    if (this.jumpVel !== 0 || this.playerY > 0) {
+      this.jumpVel -= 22 * delta;
+      this.playerY += this.jumpVel * delta;
+      if (this.playerY <= 0) {
+        this.playerY = 0;
+        this.jumpVel = 0;
+      }
+    }
+
     // Drive mixer first so root-motion sample sees this frame's pose, then
     // fold travel into world position. Ending a skill must leave the body at
     // the clip terminus (no snap back to the cast origin).
     if (this.playerAnimator) {
-      this.playerAnimator.setMoving(playerMoving);
+      this.playerAnimator.setMoving(playerMoving && this.playerY <= 0.05);
       this.playerAnimator.update(delta);
       if (this.playerAnimator.consumeRootMotion(this._rmTmp)) {
         this.playerPos.x += this._rmTmp.x;
@@ -1696,9 +2055,34 @@ export class GameEngine {
 
     // Resolve the freshly-moved player against the real dungeon geometry.
     this.resolvePlayer();
+    this.playerPos.y = this.playerY;
+
+    // Slash waves (special + skill cuts) — travel farther than the melee hit.
+    if (this.slashField) {
+      const slashHits = this.slashField.update(
+        delta,
+        this.enemies.map((en) => ({
+          id: en.id,
+          position: en.position,
+          alive: en.state !== "dead" && en.state !== "death",
+        })),
+      );
+      for (const h of slashHits) {
+        const en = this.enemies.find((e) => e.id === h.enemyId);
+        if (en) this.damageEnemy(en, h.damage, Math.random() < this.playerCritChance);
+      }
+    }
+
+    // Skill cursor follows mouse while ground-AoE is pending.
+    if (this.pendingSkillIdx >= 0 && this.skillCursor && this.pointerGround) {
+      this.skillCursor.visible = true;
+      this.skillCursor.position.set(this.pointerGround.x, 0.12, this.pointerGround.z);
+      const sk = this.fighterKit.skills[this.pendingSkillIdx];
+      if (sk) this.skillCursor.scale.setScalar(sk.aoeRadius ?? 4);
+    }
 
     if (this.playerGroup) {
-      const targetPos = new THREE.Vector3(this.playerPos.x, this.playerPos.y, this.playerPos.z);
+      const targetPos = new THREE.Vector3(this.playerPos.x, this.playerY, this.playerPos.z);
       const blend = this.playerAnimator?.isRootMotionActive() ? 0.9 : 0.4;
       this.playerGroup.position.lerp(targetPos, blend);
       // Shortest-arc turn toward facing — avoids the long way around at ±π.
@@ -1909,6 +2293,10 @@ export class GameEngine {
       bossName: boss?.template.name ?? null,
       bossHp: boss?.hp ?? 0,
       bossMaxHp: boss?.maxHp ?? 0,
+      pendingSkillIdx: this.pendingSkillIdx,
+      specialReadyPct: Math.min(1, 1 - Math.max(0, this.specialCdUntil - performance.now()) / Math.max(1, this.fighterKit.special.cooldown * 1000)),
+      blocking: this.blocking,
+      jumping: this.playerY > 0.05 || this.jumpVel > 0,
     });
   }
 
@@ -1952,6 +2340,14 @@ export class GameEngine {
     this.particles?.dispose();
     this.telegraphs?.dispose();
     this.deployables?.dispose();
+    this.slashField?.dispose();
+    this.slashField = null;
+    if (this.skillCursor) {
+      this.scene.remove(this.skillCursor);
+      this.skillCursor.geometry.dispose();
+      this.skillCursorMat?.dispose();
+      this.skillCursor = null;
+    }
     // Dispose the procedural ground + rock field.
     if (this.groundMesh) {
       this.groundMesh.geometry.dispose();
