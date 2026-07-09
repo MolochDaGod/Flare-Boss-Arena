@@ -27,9 +27,12 @@ import {
   ArrowLeft,
   Sword,
   Crosshair,
+  LayoutGrid,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { BarGauge, OrbGauge, Separator, WarningBanner } from "@/components/CraftpixUI";
+import { useSystemsHotkey } from "@/hooks/useSystemsHotkey";
+import { GameEscapeMenu, SystemHub } from "@/components/SystemHub";
 
 // ─── Error boundary (WebGL may be unavailable in headless/screenshot) ───────────
 class ArenaErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -331,21 +334,35 @@ function BossArena() {
   }, [boss, handleSummon]);
 
   const charName = char.name;
+  const [menuOpen, setMenuOpen] = useSystemsHotkey({ alsoEscape: true });
+  const [hubOpen, setHubOpen] = useState(false);
 
   return (
     <div className="fixed inset-0 bg-black overflow-hidden select-none">
       {/* 3D mount */}
       <div ref={mountRef} className="absolute inset-0" />
+      <GameEscapeMenu open={menuOpen} onOpenChange={setMenuOpen} />
+      <SystemHub open={hubOpen} onOpenChange={setHubOpen} />
 
-      {/* Back button */}
-      <button
-        onClick={() => setLocation("/")}
-        className="absolute top-4 left-4 z-20 flex items-center gap-2 font-serif text-xs tracking-widest uppercase text-muted-foreground hover:text-primary transition-colors px-3 py-2"
-        style={stonePanel}
-      >
-        <Rivets />
-        <ArrowLeft className="w-4 h-4" /> War Panel
-      </button>
+      {/* Back + systems */}
+      <div className="absolute top-4 left-4 z-20 flex items-center gap-2">
+        <button
+          onClick={() => setLocation("/")}
+          className="flex items-center gap-2 font-serif text-xs tracking-widest uppercase text-muted-foreground hover:text-primary transition-colors px-3 py-2"
+          style={stonePanel}
+        >
+          <Rivets />
+          <ArrowLeft className="w-4 h-4" /> War Panel
+        </button>
+        <button
+          onClick={() => setHubOpen(true)}
+          className="flex items-center gap-2 font-serif text-xs tracking-widest uppercase px-3 py-2"
+          style={{ ...stonePanel, color: GOLD }}
+          title="Systems (M)"
+        >
+          <LayoutGrid className="w-4 h-4" /> Systems
+        </button>
+      </div>
 
       {/* ── Loading until a boss payload exists ── */}
       {!boss && (

@@ -20,6 +20,8 @@ import {
 } from "@/data/resources";
 import { getGameLoadout, loadoutSkillBar } from "@/data/gameCombat";
 import { toast } from "sonner";
+import { useSystemsHotkey } from "@/hooks/useSystemsHotkey";
+import { GameEscapeMenu, SystemHub } from "@/components/SystemHub";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
 class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -294,11 +296,15 @@ function Game() {
   const manaPct = gameState ? (gameState.playerMana / gameState.playerMaxMana) * 100 : 100;
   const atkPct  = gameState ? (1 - gameState.playerAttackCooldown) * 100 : 100;
   const hpColor = hpPct > 50 ? "#22c55e" : hpPct > 25 ? "#f59e0b" : "#ef4444";
+  const [menuOpen, setMenuOpen] = useSystemsHotkey({ alsoEscape: true });
+  const [hubOpen, setHubOpen] = useState(false);
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col" style={{ zIndex: 50 }}>
       {/* 3D canvas */}
       <div ref={mountRef} className="absolute inset-0" style={{ cursor: "crosshair" }} />
+      <GameEscapeMenu open={menuOpen} onOpenChange={setMenuOpen} />
+      <SystemHub open={hubOpen} onOpenChange={setHubOpen} />
 
       {/* Loading overlay — held until the dungeon GLB + collision BVH are built */}
       <AnimatePresence>
@@ -341,13 +347,23 @@ function Game() {
 
       {/* Top — zone + back */}
       <div className="absolute top-0 left-0 right-0 flex items-start justify-between px-4 pt-3 z-10 pointer-events-none">
-        <button
-          className="pointer-events-auto flex items-center gap-2 px-3 py-1.5 bg-black/60 border border-white/10 rounded text-xs font-serif tracking-widest uppercase text-muted-foreground hover:text-white hover:border-white/30 transition-colors backdrop-blur-sm"
-          onClick={() => setLocation("/")}
-        >
-          <ArrowLeft className="w-3 h-3" />
-          War Panel
-        </button>
+        <div className="pointer-events-auto flex items-center gap-2">
+          <button
+            className="flex items-center gap-2 px-3 py-1.5 bg-black/60 border border-white/10 rounded text-xs font-serif tracking-widest uppercase text-muted-foreground hover:text-white hover:border-white/30 transition-colors backdrop-blur-sm"
+            onClick={() => setLocation("/")}
+          >
+            <ArrowLeft className="w-3 h-3" />
+            War Panel
+          </button>
+          <button
+            className="flex items-center gap-2 px-3 py-1.5 bg-black/60 border border-primary/30 rounded text-xs font-serif tracking-widest uppercase text-primary hover:bg-primary/10 transition-colors backdrop-blur-sm"
+            onClick={() => setHubOpen(true)}
+            title="All systems (M)"
+          >
+            <LayoutGrid className="w-3 h-3" />
+            Systems
+          </button>
+        </div>
 
         <div className="text-center">
           <p className="text-[10px] font-serif uppercase tracking-[0.2em] text-muted-foreground/60">{gameState?.zone ?? ""}</p>

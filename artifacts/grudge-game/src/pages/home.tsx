@@ -131,15 +131,17 @@ function FighterStage({ fighter }: { fighter: FighterDef }) {
 }
 
 const WAR_ROOM: { href: string; label: string; sub: string; icon: React.ElementType }[] = [
-  { href: "/units", label: "Unit Roster", sub: "Champion compendium", icon: PawPrint },
-  { href: "/equipment", label: "Armory", sub: "Weapons & armor", icon: Shield },
-  { href: "/skills", label: "Grimoire", sub: "Skill trees", icon: ScrollText },
-  { href: "/perks", label: "Perks", sub: "KF2 machines", icon: Sparkles },
+  { href: "/select", label: "Choose Fighter", sub: "Active champion", icon: Users },
+  { href: "/party", label: "Party Allies", sub: "Up to 2 Grudge6 units", icon: PawPrint },
+  { href: "/equipment", label: "Stone Sockets", sub: "8 attribute stones", icon: Sparkles },
+  { href: "/skills", label: "Grimoire", sub: "Skill ranks", icon: ScrollText },
+  { href: "/perks", label: "Perks", sub: "Combat machines", icon: Flame },
+  { href: "/units", label: "Unit Roster", sub: "Champion compendium", icon: Shield },
+  { href: "/enemies", label: "Bestiary", sub: "Enemy units", icon: Skull },
   { href: "/rewards", label: "Rewards", sub: "Dailies & season", icon: Gift },
   { href: "/account", label: "Wallet", sub: "Currencies", icon: Wallet },
   { href: "/content", label: "Atlas", sub: "Modes & props", icon: Map },
-  { href: "/enemies", label: "Bestiary", sub: "Enemy units", icon: Skull },
-  { href: "/character/new", label: "Account", sub: "Profile & wallet", icon: Hammer },
+  { href: "/character/new", label: "Profile", sub: "Account sheet", icon: Hammer },
 ];
 
 export default function Home() {
