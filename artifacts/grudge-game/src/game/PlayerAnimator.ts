@@ -61,27 +61,65 @@ export class PlayerAnimator {
     if (idle) idle.reset().play();
     this.current = this.actions.idle ? "idle" : "walk";
 
-    this.mixer.addEventListener("finished", () => {
+    this.mixer.addEventListener("finished", (e) => {
       if (!this.attacking) return; // ignore stray finishes (and the 2nd of a pair)
+      // Only react to the primary one-shot finishing (not a secondary blend track).
+      const finished = (e as unknown as { action?: THREE.AnimationAction }).action;
+      if (finished && this.oneShot && finished !== this.oneShot && !this.oneShotBlend.includes(finished)) {
+        return;
+      }
       this.attacking = false;
       this.rm.end();
-      this.oneShot?.fadeOut(0.15);
+      this.oneShot?.fadeOut(0.18);
       this.oneShot = null;
-      for (const a of this.oneShotBlend) a.fadeOut(0.15);
+      for (const a of this.oneShotBlend) a.fadeOut(0.18);
       this.oneShotBlend = [];
-      const cur = this.actions[this.current];
-      cur?.reset().fadeIn(0.15).play();
+      // Smooth return to locomotion (crossFade preserves weight continuity).
+      this.resumeLocomotion(0.2);
     });
   }
 
+  /** Cross-fade into current idle/walk without a hard cut. */
+  private resumeLocomotion(fade = 0.18) {
+    const cur = this.actions[this.current];
+    if (!cur) return;
+    cur.enabled = true;
+    cur.setEffectiveWeight(1);
+    cur.reset().fadeIn(fade).play();
+  }
+
+  /**
+   * Best-practice locomotion blend: `crossFadeTo` so idle↔walk never pops.
+   * Skipped while a one-shot owns the mixer.
+   */
   setMoving(moving: boolean) {
     const next: PAction = moving && this.actions.walk ? "walk" : "idle";
     if (next === this.current) return;
-    const prev = this.actions[this.current];
+    const prevA = this.actions[this.current];
+    const nextA = this.actions[next];
     this.current = next;
     if (this.attacking) return; // resume happens on attack finish
-    prev?.fadeOut(0.18);
-    this.actions[next]?.reset().fadeIn(0.18).play();
+    if (!nextA) return;
+    nextA.enabled = true;
+    nextA.setEffectiveWeight(1);
+    nextA.reset().play();
+    if (prevA && prevA !== nextA) {
+      prevA.crossFadeTo(nextA, 0.22, false);
+    } else {
+      nextA.fadeIn(0.16);
+    }
+  }
+
+  /** Cross-fade into a one-shot role/skill clip from locomotion. */
+  private playOneShot(action: THREE.AnimationAction, fadeIn = 0.1) {
+    action.reset();
+    action.setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = true;
+    action.enabled = true;
+    action.setEffectiveWeight(1);
+    action.fadeIn(fadeIn).play();
+    const loco = this.actions[this.current];
+    if (loco && loco !== action) loco.fadeOut(fadeIn);
   }
 
   /** True when a dedicated attack clip resolved (a labelled attack OR a blend). */
@@ -100,11 +138,7 @@ export class PlayerAnimator {
     if (!a) return false;
     this.attacking = true;
     this.oneShot = a;
-    a.reset();
-    a.setLoop(THREE.LoopOnce, 1);
-    a.clampWhenFinished = true;
-    a.fadeIn(0.06).play();
-    this.actions[this.current]?.fadeOut(0.06);
+    this.playOneShot(a, 0.08);
     this.rm.begin();
     return true;
   }
@@ -121,9 +155,10 @@ export class PlayerAnimator {
         a.setLoop(THREE.LoopOnce, 1);
         a.clampWhenFinished = true;
         a.setEffectiveWeight(1);
-        a.fadeIn(0.06).play();
+        a.fadeIn(0.08).play();
       }
-      this.actions[this.current]?.fadeOut(0.06);
+      this.oneShot = this.oneShotBlend[0] ?? null;
+      this.actions[this.current]?.fadeOut(0.08);
       this.rm.begin();
       return;
     }
@@ -131,11 +166,7 @@ export class PlayerAnimator {
     if (!a) return;
     this.attacking = true;
     this.oneShot = a;
-    a.reset();
-    a.setLoop(THREE.LoopOnce, 1);
-    a.clampWhenFinished = true;
-    a.fadeIn(0.06).play();
-    this.actions[this.current]?.fadeOut(0.06);
+    this.playOneShot(a, 0.08);
     this.rm.begin();
   }
 
@@ -144,9 +175,12 @@ export class PlayerAnimator {
   triggerNamed(candidates: string[]): boolean {
     if (this.attacking) return true;
     let clip: THREE.AnimationClip | undefined;
-    for (const cand of candidates) {
+    // Prefer longer / more specific candidate matches first.
+    const sorted = [...candidates].sort((a, b) => b.length - a.length);
+    for (const cand of sorted) {
+      const lc = cand.toLowerCase();
       for (const [name, c] of this.pool) {
-        if (name.includes(cand)) {
+        if (name.includes(lc)) {
           clip = c;
           break;
         }
@@ -163,18 +197,15 @@ export class PlayerAnimator {
     const action = this.mixer.clipAction(clip);
     this.attacking = true;
     this.oneShot = action;
-    action.reset();
-    action.setLoop(THREE.LoopOnce, 1);
-    action.clampWhenFinished = true;
-    action.fadeIn(0.06).play();
-    this.actions[this.current]?.fadeOut(0.06);
+    this.playOneShot(action, 0.1);
     this.rm.begin();
     return true;
   }
 
   update(delta: number) {
-    this.mixer.update(delta);
-    this.rm.sample(delta);
+    // Clamp mixer steps so a long frame hitch doesn't explode root-motion travel.
+    this.mixer.update(Math.min(delta, 0.05));
+    this.rm.sample(Math.min(delta, 0.05));
   }
 
   /** World-space horizontal displacement banked from root motion this frame. */

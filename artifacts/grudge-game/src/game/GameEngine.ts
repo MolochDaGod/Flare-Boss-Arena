@@ -48,6 +48,9 @@ import { TelegraphField } from "./combat/telegraphs";
 import { DeployableManager } from "./combat/deployables";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import { SlashWaveField } from "./combat/slashVfx";
+import { AuraField } from "./combat/auras";
+import { getActiveCombatProfile, brainTuning, type BrainArchetype } from "../data/characterCombatProfiles";
+import { pickHeroEnemies, heroEnemyAsTemplate } from "../data/heroEnemyLibrary";
 import { FX2D } from "./FX2D";
 import { DUNGEON_COLLECTABLES } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
@@ -294,6 +297,10 @@ export class GameEngine {
 
   private fighterKit: FighterKit = getActiveFighterKit();
   private slashField: SlashWaveField | null = null;
+  private auras: AuraField | null = null;
+  /** fighterId → brain for hero-rival enemies. */
+  private enemyBrains = new Map<string, BrainArchetype>();
+  private playerAuraElement = getActiveCombatProfile().auraElement;
   /** -1 = none; 0-4 = skill awaiting ground placement. */
   private pendingSkillIdx = -1;
   private skillCdUntil = [0, 0, 0, 0, 0];
@@ -368,13 +375,17 @@ export class GameEngine {
       this.renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
     }
     this.renderer.setSize(w, h);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Cap DPR for lag-free rendering on high-DPI laptops (2x often halves FPS).
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // PCFSoft is deprecated / slower — PCF is clearer and cheaper.
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     // Filmic tone mapping for richer contrast across the larger lit map.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.toneMappingExposure = 1.05;
+    // Prefer power-of-two shadow maps and avoid auto-clear thrash.
+    this.renderer.shadowMap.autoUpdate = true;
     container.appendChild(this.renderer.domElement);
 
     this.clock = new THREE.Clock();
@@ -384,7 +395,9 @@ export class GameEngine {
     this.telegraphs = new TelegraphField(this.scene);
     this.deployables = new DeployableManager(this.scene);
     this.slashField = new SlashWaveField(this.scene, this.particles);
+    this.auras = new AuraField(this.scene);
     this.fighterKit = getActiveFighterKit();
+    this.playerAuraElement = getActiveCombatProfile().auraElement;
     // Ground-AoE placement ring (shown while a skill is pending).
     this.skillCursorMat = new THREE.MeshBasicMaterial({
       color: 0x66ccff,
@@ -892,6 +905,12 @@ export class GameEngine {
     this.playerGroup.add(ring);
 
     this.scene.add(this.playerGroup);
+    // Element signature aura under the fighter (from combat profile).
+    this.auras?.attach(this.playerAuraElement, {
+      follow: this.playerGroup,
+      radius: 1.35,
+      yOffset: 0.05,
+    });
     this.loaded = true;
     this.notifyState();
   }
@@ -941,6 +960,14 @@ export class GameEngine {
 
     // Spawn the KayKit skeleton minions (real shared-library skeletal animation).
     for (const m of KIT_TEMPLATES) configs.push({ template: m, count: m.tier === 1 ? 3 : 2 });
+
+    // Rival heroes (unused fighters) — elite pack with AI brains from combat profiles.
+    const rivals = pickHeroEnemies(this.mapSeed ^ 0xc0ffee, Math.min(3, 1 + Math.floor((this.islandRound - 1) / 2)));
+    for (const h of rivals) {
+      configs.push({ template: heroEnemyAsTemplate(h), count: 1 });
+      this.enemyBrains.set(h.visualId, h.brain);
+      this.enemyBrains.set(h.id, h.brain);
+    }
 
     const rng = mulberry(this.mapSeed ^ 0x51aced);
     for (const { template, count } of configs) {
@@ -1058,6 +1085,24 @@ export class GameEngine {
     model.group.userData.enemyId = id;
     this.scene.add(model.group);
 
+    const brain = this.enemyBrains.get(template.id) ?? this.enemyBrains.get(modelId);
+    const tune = brain ? brainTuning(brain) : null;
+    let aggroRange = 6.5 + template.tier * 0.6;
+    let attackRange = 1.8 + template.tier * 0.2 + (model.archetype === "dragon" || model.archetype === "golem" ? 1.2 : 0);
+    let speed =
+      model.archetype === "flying"
+        ? 3.5
+        : model.archetype === "golem"
+          ? 1.6
+          : model.archetype === "dragon"
+            ? 2.4
+            : 2.4 + template.tier * 0.35;
+    if (tune) {
+      aggroRange *= tune.aggroMult;
+      attackRange *= tune.attackRangeMult;
+      speed *= tune.speedMult;
+    }
+
     const enemy: EnemyInstance = {
       id,
       template,
@@ -1072,13 +1117,29 @@ export class GameEngine {
       facing: Math.random() * Math.PI * 2,
       attackCooldown: Math.random() * 1.5,
       hurtTimer: 0,
-      aggroRange: 6.5 + template.tier * 0.6,
-      attackRange: 1.8 + template.tier * 0.2 + (model.archetype === "dragon" || model.archetype === "golem" ? 1.2 : 0),
-      speed: model.archetype === "flying" ? 3.5 : model.archetype === "golem" ? 1.6 : model.archetype === "dragon" ? 2.4 : 2.4 + template.tier * 0.35,
+      aggroRange,
+      attackRange,
+      speed,
     };
 
     // Make every mesh under the enemy carry the enemyId for raycast hits
     model.group.traverse((c) => { c.userData.enemyId = id; });
+    // Soft signature aura for elites / rivals (tier ≥ 3).
+    if (template.tier >= 3 && this.auras) {
+      const el =
+        brain === "caster" || brain === "gunner"
+          ? "arcane"
+          : brain === "assassin"
+            ? "poison"
+            : brain === "tank"
+              ? "physical"
+              : "fire";
+      this.auras.attach(el as import("./combat/particles").SkillElement, {
+        follow: model.group,
+        radius: 1.1 + template.tier * 0.12,
+        yOffset: 0.06,
+      });
+    }
 
     this.enemies.push(enemy);
     return enemy;
@@ -1408,6 +1469,7 @@ export class GameEngine {
         this.damageEnemy(en, dmg, Math.random() < this.playerCritChance + 0.08);
       }
     }
+    this.auras?.pulse(sp.element ?? this.playerAuraElement, this.playerPos.clone(), 2.8, 0.5);
     this.log(`${getActiveFighter().name} — ${sp.name}!`);
     this.notifyState();
   }
@@ -1770,7 +1832,16 @@ export class GameEngine {
       else if (en.model.isGLB) disposeMonsterModel(en.model);
     }
     this.enemies = [];
+    this.enemyBrains.clear();
     this.bossEnemyId = null;
+    this.auras?.clear();
+    if (this.playerGroup) {
+      this.auras?.attach(this.playerAuraElement, {
+        follow: this.playerGroup,
+        radius: 1.35,
+        yOffset: 0.05,
+      });
+    }
     this.buildHarvestables();
     this.spawnInitialEnemies();
     this.spawnDungeonBoss();
@@ -2200,6 +2271,7 @@ export class GameEngine {
     this.skillVfx.update(delta);
     this.particles?.update(delta);
     this.telegraphs?.update(delta);
+    this.auras?.update(delta);
     this.deployables?.update(delta, {
       targets: this.enemyTargets(),
       particles: this.particles,
@@ -2292,6 +2364,8 @@ export class GameEngine {
 
     const distToPlayer = en.position.distanceTo(this.playerPos);
     en.anim.isWalking = false;
+    const brain = this.enemyBrains.get(en.template.id);
+    const tune = brain ? brainTuning(brain) : null;
 
     if (en.state !== "hurt" && en.state !== "death") {
       if (distToPlayer < en.aggroRange) {
@@ -2300,17 +2374,46 @@ export class GameEngine {
         const dz = this.playerPos.z - en.position.z;
         en.facing = Math.atan2(dx, dz);
 
-        if (distToPlayer <= en.attackRange) {
+        // Brain kite: skirmishers/casters back off when too close.
+        const kiteFloor = tune ? en.attackRange * tune.kiteBelow : 0;
+        if (tune && distToPlayer < kiteFloor && distToPlayer > 0.6) {
+          en.state = "chase";
+          const dir = new THREE.Vector3().subVectors(en.position, this.playerPos).normalize();
+          en.position.x += dir.x * en.speed * 0.85 * delta;
+          en.position.z += dir.z * en.speed * 0.85 * delta;
+          this.clampToArena(en.position);
+          en.anim.isWalking = true;
+        } else if (distToPlayer <= en.attackRange) {
           en.state = "attack";
           if (en.attackCooldown <= 0) {
             en.anim.isAttacking = true;
-            const dmg = Math.floor(en.template.damage * (0.85 + Math.random() * 0.3));
-            this.takeDamage(dmg, en.template.name);
-            en.attackCooldown = 1.8 + Math.random() * 0.6;
+            const special = tune && Math.random() < tune.specialBias;
+            const dmg = Math.floor(
+              en.template.damage * (special ? 1.45 : 1) * (0.85 + Math.random() * 0.3),
+            );
+            this.takeDamage(dmg, en.template.name + (special ? " ★" : ""));
+            if (special && this.auras) {
+              this.auras.pulse(
+                brain === "caster" ? "arcane" : brain === "assassin" ? "poison" : "fire",
+                en.position.clone(),
+                2.2 + en.template.tier * 0.2,
+                0.45,
+              );
+            }
+            en.attackCooldown = (special ? 2.4 : 1.7) + Math.random() * 0.6;
           }
         } else {
           en.state = "chase";
           const dir = new THREE.Vector3().subVectors(this.playerPos, en.position).normalize();
+          // Assassins add a slight lateral strafe for flanking feel.
+          if (brain === "assassin") {
+            const side = Math.sin(elapsed * 1.7) >= 0 ? 1 : -1;
+            const sx = -dir.z * 0.4 * side;
+            const sz = dir.x * 0.4 * side;
+            dir.x += sx;
+            dir.z += sz;
+            dir.normalize();
+          }
           en.position.x += dir.x * en.speed * delta;
           en.position.z += dir.z * en.speed * delta;
           this.clampToArena(en.position);
@@ -2452,6 +2555,8 @@ export class GameEngine {
     this.deployables?.dispose();
     this.slashField?.dispose();
     this.slashField = null;
+    this.auras?.dispose();
+    this.auras = null;
     if (this.skillCursor) {
       this.scene.remove(this.skillCursor);
       this.skillCursor.geometry.dispose();
