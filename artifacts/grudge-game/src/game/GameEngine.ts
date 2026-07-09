@@ -6,7 +6,7 @@ import { isKitMonsterId, loadKitMonster, disposeKitModel, KIT_TEMPLATES } from "
 import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
 import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle } from "./PirateNPC";
-import { RunDirector } from "./RunDirector";
+import { RunDirector, type RunEvent } from "./RunDirector";
 import { BOSS_MONSTER_TEMPLATES } from "../data/bossMonsters";
 import { Townsperson } from "./Townsfolk";
 import { PlayerAnimator, buildAuthoredClips } from "./PlayerAnimator";
@@ -1317,7 +1317,7 @@ export class GameEngine {
         const spawnPos = enemy.spawnPos.clone();
         spawnPos.x += (Math.random() - 0.5) * 4;
         spawnPos.z += (Math.random() - 0.5) * 4;
-        this.createEnemy(enemy.template, spawnPos);
+        this.createEnemy(enemy.template, spawnPos, { skipScale: true });
       }, 14000);
     } else {
       setTimeout(() => {
@@ -1327,7 +1327,7 @@ export class GameEngine {
     }
   }
 
-  private handleRunEvent(ev: import("./RunDirector").RunEvent) {
+  private handleRunEvent(ev: RunEvent) {
     if (ev.type === "mission_progress") {
       this.log(`Mission: ${ev.kills}/${ev.goal} hostiles culled`);
     } else if (ev.type === "boss_alert") {

@@ -231,6 +231,10 @@ function Game() {
   const ready = enemyTemplates.length > 0 && !!playerStats;
 
   useEffect(() => {
+    bootArmadaEngine();
+  }, []);
+
+  useEffect(() => {
     if (!mountRef.current || !ready || !playerStats) return;
 
     const c = char as unknown as Record<string, unknown>;
