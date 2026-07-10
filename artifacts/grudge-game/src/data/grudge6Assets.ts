@@ -112,3 +112,19 @@ export function bakedAnimUrl(rel: string): string {
 export function animPackForRole(role: AllyRole): BakedAnimPack {
   return ROLE_TO_BAKED_PACK[role] ?? "sword_shield";
 }
+
+/** Base human height (m) — multiplied by per-race scale (grudge-arena RaceConfig). */
+export const GRUDGE6_BASE_HEIGHT = 1.75;
+
+export const RACE_HEIGHT_SCALE: Record<RaceId, number> = {
+  human: 1.0,
+  barbarian: 1.12,
+  elf: 1.05,
+  dwarf: 0.85,
+  orc: 1.08,
+  undead: 0.95,
+};
+
+export function targetHeightForRace(race: RaceId): number {
+  return GRUDGE6_BASE_HEIGHT * (RACE_HEIGHT_SCALE[race] ?? 1);
+}

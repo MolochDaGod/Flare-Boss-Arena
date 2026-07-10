@@ -7,7 +7,7 @@ import * as THREE from "three";
 import type { Grudge6Instance } from "./Grudge6Character";
 import type { AllyBrainId } from "../../data/grudge6Roster";
 
-export type AllyState = "follow" | "attack" | "heal" | "gather" | "idle";
+export type AllyState = "follow" | "attack" | "heal" | "gather" | "idle" | "down";
 
 export interface AllyWorldView {
   playerPos: THREE.Vector3;
@@ -43,13 +43,18 @@ export interface AllyAgent {
   hp: number;
   maxHp: number;
   followSlot: number; // 0 or 1 — formation offset
+  dead: boolean;
+  /** Unix seconds — auto-respawn at cove when elapsed (0 = no timer). */
+  respawnAt: number;
+  hurtFlash: number;
 }
 
 const FOLLOW_DIST = 2.8;
 const LEASH = 22;
 const GATHER_RANGE = 2.4;
 
-function formationOffset(slot: number, playerFacing: number): THREE.Vector3 {
+/** Formation offset behind/flanking the player (exported for cove respawn). */
+export function allyFormationOffset(slot: number, playerFacing: number): THREE.Vector3 {
   // Flank left / right behind the player
   const side = slot === 0 ? -1 : 1;
   const back = 1.6;
@@ -75,6 +80,9 @@ export function createAllyAgent(instance: Grudge6Instance, slot: number): AllyAg
     hp: 180 + kit.damage * 8,
     maxHp: 180 + kit.damage * 8,
     followSlot: slot,
+    dead: false,
+    respawnAt: 0,
+    hurtFlash: 0,
   };
 }
 
@@ -87,6 +95,8 @@ export function thinkAlly(
   world: AllyWorldView,
   playerFacing: number,
 ): AllyAction {
+  if (agent.dead) return { type: "idle" };
+
   const kit = agent.instance.def.kit;
   agent.attackCd = Math.max(0, agent.attackCd - world.dt);
   agent.healCd = Math.max(0, agent.healCd - world.dt);
@@ -198,7 +208,7 @@ export function thinkAlly(
 
   // Default follow formation
   agent.state = "follow";
-  const form = world.playerPos.clone().add(formationOffset(agent.followSlot, playerFacing));
+  const form = world.playerPos.clone().add(allyFormationOffset(agent.followSlot, playerFacing));
   if (agent.pos.distanceTo(form) > FOLLOW_DIST * 0.45) {
     return { type: "move", targetPos: form };
   }

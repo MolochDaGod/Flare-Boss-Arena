@@ -27,12 +27,14 @@ import { Grudge6Factory, type Grudge6PrefabDebug } from "./grudge6/Grudge6Charac
 import type { AllyState } from "./grudge6/AllyBrain";
 import { getGrudge6Hero, getPartyAllyIds } from "../data/grudge6Roster";
 import {
+  allyFormationOffset,
   createAllyAgent,
   stepAllyMovement,
   thinkAlly,
   type AllyAgent,
   type AllyWorldView,
 } from "./grudge6/AllyBrain";
+import { targetHeightForRace } from "../data/grudge6Assets";
 import { Townsperson } from "./Townsfolk";
 import { PlayerAnimator, buildAuthoredClips } from "./PlayerAnimator";
 import {
@@ -192,6 +194,8 @@ export interface AllyHudSnapshot {
   state: AllyState;
   brain: string;
   loadOk: boolean;
+  dead: boolean;
+  respawnSec: number;
   debug: Grudge6PrefabDebug | null;
 }
 
@@ -293,6 +297,7 @@ export class GameEngine {
   private slashWaves: SlashWaveField | null = null;
   private allies: AllyAgent[] = [];
   private partyLoadErrors: string[] = [];
+  private readonly ALLY_RESPAWN_SEC = 28;
   private grudge6Factory = new Grudge6Factory();
   private beatOverlay: GameBeat | null = null;
   private playerDead = false;
@@ -493,6 +498,16 @@ export class GameEngine {
       ? dm.sampleFloorY(this.playerPos.x, this.playerPos.z, this.playerPos.y + 0.6)
       : null;
     this.playerPos.y = fy ?? 0;
+  }
+
+  /** Sample dungeon floor Y and sync ally world + group position. */
+  private resolveAllyFloor(agent: AllyAgent) {
+    const dm = this.dungeonMap;
+    const fy = dm?.ready
+      ? dm.sampleFloorY(agent.pos.x, agent.pos.z, agent.pos.y + 0.6)
+      : null;
+    agent.pos.y = fy ?? 0;
+    agent.instance.group.position.set(agent.pos.x, agent.pos.y, agent.pos.z);
   }
 
   /** Clamp an arbitrary XZ point to the playable arena (±DUNGEON). */
@@ -831,7 +846,7 @@ export class GameEngine {
         continue;
       }
       try {
-        const inst = await this.grudge6Factory.create(def, 1.75);
+        const inst = await this.grudge6Factory.create(def, targetHeightForRace(def.race));
         if (!inst.animator) {
           this.partyLoadErrors.push(`${def.displayName}: no animator (${inst.debug.animSource})`);
         }
@@ -839,8 +854,8 @@ export class GameEngine {
           this.partyLoadErrors.push(`${def.displayName}: untextured (${inst.debug.errors.join(", ") || "atlas missing"})`);
         }
         const agent = createAllyAgent(inst, i);
-        agent.pos.copy(this.playerPos).add(new THREE.Vector3(i === 0 ? -2 : 2, 0, -1.5));
-        inst.group.position.copy(agent.pos);
+        agent.pos.copy(this.playerPos).add(allyFormationOffset(i, this.playerFacing));
+        this.resolveAllyFloor(agent);
         this.scene.add(inst.group);
         this.allies.push(agent);
         const src = inst.debug.animSource;
@@ -1800,6 +1815,86 @@ export class GameEngine {
     }
   }
 
+  private damageAlly(agent: AllyAgent, amount: number, source: string) {
+    if (agent.dead || this.playerDead) return;
+    const mitigated = Math.max(1, Math.floor(amount * 0.82));
+    agent.hp = Math.max(0, agent.hp - mitigated);
+    agent.hurtFlash = 0.35;
+    agent.instance.animator?.triggerNamed(["hit", "hurt"]);
+    const wp = agent.pos.clone();
+    wp.y += (agent.instance.debug.targetHeight ?? 1.75) + 0.3;
+    this.damageNumbers.push({
+      id: `d${this.idCounter++}`,
+      value: mitigated,
+      worldPos: wp,
+      age: 0,
+      isPlayer: false,
+      isCrit: false,
+    });
+    this.log(`${source} hits ${agent.instance.def.displayName} for ${mitigated}`);
+    if (agent.hp <= 0) this.downAlly(agent, source);
+    this.notifyState();
+  }
+
+  private downAlly(agent: AllyAgent, source: string) {
+    agent.dead = true;
+    agent.state = "down";
+    agent.hp = 0;
+    agent.respawnAt = performance.now() / 1000 + this.ALLY_RESPAWN_SEC;
+    agent.instance.group.visible = false;
+    agent.instance.animator?.setMoving(false);
+    this.log(`${agent.instance.def.displayName} fell — respawns at cove in ${this.ALLY_RESPAWN_SEC}s.`);
+    void source;
+  }
+
+  private respawnAlly(agent: AllyAgent) {
+    agent.dead = false;
+    agent.hp = agent.maxHp;
+    agent.respawnAt = 0;
+    agent.hurtFlash = 0;
+    agent.state = "follow";
+    agent.pos.copy(this.coveCenter).add(allyFormationOffset(agent.followSlot, this.playerFacing));
+    this.resolveAllyFloor(agent);
+    agent.instance.group.visible = true;
+    agent.instance.group.rotation.y = agent.facing;
+    agent.instance.animator?.setMoving(false);
+    this.log(`${agent.instance.def.displayName} rallied at the cove.`);
+  }
+
+  /** Enemy melee swing — hits closest valid target in range (player or ally). */
+  private dealEnemyMeleeHit(en: EnemyInstance) {
+    const dmg = Math.floor(en.template.damage * (0.85 + Math.random() * 0.3));
+    const range = en.attackRange * 1.05;
+    let best: "player" | AllyAgent | null = null;
+    let bestDist = range + 1;
+
+    const playerDist = en.position.distanceTo(this.playerPos);
+    if (!this.playerDead && playerDist <= range && playerDist < bestDist) {
+      best = "player";
+      bestDist = playerDist;
+    }
+    for (const a of this.allies) {
+      if (a.dead) continue;
+      const d = a.pos.distanceTo(en.position);
+      if (d <= range && d < bestDist) {
+        best = a;
+        bestDist = d;
+      }
+    }
+    if (!best) return;
+    if (best === "player") this.takeDamage(dmg, en.template.name);
+    else this.damageAlly(best, dmg, en.template.name);
+  }
+
+  private nearestThreatDist(en: EnemyInstance): number {
+    let best = en.position.distanceTo(this.playerPos);
+    for (const a of this.allies) {
+      if (a.dead) continue;
+      best = Math.min(best, a.pos.distanceTo(en.position));
+    }
+    return best;
+  }
+
   private takeDamage(amount: number, source: string) {
     if (this.playerDead) return;
     const mods = getActivePerkMods();
@@ -1850,7 +1945,11 @@ export class GameEngine {
     this.playerHp = Math.floor(this.playerMaxHp * 0.5);
     this.playerMana = Math.floor(this.playerMaxMana * 0.5);
     this.playerPos.copy(this.coveCenter);
+    this.resolvePlayer();
     if (this.playerGroup) this.playerGroup.position.copy(this.playerPos);
+    for (const a of this.allies) {
+      if (a.dead) this.respawnAlly(a);
+    }
     this.beatOverlay = null;
     this.log("Respawned at Pirate Cove.");
     this.notifyState();
@@ -2108,7 +2207,7 @@ export class GameEngine {
     if (this.fogOfWar) {
       const sources = [{ x: this.playerPos.x, z: this.playerPos.z, radius: 15 }];
       for (const a of this.allies) {
-        sources.push({ x: a.pos.x, z: a.pos.z, radius: 9 });
+        if (!a.dead) sources.push({ x: a.pos.x, z: a.pos.z, radius: 9 });
       }
       this.fogOfWar.update(sources);
       this.fogSaveAccum += delta;
@@ -2142,9 +2241,15 @@ export class GameEngine {
     };
 
     for (const agent of this.allies) {
+      if (agent.dead) {
+        if (agent.respawnAt > 0 && now >= agent.respawnAt) this.respawnAlly(agent);
+        continue;
+      }
+      if (agent.hurtFlash > 0) agent.hurtFlash -= delta;
+
       const action = thinkAlly(agent, agent.instance.def.brain, world, this.playerFacing);
       stepAllyMovement(agent, action, 4.5, delta, (p) => this.clampToArena(p));
-      agent.instance.group.position.copy(agent.pos);
+      this.resolveAllyFloor(agent);
       agent.instance.group.rotation.y = agent.facing;
       agent.instance.animator?.update(delta);
 
@@ -2175,13 +2280,13 @@ export class GameEngine {
     }
 
     const distToPlayer = en.position.distanceTo(this.playerPos);
+    const threatDist = this.nearestThreatDist(en);
     en.anim.isWalking = false;
 
     if (en.attackWindup > 0) {
       en.attackWindup -= delta;
       if (en.attackWindup <= 0 && en.attackCooldown <= 0) {
-        const dmg = Math.floor(en.template.damage * (0.85 + Math.random() * 0.3));
-        this.takeDamage(dmg, en.template.name);
+        this.dealEnemyMeleeHit(en);
         en.attackCooldown = 1.8 + Math.random() * 0.6;
         en.anim.isAttacking = false;
       }
@@ -2189,17 +2294,33 @@ export class GameEngine {
 
     if (en.state !== "hurt" && en.state !== "death") {
       const leash = en.aggroRange * 2.4;
-      if (distToPlayer > leash && (en.state === "chase" || en.state === "attack")) {
+      if (threatDist > leash && (en.state === "chase" || en.state === "attack")) {
         en.state = "patrol";
         en.attackWindup = 0;
         en.patrolTarget.copy(en.spawnPos);
-      } else if (distToPlayer < en.aggroRange) {
-        // Face the player
-        const dx = this.playerPos.x - en.position.x;
-        const dz = this.playerPos.z - en.position.z;
-        en.facing = Math.atan2(dx, dz);
+      } else if (threatDist < en.aggroRange) {
+        // Face nearest threat (player or party ally)
+        let faceX = this.playerPos.x - en.position.x;
+        let faceZ = this.playerPos.z - en.position.z;
+        let teleOrigin = this.playerPos.clone();
+        let nearestAlly: AllyAgent | null = null;
+        let nearestAllyD = Infinity;
+        for (const a of this.allies) {
+          if (a.dead) continue;
+          const d = a.pos.distanceTo(en.position);
+          if (d < nearestAllyD) {
+            nearestAllyD = d;
+            nearestAlly = a;
+          }
+        }
+        if (nearestAlly && nearestAllyD < distToPlayer) {
+          faceX = nearestAlly.pos.x - en.position.x;
+          faceZ = nearestAlly.pos.z - en.position.z;
+          teleOrigin = nearestAlly.pos.clone();
+        }
+        en.facing = Math.atan2(faceX, faceZ);
 
-        if (distToPlayer <= en.attackRange) {
+        if (threatDist <= en.attackRange) {
           en.state = "attack";
           if (en.attackCooldown <= 0 && en.attackWindup <= 0) {
             en.attackWindup = 0.42 + en.template.tier * 0.06;
@@ -2207,7 +2328,7 @@ export class GameEngine {
             this.telegraphs?.show(
               {
                 kind: "circle",
-                origin: this.playerPos.clone(),
+                origin: teleOrigin,
                 dir: new THREE.Vector3(0, 0, 1),
                 radius: 1.1 + en.template.tier * 0.08,
               },
@@ -2217,8 +2338,10 @@ export class GameEngine {
           }
         } else {
           en.state = "chase";
-          const dir = new THREE.Vector3().subVectors(this.playerPos, en.position).normalize();
-          const chaseMul = distToPlayer > en.attackRange * 2.5 ? 1.25 : 1;
+          const chaseTarget = teleOrigin;
+          const chaseDist = en.position.distanceTo(chaseTarget);
+          const dir = new THREE.Vector3().subVectors(chaseTarget, en.position).normalize();
+          const chaseMul = chaseDist > en.attackRange * 2.5 ? 1.25 : 1;
           en.position.x += dir.x * en.speed * chaseMul * delta;
           en.position.z += dir.z * en.speed * chaseMul * delta;
           this.clampToArena(en.position);
@@ -2320,6 +2443,8 @@ export class GameEngine {
         state: a.state,
         brain: a.instance.def.brain,
         loadOk: !!a.instance.animator && a.instance.debug.texturedSlots > 0,
+        dead: a.dead,
+        respawnSec: a.dead && a.respawnAt > 0 ? Math.max(0, Math.ceil(a.respawnAt - performance.now() / 1000)) : 0,
         debug: a.instance.debug,
       })),
       partyLoadErrors: [...this.partyLoadErrors],

@@ -8,7 +8,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { clone as cloneSkinnedHierarchy } from "three/addons/utils/SkeletonUtils.js";
 import type { RaceId } from "../../data/characterMeshes";
 import type { Grudge6HeroDef } from "../../data/grudge6Roster";
-import { animPackForRole, raceAtlasUrl, raceGlbUrl } from "../../data/grudge6Assets";
+import { animPackForRole, raceAtlasUrl, raceGlbUrl, targetHeightForRace } from "../../data/grudge6Assets";
 import { PlayerAnimator, buildAuthoredClips } from "../PlayerAnimator";
 import { loadBakedPackForAlly } from "./bakedAnimLoader";
 
@@ -17,6 +17,7 @@ export interface Grudge6PrefabDebug {
   glbUrl: string;
   atlasUrl: string;
   animPack: string;
+  targetHeight: number;
   boneCount: number;
   visibleMeshes: string[];
   texturedSlots: number;
@@ -72,6 +73,15 @@ function fitFeetOrigin(model: THREE.Object3D, targetHeight: number) {
   model.position.x -= center.x;
   model.position.z -= center.z;
   model.position.y -= box2.min.y;
+}
+
+/** Reset skinned meshes to bind pose before applying baked clips (prevents T-pose pop). */
+export function resetSkeletonBindPose(scene: THREE.Object3D) {
+  scene.traverse((node) => {
+    const sm = node as THREE.SkinnedMesh;
+    if (sm.isSkinnedMesh && sm.skeleton) sm.skeleton.pose();
+  });
+  scene.updateMatrixWorld(true);
 }
 
 function cloneGLTFScene(source: THREE.Object3D): THREE.Group {
@@ -250,7 +260,7 @@ export async function createGrudge6Character(
   opts: { height?: number } = {},
 ): Promise<Grudge6Instance> {
   const t0 = performance.now();
-  const height = opts.height ?? 1.75;
+  const height = opts.height ?? targetHeightForRace(def.race);
   const group = new THREE.Group();
   group.name = def.id;
 
@@ -259,6 +269,7 @@ export async function createGrudge6Character(
     glbUrl: raceGlbUrl(def.race),
     atlasUrl: raceAtlasUrl(def.race),
     animPack: animPackForRole(def.role),
+    targetHeight: height,
     boneCount: 0,
     visibleMeshes: [],
     texturedSlots: 0,
@@ -295,6 +306,7 @@ export async function createGrudge6Character(
   debug.boneCount = countBones(model);
   debug.visibleMeshes = listVisibleMeshes(model);
 
+  resetSkeletonBindPose(model);
   const animator = await buildAnimator(model, def, debug);
   debug.loadMs = Math.round(performance.now() - t0);
 
@@ -316,7 +328,9 @@ export async function createGrudge6Character(
 export class Grudge6Factory {
   private loader = new GLTFLoader();
 
-  async create(def: Grudge6HeroDef, height = 1.85) {
-    return createGrudge6Character(def, this.loader, { height });
+  async create(def: Grudge6HeroDef, height?: number) {
+    return createGrudge6Character(def, this.loader, {
+      height: height ?? targetHeightForRace(def.race),
+    });
   }
 }

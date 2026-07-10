@@ -38,12 +38,14 @@ export function PartyHud({ allies, loadErrors }: PartyHudProps) {
 
       <div className="p-2 space-y-2">
         {allies.map((a) => {
-          const ratio = a.maxHp > 0 ? a.hp / a.maxHp : 0;
+          const ratio = a.dead ? 0 : a.maxHp > 0 ? a.hp / a.maxHp : 0;
           const roleColor = ROLE_COLORS[a.role] ?? "#c5a059";
           return (
-            <div key={a.id} className="space-y-1">
+            <div key={a.id} className={`space-y-1 ${a.dead ? "opacity-55" : ""}`}>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] font-serif text-foreground truncate">{a.name}</span>
+                <span className={`text-[10px] font-serif truncate ${a.dead ? "text-muted-foreground line-through" : "text-foreground"}`}>
+                  {a.name}
+                </span>
                 <span
                   className="text-[7px] font-mono uppercase tracking-wider px-1 py-0.5 rounded shrink-0"
                   style={{ color: roleColor, border: `1px solid ${roleColor}44` }}
@@ -58,8 +60,10 @@ export function PartyHud({ allies, loadErrors }: PartyHudProps) {
                 />
               </div>
               <div className="flex items-center justify-between text-[7px] font-mono text-muted-foreground">
-                <span>{Math.round(a.hp)}/{a.maxHp}</span>
-                <span className="uppercase tracking-wider">{a.state}</span>
+                <span>{a.dead ? "—" : `${Math.round(a.hp)}/${a.maxHp}`}</span>
+                <span className="uppercase tracking-wider">
+                  {a.dead ? (a.respawnSec > 0 ? `down · ${a.respawnSec}s` : "down") : a.state}
+                </span>
               </div>
               {!a.loadOk && (
                 <p className="text-[7px] text-red-400 font-mono">Prefab load issue</p>
@@ -96,7 +100,7 @@ export function PartyHud({ allies, loadErrors }: PartyHudProps) {
                     <p className="text-[#c5a059]">{a.name}</p>
                     <p>anim: {a.debug.animSource} · pack {a.debug.animPack}</p>
                     <p>clips: {a.debug.clipNames.join(", ") || "—"}</p>
-                    <p>meshes: {a.debug.visibleMeshes.length} · bones {a.debug.boneCount}</p>
+                    <p>h: {a.debug.targetHeight?.toFixed(2) ?? "?"}m · meshes {a.debug.visibleMeshes.length} · bones {a.debug.boneCount}</p>
                     <p>tex slots: {a.debug.texturedSlots} · {a.debug.loadMs}ms</p>
                     {a.debug.errors.length > 0 && (
                       <p className="text-red-400">{a.debug.errors.join("; ")}</p>
