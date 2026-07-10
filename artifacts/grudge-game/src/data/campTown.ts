@@ -290,6 +290,9 @@ export const CAMP_DUMMY_SPOTS: { x: number; z: number; name: string }[] = [
 
 export const CAMP_STATION_BY_ID = new Map(CAMP_STATION_LAYOUTS.map((s) => [s.id, s]));
 
+/** Harbor-scale pixel art scatter — pair with {@link HARBOR_TILEABLE_SCATTER} when migrating CampScene bounds. */
+export { HARBOR_TILEABLE_SCATTER } from "./tileablePixelPack";
+
 /** Minimap markers for HUD (normalized later in scene). */
 export function campStationMarkers(): { id: CampStationId; x: number; z: number; color: number; category: CampStationCategory }[] {
   const fromLayouts = CAMP_STATION_LAYOUTS.map((s) => ({

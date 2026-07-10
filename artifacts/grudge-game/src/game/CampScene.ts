@@ -23,6 +23,8 @@ import {
   campStationMarkers,
   type CampStationCategory,
 } from "../data/campTown";
+import { CAMP_TILEABLE_FLOOR, CAMP_TILEABLE_SCATTER } from "../data/tileablePixelPack";
+import { buildTileableCamp, type TileablePackHandle } from "./TileablePackLoader";
 
 export type CampStationId =
   | "anvil"
@@ -209,6 +211,7 @@ export class CampScene {
 
   private options: CampSceneOptions;
   private _engaged = false;
+  private tileableHandle: TileablePackHandle | null = null;
 
   constructor(options: CampSceneOptions = {}) {
     this.options = options;
@@ -250,6 +253,7 @@ export class CampScene {
     this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h);
 
     this.buildEnvironment();
+    this.buildTileableWorld();
     this.buildStations();
     this.loadTown();
     this.buildWorldProps();
@@ -274,61 +278,27 @@ export class CampScene {
     moonDir.position.set(-15, 20, -10);
     this.scene.add(moonDir);
 
-    // Stone floor — large dark hex-like tile
+    // Dark underlay — visible until the tileable floor grid streams in.
     const floorGeom = new THREE.CircleGeometry(this.BOUNDS, 64);
     const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x1a1410,
-      roughness: 0.95,
-      metalness: 0.05,
+      color: 0x0e0c0a,
+      roughness: 1,
+      metalness: 0,
     });
     const floor = new THREE.Mesh(floorGeom, floorMat);
     floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.02;
     floor.receiveShadow = true;
     this.scene.add(floor);
+  }
 
-    // Inner ring stones (cobble path) — instanced
-    const stoneGeom = new THREE.BoxGeometry(0.6, 0.18, 0.6);
-    const stoneMat = new THREE.MeshStandardMaterial({ color: 0x2b2520, roughness: 0.85 });
-    const ringCount = 64;
-    const ringInstanced = new THREE.InstancedMesh(stoneGeom, stoneMat, ringCount);
-    const m = new THREE.Matrix4();
-    for (let i = 0; i < ringCount; i++) {
-      const a = (i / ringCount) * Math.PI * 2;
-      const r = 3.2 + Math.random() * 0.4;
-      const x = Math.cos(a) * r;
-      const z = Math.sin(a) * r;
-      const yRot = Math.random() * Math.PI;
-      m.compose(
-        new THREE.Vector3(x, 0.09, z),
-        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yRot, 0)),
-        new THREE.Vector3(1, 0.6 + Math.random() * 0.4, 1),
-      );
-      ringInstanced.setMatrixAt(i, m);
-    }
-    ringInstanced.receiveShadow = true;
-    this.scene.add(ringInstanced);
-
-    // Outer perimeter rocks
-    const rockGeom = new THREE.DodecahedronGeometry(0.7, 0);
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x14110d, roughness: 1 });
-    const rockCount = 36;
-    const rockInst = new THREE.InstancedMesh(rockGeom, rockMat, rockCount);
-    for (let i = 0; i < rockCount; i++) {
-      const a = (i / rockCount) * Math.PI * 2 + Math.random() * 0.1;
-      const r = this.BOUNDS - 1 - Math.random() * 1.8;
-      const x = Math.cos(a) * r;
-      const z = Math.sin(a) * r;
-      const scl = 0.7 + Math.random() * 1.2;
-      m.compose(
-        new THREE.Vector3(x, scl * 0.3, z),
-        new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random(), Math.random() * Math.PI, Math.random())),
-        new THREE.Vector3(scl, scl, scl),
-      );
-      rockInst.setMatrixAt(i, m);
-    }
-    rockInst.castShadow = true;
-    rockInst.receiveShadow = true;
-    this.scene.add(rockInst);
+  /** Modular grass/stone floor, trees, rocks, walls, and town-upgrade buildings. */
+  private buildTileableWorld() {
+    const loader = new GLTFLoader();
+    this.tileableHandle = buildTileableCamp(loader, this.scene, {
+      floor: { ...CAMP_TILEABLE_FLOOR, bounds: this.BOUNDS },
+      scatter: CAMP_TILEABLE_SCATTER,
+    });
   }
 
   private buildCampfire() {
@@ -1436,6 +1406,8 @@ export class CampScene {
       disposeWorldProp(wp);
     }
     this.worldProps = [];
+    this.tileableHandle?.dispose();
+    this.tileableHandle = null;
     this.embers = [];
     this.vfx = [];
     this.dummies = [];
