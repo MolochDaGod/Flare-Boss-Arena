@@ -7,7 +7,31 @@ import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./procedura
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
 import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle } from "./PirateNPC";
 import { RunDirector, type RunEvent } from "./RunDirector";
-import { BOSS_MONSTER_TEMPLATES } from "../data/bossMonsters";
+import { BOSS_MONSTER_BY_ID, BOSS_MONSTER_TEMPLATES } from "../data/bossMonsters";
+import { getActivePerkMods, getActivePerks } from "../data/perks";
+import { addResource, getResources } from "../data/resources";
+import { vendorQuickTrade } from "../data/vendor";
+import {
+  attachRockFieldNodes,
+  buildHarvestField,
+  damageHarvestNode,
+  nearestHarvestNode,
+  resourceForKind,
+  tickHarvestRespawns,
+  type HarvestField,
+  type HarvestNode,
+} from "./Harvestables";
+import type { RockFieldResult } from "./proceduralTextures";
+import { SlashWaveField } from "./combat/slashVfx";
+import { Grudge6Factory } from "./grudge6/Grudge6Character";
+import { getGrudge6Hero, getPartyAllyIds } from "../data/grudge6Roster";
+import {
+  createAllyAgent,
+  stepAllyMovement,
+  thinkAlly,
+  type AllyAgent,
+  type AllyWorldView,
+} from "./grudge6/AllyBrain";
 import { Townsperson } from "./Townsfolk";
 import { PlayerAnimator, buildAuthoredClips } from "./PlayerAnimator";
 import {
@@ -99,6 +123,19 @@ export interface DamageNumber {
   isCrit: boolean;
 }
 
+export type GameBeatKind =
+  | "boss_alert"
+  | "boss_defeated"
+  | "victory"
+  | "sail"
+  | "mission_complete";
+
+export interface GameBeat {
+  kind: GameBeatKind;
+  title: string;
+  subtitle: string;
+}
+
 export interface GameState {
   playerHp: number;
   playerMaxHp: number;
@@ -122,6 +159,13 @@ export interface GameState {
   missionGoal: number;
   nearbyInteract: string | null;
   canSail: boolean;
+  beat: GameBeat | null;
+  playerDead: boolean;
+  activePerkIds: string[];
+  wood: number;
+  stone: number;
+  partyNames: string[];
+  coveBearing: number | null;
 }
 
 export interface PlayerInitStats {
@@ -215,6 +259,14 @@ export class GameEngine {
   private sun: THREE.DirectionalLight | null = null;
   private groundMesh: THREE.Mesh | null = null;
   private rockField: THREE.InstancedMesh | null = null;
+  private rockFieldData: RockFieldResult | null = null;
+  private harvestField: HarvestField | null = null;
+  private slashWaves: SlashWaveField | null = null;
+  private allies: AllyAgent[] = [];
+  private grudge6Factory = new Grudge6Factory();
+  private beatOverlay: GameBeat | null = null;
+  private playerDead = false;
+
   private terrainMesh: THREE.Mesh | null = null;
   private camp: CampHandle | null = null;
   private pirates: PirateHandle[] = [];
@@ -287,6 +339,7 @@ export class GameEngine {
     this.particles = new ParticleVfx(this.scene);
     this.telegraphs = new TelegraphField(this.scene);
     this.deployables = new DeployableManager(this.scene);
+    this.slashWaves = new SlashWaveField(this.scene, this.particles);
     // Selective bloom so the additive particle VFX glow without washing out the
     // dark scene. Null (graceful fallback to direct render) if setup fails headless.
     this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h);
@@ -332,8 +385,13 @@ export class GameEngine {
     // Hundreds of scattered rocks in a single InstancedMesh draw call (fills
     // the now-much-larger map without tanking performance).
     const rocks = makeRockField(220, D * 0.35, D - 4);
+    this.rockFieldData = rocks;
     this.scene.add(rocks.mesh);
     this.rockField = rocks.mesh;
+
+    this.harvestField = buildHarvestField(this.runDirector.run.seed, D);
+    this.scene.add(this.harvestField.root);
+    attachRockFieldNodes(this.harvestField, rocks.mesh, rocks.positions, rocks.scales);
 
     // Invisible click plane — covers the playable area for click-to-move
     // raycasting. Sits just above the visible ground so floor picks are stable.
@@ -711,7 +769,30 @@ export class GameEngine {
 
     this.scene.add(this.playerGroup);
     this.loaded = true;
+    void this.spawnPartyAllies();
     this.notifyState();
+  }
+
+  private async spawnPartyAllies() {
+    const ids = getPartyAllyIds();
+    for (let i = 0; i < ids.length; i++) {
+      const def = getGrudge6Hero(ids[i]!);
+      if (!def) continue;
+      try {
+        const inst = await this.grudge6Factory.create(def, 1.75);
+        const agent = createAllyAgent(inst, i);
+        agent.pos.copy(this.playerPos).add(new THREE.Vector3(i === 0 ? -2 : 2, 0, -1.5));
+        inst.group.position.copy(agent.pos);
+        this.scene.add(inst.group);
+        this.allies.push(agent);
+      } catch {
+        /* CDN race GLB may fail offline — skip ally */
+      }
+    }
+    if (this.allies.length) {
+      this.log(`${this.allies.length} party ally/allies deployed.`);
+      this.notifyState();
+    }
   }
 
   private buildFallbackPlayer(): THREE.Group {
@@ -1062,7 +1143,7 @@ export class GameEngine {
   }
 
   attackNearest() {
-    if (this.playerAttackCooldown > 0) return;
+    if (this.playerAttackCooldown > 0 || this.playerDead) return;
     let nearest: EnemyInstance | null = null;
     let nearestDist = Infinity;
     for (const en of this.enemies) {
@@ -1070,7 +1151,11 @@ export class GameEngine {
       const d = en.position.distanceTo(this.playerPos);
       if (d < nearestDist) { nearestDist = d; nearest = en; }
     }
-    if (nearest && nearestDist < 4.5) this.doAttack(nearest);
+    if (nearest && nearestDist < 4.5) {
+      this.doAttack(nearest);
+      return;
+    }
+    this.tryHarvestStrike(4.2);
   }
 
   /** Nearest live enemy within `maxDist` (used by the RMB hold-to-attack lock). */
@@ -1221,7 +1306,7 @@ export class GameEngine {
   }
 
   private doAttack(enemy: EnemyInstance) {
-    if (this.playerAttackCooldown > 0) return;
+    if (this.playerAttackCooldown > 0 || this.playerDead) return;
     if (enemy.state === "dead" || enemy.state === "death") return;
 
     const dist = this.playerPos.distanceTo(enemy.position);
@@ -1230,14 +1315,28 @@ export class GameEngine {
       return;
     }
 
+    const mods = getActivePerkMods();
     const base = this.playerBaseDamage;
     const variance = 0.8 + Math.random() * 0.4;
-    const isCrit = Math.random() < this.playerCritChance;
-    const rawDmg = Math.max(1, Math.floor(base * variance * (isCrit ? 1.75 : 1)));
+    const isCrit = Math.random() < this.playerCritChance + mods.critBonus;
+    const rawDmg = Math.max(1, Math.floor(base * variance * mods.autoAttackMult * (isCrit ? 1.75 : 1)));
     const dmg = Math.max(1, rawDmg - Math.floor(enemy.template.tier * 2));
 
     enemy.hp = Math.max(0, enemy.hp - dmg);
-    this.playerAttackCooldown = this.playerMaxAttackCooldown;
+    this.playerAttackCooldown = this.playerMaxAttackCooldown / Math.max(0.35, mods.attackSpeedMult);
+
+    if (mods.autoAttackSlash && this.slashWaves) {
+      const dir = new THREE.Vector3(
+        enemy.position.x - this.playerPos.x,
+        0,
+        enemy.position.z - this.playerPos.z,
+      ).normalize();
+      this.slashWaves.spawn(this.playerPos.clone(), dir, {
+        damage: Math.max(1, Math.floor(dmg * 0.55)),
+        range: 11 * mods.slashRangeMult,
+        color: mods.burnOnHit > 0 ? 0xff6622 : 0xffcc66,
+      });
+    }
 
     // Face the enemy
     const dx = enemy.position.x - this.playerPos.x;
@@ -1330,12 +1429,35 @@ export class GameEngine {
   private handleRunEvent(ev: RunEvent) {
     if (ev.type === "mission_progress") {
       this.log(`Mission: ${ev.kills}/${ev.goal} hostiles culled`);
+      if (ev.kills >= ev.goal) {
+        this.beatOverlay = {
+          kind: "mission_complete",
+          title: "Beachhead Cleared",
+          subtitle: "The Island Colossus is stirring…",
+        };
+      }
     } else if (ev.type === "boss_alert") {
+      const def = BOSS_MONSTER_BY_ID.get(ev.bossId);
+      this.beatOverlay = {
+        kind: "boss_alert",
+        title: def?.name ?? "Island Colossus",
+        subtitle: "A boss-class threat approaches — dodge the red telegraphs.",
+      };
       this.log("The Island Colossus stirs — brace yourself!");
       this.bossSpawnTimer = 2.2;
     } else if (ev.type === "boss_defeated") {
+      this.beatOverlay = {
+        kind: "victory",
+        title: "Island Secured",
+        subtitle: "Visit Capt. Barbarossa at the cove — press E to sail onward.",
+      };
       this.log("Island secured! Speak with Capt. Barbarossa at the cove (E) to sail onward.");
     } else if (ev.type === "sail") {
+      this.beatOverlay = {
+        kind: "sail",
+        title: `Round ${ev.round} Charted`,
+        subtitle: `New seed ${ev.seed.toString(16).slice(0, 6)} — hostiles scale harder.`,
+      };
       this.log(`Sailing to Island Round ${ev.round}…`);
     }
     this.notifyState();
@@ -1366,11 +1488,30 @@ export class GameEngine {
     this.hoveredEnemy = null;
   }
 
+  private rebuildHarvestField() {
+    if (this.harvestField) {
+      this.scene.remove(this.harvestField.root);
+      this.harvestField.dispose();
+    }
+    this.harvestField = buildHarvestField(this.runDirector.run.seed, this.DUNGEON);
+    this.scene.add(this.harvestField.root);
+    if (this.rockFieldData) {
+      attachRockFieldNodes(
+        this.harvestField,
+        this.rockFieldData.mesh,
+        this.rockFieldData.positions,
+        this.rockFieldData.scales,
+      );
+    }
+  }
+
   private reSailToNextIsland() {
     const ev = this.runDirector.sailToNextIsland();
     this.handleRunEvent(ev);
     this.clearHostileEnemies();
     this.bossSpawnTimer = 0;
+    this.beatOverlay = null;
+    this.rebuildHarvestField();
     this.spawnInitialEnemies();
     this.playerHp = Math.min(this.playerMaxHp, this.playerHp + this.playerMaxHp * 0.35);
     this.playerMana = this.playerMaxMana;
@@ -1379,14 +1520,22 @@ export class GameEngine {
 
   private engageNearbyPirate() {
     if (!this.nearbyInteract) return;
+    const vendor = this.pirates.find((p) => p.def.role === "vendor");
     const captain = this.pirates.find((p) => p.def.role === "captain");
     if (captain && this.runDirector.canSail() && this.nearbyInteract.includes("Sail")) {
       captain.animator?.wave();
-      this.reSailToNextIsland();
+      this.sailFromUI();
       return;
     }
-    if (this.nearbyInteract.includes("Trade")) {
-      this.log("Anne Bonny: vendor trades coming soon — bring wood & stone from harvest nodes.");
+    if (vendor && (this.nearbyInteract.includes("Trade") || vendor.def.prompt)) {
+      const r = vendorQuickTrade();
+      this.log(r.message);
+      if (r.ok && r.message.toLowerCase().includes("grog")) {
+        this.playerHp = Math.min(this.playerMaxHp, this.playerHp + this.playerMaxHp * 0.35);
+        this.playerMana = Math.min(this.playerMaxMana, this.playerMana + this.playerMaxMana * 0.25);
+      }
+      vendor.animator?.wave();
+      this.notifyState();
       return;
     }
     this.log(this.nearbyInteract);
@@ -1415,13 +1564,79 @@ export class GameEngine {
   }
 
   private takeDamage(amount: number, source: string) {
-    const mitigated = Math.max(1, amount - Math.floor(this.playerDefense * 0.5));
+    if (this.playerDead) return;
+    const mods = getActivePerkMods();
+    const mitigated = Math.max(
+      1,
+      Math.floor((amount - Math.floor(this.playerDefense * 0.5)) * mods.damageTakenMult),
+    );
     this.playerHp = Math.max(0, this.playerHp - mitigated);
     const wp = this.playerPos.clone();
     wp.y += 2.5;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: mitigated, worldPos: wp, age: 0, isPlayer: true, isCrit: false });
     this.log(`${source} hits you for ${mitigated}`);
+    if (this.playerHp <= 0) {
+      this.playerDead = true;
+      this.beatOverlay = null;
+      this.log("You were defeated — respawn at the cove.");
+    }
     this.notifyState();
+  }
+
+  private tryHarvestStrike(maxDist: number) {
+    if (!this.harvestField || this.playerAttackCooldown > 0) return;
+    const now = performance.now() / 1000;
+    const node = nearestHarvestNode(this.harvestField.nodes, this.playerPos, maxDist, now);
+    if (!node) return;
+    this.doHarvestHit(node, now);
+  }
+
+  private doHarvestHit(node: HarvestNode, now: number) {
+    if (!this.harvestField) return;
+    const mods = getActivePerkMods();
+    const dmg = Math.max(8, Math.floor(this.playerBaseDamage * 0.65 * mods.autoAttackMult));
+    this.playerAttackCooldown = this.playerMaxAttackCooldown / Math.max(0.35, mods.attackSpeedMult);
+    this.heroAnim?.trigger("attack");
+    const result = damageHarvestNode(this.harvestField, node, dmg, now);
+    if (result.depleted) {
+      const res = resourceForKind(node.kind);
+      addResource(res, result.yieldAmount);
+      this.log(`Harvested ${result.yieldAmount} ${res}.`);
+    } else {
+      this.log(`Chopping ${node.kind}… (${node.hp}/${node.maxHp})`);
+    }
+    this.notifyState();
+  }
+
+  respawnAtCove() {
+    this.playerDead = false;
+    this.playerHp = Math.floor(this.playerMaxHp * 0.5);
+    this.playerMana = Math.floor(this.playerMaxMana * 0.5);
+    this.playerPos.copy(this.coveCenter);
+    if (this.playerGroup) this.playerGroup.position.copy(this.playerPos);
+    this.beatOverlay = null;
+    this.log("Respawned at Pirate Cove.");
+    this.notifyState();
+  }
+
+  dismissBeat() {
+    this.beatOverlay = null;
+    this.notifyState();
+  }
+
+  sailFromUI() {
+    if (!this.runDirector.canSail()) return;
+    this.beatOverlay = {
+      kind: "sail",
+      title: "Setting Sail…",
+      subtitle: `Charts plot a course to Island Round ${this.runDirector.run.round + 1}`,
+    };
+    this.notifyState();
+    window.setTimeout(() => {
+      this.reSailToNextIsland();
+      this.beatOverlay = null;
+      this.notifyState();
+    }, 1400);
   }
 
   private log(msg: string) {
@@ -1460,7 +1675,30 @@ export class GameEngine {
 
     if (this.playerAttackCooldown > 0) this.playerAttackCooldown -= delta;
 
+    const now = performance.now() / 1000;
+    if (this.harvestField) tickHarvestRespawns(this.harvestField, now);
+
     this.updatePirateProximity();
+
+    if (!this.playerDead) {
+      this.updateAllies(delta);
+      if (this.slashWaves) {
+        const hits = this.slashWaves.update(
+          delta,
+          this.enemies.map((e) => ({
+            id: e.id,
+            position: e.position,
+            alive: e.state !== "dead" && e.state !== "death",
+          })),
+        );
+        for (const h of hits) {
+          const en = this.enemies.find((e) => e.id === h.enemyId);
+          if (!en || en.state === "dead" || en.state === "death") continue;
+          en.hp = Math.max(0, en.hp - h.damage);
+          if (en.hp <= 0) this.killEnemy(en);
+        }
+      }
+    }
 
     if (this.bossSpawnTimer > 0) {
       this.bossSpawnTimer -= delta;
@@ -1479,7 +1717,7 @@ export class GameEngine {
     if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) { raw.x += 1; raw.y -= 1; }
 
     let playerMoving = false;
-    if (raw.length() > 0) {
+    if (!this.playerDead && raw.length() > 0) {
       raw.normalize();
       this.playerPos.x += raw.x * this.playerSpeed * delta;
       this.playerPos.z += raw.y * this.playerSpeed * delta;
@@ -1493,7 +1731,7 @@ export class GameEngine {
     // RIGHT mouse held = attack. Lock the LEFT-selected enemy if it's still
     // alive, otherwise auto-acquire the nearest one; advance into melee, strike.
     let attacking = false;
-    if (!playerMoving && this.attackHeld) {
+    if (!this.playerDead && !playerMoving && this.attackHeld) {
       const locked =
         this.targetEnemy && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death"
           ? this.targetEnemy
@@ -1621,11 +1859,57 @@ export class GameEngine {
       return d.age < 1.4;
     });
 
-    if (this.playerHp < this.playerMaxHp) {
-      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + delta * 6);
+    if (!this.playerDead && this.playerHp < this.playerMaxHp) {
+      const mods = getActivePerkMods();
+      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + delta * (6 + mods.regenPerSec));
     }
 
     this.notifyState();
+  }
+
+  private updateAllies(delta: number) {
+    if (!this.allies.length) return;
+    const now = performance.now() / 1000;
+    const world: AllyWorldView = {
+      playerPos: this.playerPos,
+      playerHp: this.playerHp,
+      playerMaxHp: this.playerMaxHp,
+      focusTarget: this.targetEnemy ? this.targetEnemy.position.clone() : null,
+      focusEnemyId: this.targetEnemy?.id ?? null,
+      enemies: this.enemies
+        .filter((e) => e.state !== "dead" && e.state !== "death")
+        .map((e) => ({ id: e.id, pos: e.position.clone(), hp: e.hp, maxHp: e.maxHp })),
+      harvest:
+        this.harvestField?.nodes
+          .filter((n) => n.hp > 0)
+          .map((n) => ({ id: n.id, pos: n.position.clone(), kind: n.kind })) ?? [],
+      dt: delta,
+      now,
+    };
+
+    for (const agent of this.allies) {
+      const action = thinkAlly(agent, agent.instance.def.brain, world, this.playerFacing);
+      stepAllyMovement(agent, action, 4.5, delta, (p) => this.clampToArena(p));
+      agent.instance.group.position.copy(agent.pos);
+      agent.instance.group.rotation.y = agent.facing;
+      agent.instance.animator?.update(delta);
+
+      if (action.type === "attack" && action.enemyId) {
+        const en = this.enemies.find((e) => e.id === action.enemyId);
+        if (en && en.hp > 0) {
+          const dmg = Math.floor(agent.instance.def.kit.damage * (0.85 + Math.random() * 0.3));
+          en.hp = Math.max(0, en.hp - dmg);
+          if (en.hp <= 0) this.killEnemy(en);
+        }
+      }
+      if (action.type === "harvest" && action.harvestId && this.harvestField) {
+        const node = this.harvestField.nodes.find((n) => n.id === action.harvestId);
+        if (node && node.hp > 0) this.doHarvestHit(node, now);
+      }
+      if (action.type === "heal" && agent.instance.def.kit.healAmount > 0) {
+        this.playerHp = Math.min(this.playerMaxHp, this.playerHp + agent.instance.def.kit.healAmount * 0.15);
+      }
+    }
   }
 
   private updateEnemy(en: EnemyInstance, delta: number, elapsed: number) {
@@ -1766,7 +2050,23 @@ export class GameEngine {
       missionGoal: this.runDirector.mission.killGoal,
       nearbyInteract: this.nearbyInteract,
       canSail: this.runDirector.canSail(),
+      beat: this.beatOverlay,
+      playerDead: this.playerDead,
+      activePerkIds: getActivePerks(),
+      wood: getResources().wood,
+      stone: getResources().stone,
+      partyNames: this.allies.map((a) => a.instance.def.displayName),
+      coveBearing: this.computeCoveBearing(),
     });
+  }
+
+  private computeCoveBearing(): number | null {
+    if (!this.runDirector.canSail() && !this.beatOverlay) return null;
+    const dx = this.coveCenter.x - this.playerPos.x;
+    const dz = this.coveCenter.z - this.playerPos.z;
+    if (Math.hypot(dx, dz) < 2) return null;
+    const deg = (Math.atan2(dx, dz) * 180) / Math.PI;
+    return (deg + 360) % 360;
   }
 
   private onResize = () => {
@@ -1840,6 +2140,18 @@ export class GameEngine {
     }
     this.worldCollectables = [];
     this.collectedPropIds.clear();
+    for (const a of this.allies) {
+      this.scene.remove(a.instance.group);
+      a.instance.dispose();
+    }
+    this.allies = [];
+    this.slashWaves?.dispose();
+    this.slashWaves = null;
+    if (this.harvestField) {
+      this.scene.remove(this.harvestField.root);
+      this.harvestField.dispose();
+      this.harvestField = null;
+    }
     for (const g of this.coveProps) {
       this.scene.remove(g);
       disposeGltfObject(g);

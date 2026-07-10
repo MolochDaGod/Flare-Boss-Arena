@@ -21,6 +21,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { PLAY_LOOP } from "@/data/gameFlow";
+import { DeployFunnelCard } from "@/components/DeployFunnelCard";
+import { getDeployReadiness } from "@/data/deployFunnel";
 import {
   getActiveFighter,
   ATTR_ORDER,
@@ -152,6 +154,7 @@ export default function Home() {
   const classSkills = classSkillSet?.skills ?? [];
 
   const [fighter] = React.useState<FighterDef>(() => getActiveFighter());
+  const deploy = React.useMemo(() => getDeployReadiness(), []);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -167,10 +170,10 @@ export default function Home() {
           <Button
             size="lg"
             className="font-serif tracking-widest bg-primary text-primary-foreground shadow-[0_0_20px_-4px_rgba(255,165,0,0.5)] hover:bg-primary/80"
-            onClick={() => setLocation("/game")}
+            onClick={() => setLocation(deploy.deployHref)}
           >
             <Swords className="mr-2 h-5 w-5" />
-            Enter World
+            {deploy.deployLabel}
           </Button>
           <Button
             asChild
@@ -263,8 +266,10 @@ export default function Home() {
           )}
         </div>
 
-        {/* Side column — combat profile, equipment, war room */}
+        {/* Side column — deploy funnel, combat profile, equipment, war room */}
         <div className="space-y-6">
+          <DeployFunnelCard />
+
           <ParchmentPanel className="overflow-hidden">
             <div className="border-b border-[#c5a059]/30 px-6 pb-3 pt-4">
               <h2 className="font-serif text-sm uppercase tracking-widest" style={{ color: GOLD }}>

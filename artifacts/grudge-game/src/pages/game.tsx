@@ -14,6 +14,8 @@ import { SkillIcon } from "@/components/SkillIcon";
 import { BarGauge, OrbGauge, Separator, WarningBanner } from "@/components/CraftpixUI";
 import loadingSpinner from "@assets/grudgestudio_1782639192041.gif";
 import { bootArmadaEngine } from "@/data/armadaEngine";
+import { IslandBeatOverlay } from "@/components/IslandBeatOverlay";
+import { PERKS } from "@/data/perks";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
 class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -528,6 +530,59 @@ function Game() {
         </div>
       )}
 
+      <IslandBeatOverlay
+        beat={gameState?.beat ?? null}
+        playerDead={gameState?.playerDead ?? false}
+        canSail={gameState?.canSail ?? false}
+        coveBearing={gameState?.coveBearing ?? null}
+        onRespawn={() => engineRef.current?.respawnAtCove()}
+        onSail={() => engineRef.current?.sailFromUI()}
+        onDismiss={() => engineRef.current?.dismissBeat()}
+      />
+
+      {/* Build identity — perks, party, resources */}
+      {gameState && gameState.loaded && (
+        <div className="absolute top-14 left-4 z-10 pointer-events-none space-y-2 max-w-[11rem]">
+          {(gameState.activePerkIds.length > 0 || gameState.partyNames.length > 0) && (
+            <div className="rounded border border-white/10 bg-black/65 backdrop-blur-sm px-2.5 py-2 space-y-1.5">
+              {gameState.activePerkIds.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {gameState.activePerkIds.map((id) => {
+                    const p = PERKS.find((x) => x.id === id);
+                    return (
+                      <span
+                        key={id}
+                        className="text-[8px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border"
+                        style={{
+                          borderColor: `#${(p?.color ?? 0xc5a059).toString(16).padStart(6, "0").slice(0, 6)}55`,
+                          color: `#${(p?.color ?? 0xc5a059).toString(16).padStart(6, "0").slice(0, 6)}`,
+                        }}
+                      >
+                        {p?.name ?? id}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              {gameState.partyNames.length > 0 && (
+                <p className="text-[9px] font-serif text-muted-foreground">
+                  Party: {gameState.partyNames.join(", ")}
+                </p>
+              )}
+            </div>
+          )}
+          <div className="rounded border border-white/10 bg-black/55 px-2.5 py-1.5 text-[9px] font-mono text-muted-foreground">
+            Wood {gameState.wood} · Stone {gameState.stone}
+          </div>
+          {gameState.coveBearing != null && (
+            <div className="rounded border border-[#c5a059]/40 bg-black/60 px-2.5 py-1.5 text-center">
+              <p className="text-[8px] font-serif uppercase tracking-widest text-[#c5a059]">Cove</p>
+              <p className="text-lg font-mono text-[#c5a059]">↗ {Math.round(gameState.coveBearing)}°</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Cove interact prompt */}
       {gameState?.nearbyInteract && (
         <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
@@ -604,7 +659,7 @@ function Game() {
               </div>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">WASD / Arrow Keys — Move</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Left Click Enemy — Target &amp; Chase</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F / Space — Attack Nearest</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F / Space — Attack / Harvest</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Q / Shift — Dodge</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">1–5 — Skills</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">E — Cove interact (vendor / sail)</p>

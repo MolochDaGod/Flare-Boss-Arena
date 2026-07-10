@@ -345,6 +345,34 @@ export function resourceForKind(kind: HarvestKind): ResourceId {
   return kind === "wood" ? "wood" : "stone";
 }
 
+/** Apply melee damage to a harvest node; returns yield granted on depletion. */
+export function damageHarvestNode(
+  field: HarvestField,
+  node: HarvestNode,
+  damage: number,
+  now: number,
+): { depleted: boolean; yieldAmount: number } {
+  if (node.hp <= 0) return { depleted: false, yieldAmount: 0 };
+  node.hp = Math.max(0, node.hp - damage);
+  if (node.hp > 0) return { depleted: false, yieldAmount: 0 };
+
+  hideHarvestNode(field, node);
+  const span = Math.max(0, node.yieldMax - node.yieldMin);
+  const yieldAmount = node.yieldMin + Math.floor(Math.random() * (span + 1));
+  node.respawnAt = now + 45 + Math.random() * 30;
+  return { depleted: true, yieldAmount };
+}
+
+export function tickHarvestRespawns(field: HarvestField, now: number) {
+  for (const n of field.nodes) {
+    if (n.hp <= 0 && now >= n.respawnAt) {
+      n.hp = n.maxHp;
+      n.respawnAt = 0;
+      showHarvestNode(field, n);
+    }
+  }
+}
+
 export function nearestHarvestNode(
   nodes: HarvestNode[],
   pos: THREE.Vector3,
