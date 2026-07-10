@@ -52,6 +52,39 @@ export interface AllyAgent {
 const FOLLOW_DIST = 2.8;
 const LEASH = 22;
 const GATHER_RANGE = 2.4;
+const ALLY_MOVE_SPEED = 4.5;
+const ALLY_SPRINT_DIST = 5.5;
+
+function applyAllyLocomotion(
+  agent: AllyAgent,
+  moving: boolean,
+  moveDir?: THREE.Vector3,
+  distToTarget?: number,
+) {
+  const anim = agent.instance.animator;
+  if (!anim) return;
+  if (!moving) {
+    if (anim.setGaitFromSpeed) anim.setGaitFromSpeed(0, false);
+    else anim.setMoving(false);
+    anim.setLocoDirection?.("forward");
+    return;
+  }
+  const speed01 = Math.min(1, ALLY_MOVE_SPEED / 6.5);
+  const sprint = (distToTarget ?? 0) > ALLY_SPRINT_DIST;
+  if (anim.setGaitFromSpeed) anim.setGaitFromSpeed(speed01, sprint);
+  else anim.setMoving(true);
+
+  if (moveDir && anim.setLocoDirection) {
+    const fx = Math.sin(agent.facing);
+    const fz = Math.cos(agent.facing);
+    const dot = moveDir.x * fx + moveDir.z * fz;
+    const cross = moveDir.x * fz - moveDir.z * fx;
+    if (dot < -0.35) anim.setLocoDirection("back");
+    else if (cross > 0.35) anim.setLocoDirection("right");
+    else if (cross < -0.35) anim.setLocoDirection("left");
+    else anim.setLocoDirection("forward");
+  }
+}
 
 /** Formation offset behind/flanking the player (exported for cove respawn). */
 export function allyFormationOffset(slot: number, playerFacing: number): THREE.Vector3 {
@@ -232,20 +265,20 @@ export function stepAllyMovement(
       agent.pos.z += to.z * speed * dt;
       agent.facing = Math.atan2(to.x, to.z);
       clamp(agent.pos);
-      agent.instance.animator?.setMoving(true);
+      applyAllyLocomotion(agent, true, to, d);
       return;
     }
   }
   if (action.type === "attack" && action.targetPos) {
     agent.facing = Math.atan2(action.targetPos.x - agent.pos.x, action.targetPos.z - agent.pos.z);
-    agent.instance.animator?.setMoving(false);
+    applyAllyLocomotion(agent, false);
     agent.instance.animator?.triggerAttack();
     return;
   }
   if (action.type === "heal" || action.type === "harvest") {
-    agent.instance.animator?.setMoving(false);
+    applyAllyLocomotion(agent, false);
     agent.instance.animator?.triggerNamed(["cast", "attack", "boost"]);
     return;
   }
-  agent.instance.animator?.setMoving(false);
+  applyAllyLocomotion(agent, false);
 }

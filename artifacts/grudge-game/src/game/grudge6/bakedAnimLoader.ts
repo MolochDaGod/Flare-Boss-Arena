@@ -6,12 +6,27 @@
 import * as THREE from "three";
 import {
   ANIM_PACK_CLIPS,
+  BAKED_DIR_RELS,
   BAKED_SKILL_CLIPS,
   bakedAnimUrl,
   type BakedAnimPack,
 } from "../../data/grudge6Assets";
 
 const clipCache = new Map<string, THREE.AnimationClip>();
+
+export const MIN_CLIP_BIND_RATIO = 0.45;
+export const MIN_CLIP_BIND_COUNT = 8;
+
+export class BakedAnimLoadError extends Error {
+  constructor(
+    message: string,
+    public pack: BakedAnimPack,
+    public missing: string[] = [],
+  ) {
+    super(message);
+    this.name = "BakedAnimLoadError";
+  }
+}
 
 function getAnimationRoot(scene: THREE.Object3D): THREE.Object3D {
   let skinned: THREE.SkinnedMesh | null = null;
@@ -83,6 +98,30 @@ function normalizeBakedClip(clip: THREE.AnimationClip, scene: THREE.Object3D | n
   return toRotationOnlyClip(clip);
 }
 
+export function validateClipBinding(
+  clip: THREE.AnimationClip,
+  root: THREE.Object3D,
+): { ok: boolean; bound: number; total: number; ratio: number } {
+  const mixer = new THREE.AnimationMixer(root);
+  const action = mixer.clipAction(clip, root);
+  const bindings = (action as unknown as { _propertyBindings?: Array<{ binding?: { node?: unknown } }> })
+    ._propertyBindings ?? [];
+  let bound = 0;
+  for (const b of bindings) {
+    if (b?.binding?.node) bound++;
+  }
+  const total = bindings.length;
+  const ratio = total > 0 ? bound / total : 0;
+  mixer.stopAllAction();
+  mixer.uncacheRoot(root);
+  return {
+    ok: bound >= MIN_CLIP_BIND_COUNT && ratio >= MIN_CLIP_BIND_RATIO,
+    bound,
+    total,
+    ratio,
+  };
+}
+
 async function loadBakedClip(rel: string, scene: THREE.Object3D | null): Promise<THREE.AnimationClip | null> {
   const cacheKey = `${rel}::${scene?.uuid ?? "none"}`;
   const cached = clipCache.get(cacheKey);
@@ -103,22 +142,44 @@ async function loadBakedClip(rel: string, scene: THREE.Object3D | null): Promise
 
 export interface BakedPackResult {
   pack: BakedAnimPack;
-  clips: Partial<Record<"idle" | "walk" | "run" | "attack", THREE.AnimationClip>>;
+  clips: Partial<
+    Record<
+      | "idle"
+      | "walk"
+      | "run"
+      | "sprint"
+      | "attack"
+      | "walkBack"
+      | "runBack"
+      | "strafeLeft"
+      | "strafeRight",
+      THREE.AnimationClip
+    >
+  >;
   pool: THREE.AnimationClip[];
   sources: Record<string, string>;
+  idleBindRatio: number | null;
+  missing: string[];
 }
 
-/** Load locomotion + attack + skill clips for an ally anim pack. */
+const REQUIRED_LOCO = ["idle", "walk", "run"] as const;
+
+/** Load locomotion + attack + skill + directional clips for an ally anim pack. */
 export async function loadBakedPackForAlly(
   pack: BakedAnimPack,
   scene: THREE.Object3D,
 ): Promise<BakedPackResult> {
   const defs = ANIM_PACK_CLIPS[pack];
+  const dirRels = BAKED_DIR_RELS[pack];
   const rels: Record<string, string> = {
     idle: defs.idle,
     walk: defs.walk,
     run: defs.run,
     attack: defs.attack,
+    walkBack: dirRels.walkBack,
+    runBack: dirRels.runBack,
+    strafeLeft: dirRels.strafeLeft,
+    strafeRight: dirRels.strafeRight,
     ...BAKED_SKILL_CLIPS,
   };
 
@@ -134,16 +195,49 @@ export async function loadBakedPackForAlly(
   const clips: BakedPackResult["clips"] = {};
   const pool: THREE.AnimationClip[] = [];
   const sources: Record<string, string> = {};
+  const missing: string[] = [];
 
   for (const [name, rel] of Object.entries(rels)) sources[name] = rel;
   for (const entry of entries) {
     if (!entry) continue;
     const [name, clip] = entry;
     pool.push(clip);
-    if (name === "idle" || name === "walk" || name === "run" || name === "attack") {
-      clips[name] = clip;
+    clips[name as keyof BakedPackResult["clips"]] = clip;
+  }
+
+  for (const name of REQUIRED_LOCO) {
+    if (!clips[name]) missing.push(name);
+  }
+  if (!clips.attack) missing.push("attack");
+
+  const animRoot = getAnimationRoot(scene);
+  let idleBindRatio: number | null = null;
+  if (clips.idle) {
+    const bind = validateClipBinding(clips.idle, animRoot);
+    idleBindRatio = bind.ratio;
+    if (!bind.ok) {
+      throw new BakedAnimLoadError(
+        `Idle bind ${bind.bound}/${bind.total} (${Math.round(bind.ratio * 100)}%, need ≥${Math.round(MIN_CLIP_BIND_RATIO * 100)}%)`,
+        pack,
+        ["idle-bind"],
+      );
     }
   }
 
-  return { pack, clips, pool, sources };
+  if (clips.run) {
+    const sprint = clips.run.clone();
+    sprint.name = "sprint";
+    clips.sprint = sprint;
+    pool.push(sprint);
+  }
+
+  if (missing.length) {
+    throw new BakedAnimLoadError(
+      `Baked locomotion incomplete: missing ${missing.join(", ")}`,
+      pack,
+      missing,
+    );
+  }
+
+  return { pack, clips, pool, sources, idleBindRatio, missing };
 }

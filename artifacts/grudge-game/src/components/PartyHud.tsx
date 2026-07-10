@@ -98,8 +98,12 @@ export function PartyHud({ allies, loadErrors }: PartyHudProps) {
                 a.debug ? (
                   <div key={a.id} className="space-y-0.5 border-t border-white/5 pt-1 first:border-0 first:pt-0">
                     <p className="text-[#c5a059]">{a.name}</p>
-                    <p>anim: {a.debug.animSource} · pack {a.debug.animPack}</p>
+                    <p>
+                      anim: {a.debug.animSource} · pack {a.debug.animPack}
+                      {a.debug.idleBindRatio != null ? ` · bind ${Math.round(a.debug.idleBindRatio * 100)}%` : ""}
+                    </p>
                     <p>clips: {a.debug.clipNames.join(", ") || "—"}</p>
+                    {a.gait != null && <p>gait: {a.gait.toFixed(2)}</p>}
                     <p>h: {a.debug.targetHeight?.toFixed(2) ?? "?"}m · meshes {a.debug.visibleMeshes.length} · bones {a.debug.boneCount}</p>
                     <p>tex slots: {a.debug.texturedSlots} · {a.debug.loadMs}ms</p>
                     {a.debug.errors.length > 0 && (

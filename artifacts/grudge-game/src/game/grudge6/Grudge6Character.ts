@@ -11,6 +11,19 @@ import type { Grudge6HeroDef } from "../../data/grudge6Roster";
 import { animPackForRole, raceAtlasUrl, raceGlbUrl, targetHeightForRace } from "../../data/grudge6Assets";
 import { PlayerAnimator, buildAuthoredClips } from "../PlayerAnimator";
 import { loadBakedPackForAlly } from "./bakedAnimLoader";
+import { Grudge6AllyAnimator } from "./Grudge6AllyAnimator";
+
+/** Shared animator API for party allies (baked gait or authored fallback). */
+export interface AllyAnimatorLike {
+  setMoving(moving: boolean): void;
+  setGaitFromSpeed?(speed01: number, sprint?: boolean): void;
+  setLocoDirection?(dir: "forward" | "back" | "left" | "right"): void;
+  triggerAttack(): void;
+  triggerNamed(candidates: string[]): boolean;
+  update(delta: number): void;
+  dispose(): void;
+  getGait?(): number;
+}
 
 export interface Grudge6PrefabDebug {
   race: RaceId;
@@ -23,6 +36,7 @@ export interface Grudge6PrefabDebug {
   texturedSlots: number;
   clipNames: string[];
   animSource: "baked" | "authored" | "none";
+  idleBindRatio: number | null;
   loadMs: number;
   errors: string[];
 }
@@ -31,7 +45,7 @@ export interface Grudge6Instance {
   id: string;
   def: Grudge6HeroDef;
   group: THREE.Group;
-  animator: PlayerAnimator | null;
+  animator: AllyAnimatorLike | null;
   debug: Grudge6PrefabDebug;
   dispose: () => void;
 }
@@ -211,27 +225,24 @@ async function buildAnimator(
   model: THREE.Object3D,
   def: Grudge6HeroDef,
   debug: Grudge6PrefabDebug,
-): Promise<PlayerAnimator | null> {
+): Promise<AllyAnimatorLike | null> {
   const pack = animPackForRole(def.role);
   debug.animPack = pack;
 
   try {
     const baked = await loadBakedPackForAlly(pack, model);
-    const { idle, run, attack } = baked.clips;
-    if (idle && (run || baked.clips.walk) && attack) {
+    const { idle, walk, run, sprint, attack, walkBack, runBack, strafeLeft, strafeRight } = baked.clips;
+    if (idle && walk && run && sprint && attack) {
       debug.animSource = "baked";
+      debug.idleBindRatio = baked.idleBindRatio;
       debug.clipNames = baked.pool.map((c) => c.name);
-      return new PlayerAnimator(
+      return new Grudge6AllyAnimator(
         model,
-        {
-          idle,
-          walk: run ?? baked.clips.walk,
-          attack,
-        },
+        { idle, walk, run, sprint, attack, walkBack, runBack, strafeLeft, strafeRight },
         baked.pool,
       );
     }
-    debug.errors.push("Baked pack incomplete — missing idle/run/attack");
+    debug.errors.push("Baked pack incomplete — missing idle/walk/run/sprint/attack");
   } catch (err) {
     debug.errors.push(`Baked anim load failed: ${(err as Error).message}`);
   }
@@ -275,6 +286,7 @@ export async function createGrudge6Character(
     texturedSlots: 0,
     clipNames: [],
     animSource: "none",
+    idleBindRatio: null,
     loadMs: 0,
     errors: [],
   };

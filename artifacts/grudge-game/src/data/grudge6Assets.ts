@@ -88,6 +88,49 @@ export const ANIM_PACK_CLIPS: Record<
   },
 };
 
+/** Cardinal locomotion fallbacks per baked pack (4-way). */
+export const BAKED_DIR_RELS: Record<
+  BakedAnimPack,
+  { walkBack: string; runBack: string; strafeLeft: string; strafeRight: string }
+> = {
+  unarmed: {
+    walkBack: "longbow/standing walk back",
+    runBack: "longbow/standing aim walk back",
+    strafeLeft: "locomotion/left strafe walking",
+    strafeRight: "locomotion/right strafe walking",
+  },
+  magic: {
+    walkBack: "longbow/standing walk back",
+    runBack: "longbow/standing aim walk back",
+    strafeLeft: "locomotion/left strafe walking",
+    strafeRight: "locomotion/right strafe walking",
+  },
+  sword_shield: {
+    walkBack: "longbow/standing walk back",
+    runBack: "longbow/standing aim walk back",
+    strafeLeft: "locomotion/left strafe walking",
+    strafeRight: "locomotion/right strafe walking",
+  },
+  longbow: {
+    walkBack: "longbow/standing walk back",
+    runBack: "longbow/standing run back",
+    strafeLeft: "longbow/standing walk left",
+    strafeRight: "longbow/standing walk right",
+  },
+  rifle: {
+    walkBack: "rifle/walk backward",
+    runBack: "rifle/run backward",
+    strafeLeft: "rifle/walk forward",
+    strafeRight: "rifle/walk forward",
+  },
+  pistol: {
+    walkBack: "pistol/pistol walk backward",
+    runBack: "pistol/pistol run backward",
+    strafeLeft: "pistol/pistol strafe",
+    strafeRight: "pistol/pistol strafe",
+  },
+};
+
 /** Extra one-shot clips keyed for triggerNamed(). */
 export const BAKED_SKILL_CLIPS: Record<string, string> = {
   cast: "magic/standing 1h cast spell 01",

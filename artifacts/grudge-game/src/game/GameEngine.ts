@@ -196,6 +196,7 @@ export interface AllyHudSnapshot {
   loadOk: boolean;
   dead: boolean;
   respawnSec: number;
+  gait: number | null;
   debug: Grudge6PrefabDebug | null;
 }
 
@@ -2445,6 +2446,7 @@ export class GameEngine {
         loadOk: !!a.instance.animator && a.instance.debug.texturedSlots > 0,
         dead: a.dead,
         respawnSec: a.dead && a.respawnAt > 0 ? Math.max(0, Math.ceil(a.respawnAt - performance.now() / 1000)) : 0,
+        gait: a.instance.animator?.getGait?.() ?? null,
         debug: a.instance.debug,
       })),
       partyLoadErrors: [...this.partyLoadErrors],
