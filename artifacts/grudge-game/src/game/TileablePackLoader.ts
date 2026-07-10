@@ -164,14 +164,41 @@ function buildFloorGrid(
   const col0 = -((cols - 1) * cell) / 2;
   const row0 = -((rows - 1) * cell) / 2;
 
+  const roads = config.roads;
+  const spokeHalf = roads?.spokeHalfWidth ?? 0.2;
+  const ringRoads = roads?.ringCells ?? [];
+
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       const cx = col - (cols - 1) / 2;
       const cz = row - (rows - 1) / 2;
       const dist = Math.max(Math.abs(cx), Math.abs(cz));
-      const isStone = stoneSrc && dist <= ring && dist > 0;
+      const wx = col0 + col * cell;
+      const wz = row0 + row * cell;
+      const distWorld = Math.hypot(wx, wz);
 
-      p.set(col0 + col * cell, 0, row0 + row * cell);
+      let isRoad = false;
+      if (roads && distWorld > cell * 0.4) {
+        if (roads.crossAxes && (Math.abs(cx) <= 0.55 || Math.abs(cz) <= 0.55)) {
+          isRoad = true;
+        }
+        for (const ringCell of ringRoads) {
+          if (Math.abs(dist - ringCell) < 0.55) isRoad = true;
+        }
+        if (roads.spokeAnglesDeg.length) {
+          const angle = Math.atan2(wz, wx);
+          for (const spokeDeg of roads.spokeAnglesDeg) {
+            const spoke = (spokeDeg * Math.PI) / 180;
+            let diff = Math.abs(angle - spoke);
+            diff = Math.min(diff, Math.PI * 2 - diff);
+            if (diff < spokeHalf && distWorld < half - cell) isRoad = true;
+          }
+        }
+      }
+
+      const isStone = stoneSrc && (isRoad || (dist <= ring && dist > 0));
+
+      p.set(wx, 0, wz);
       m.compose(p, q, s);
 
       if (isStone) {

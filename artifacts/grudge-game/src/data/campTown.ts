@@ -29,6 +29,14 @@ const PERK_COLORS = {
 
 export const CAMP_SCALE = 5;
 export const CAMP_BOUNDS = 90;
+/** Active training-yard scene radius (2× the original 18u yard). */
+export const CAMP_YARD_BOUNDS = 36;
+
+/** Map harbor-scale layout coordinates into the live camp scene bounds. */
+export function campSceneCoord(x: number, z: number, sceneBounds = CAMP_YARD_BOUNDS): { x: number; z: number } {
+  const s = sceneBounds / CAMP_BOUNDS;
+  return { x: x * s, z: z * s };
+}
 /** How close the player must be to see the engage prompt. */
 export const CAMP_STATION_PROXIMITY = 9;
 export const CAMP_BUILDING_PAD = 2.8;
@@ -271,7 +279,7 @@ export const CAMP_FIGHTER_NPCS: CampFighterNpcLayout[] = [
   { fighterId: "hybrid_kaido", skinId: "hybrid_kaido", name: "Kaido", x: -38, z: 72, wanderRadius: 7, faceY: -1.2 },
 ];
 
-/** KayKit ambient NPCs fill out the crowd. */
+/** KayKit ambient NPCs fill out the crowd (harbor-scale). */
 export const CAMP_KAYKIT_NPCS: { x: number; z: number; model: string }[] = [
   { x: -12, z: 28, model: "Knight" },
   { x: 22, z: 24, model: "Mage" },
@@ -281,11 +289,50 @@ export const CAMP_KAYKIT_NPCS: { x: number; z: number; model: string }[] = [
   { x: 8, z: -28, model: "Rogue_Hooded" },
 ];
 
+/** KayKit crowd for the 2× training yard — wanders along cobble roads. */
+export const CAMP_YARD_KAYKIT_NPCS: { x: number; z: number; model: string }[] = [
+  { x: -15, z: -4, model: "Knight" },
+  { x: 13.6, z: -7, model: "Mage" },
+  { x: -10, z: 13, model: "Ranger" },
+  { x: 11, z: 12, model: "Rogue" },
+  { x: 16, z: 4, model: "Barbarian" },
+  { x: -4.8, z: 11.2, model: "Knight" },
+  { x: 8.8, z: 9.6, model: "Mage" },
+  { x: -11.2, z: 7.2, model: "Ranger" },
+  { x: 12.8, z: -3.2, model: "Rogue_Hooded" },
+  { x: -3.2, z: -8.8, model: "Barbarian" },
+  { x: 0, z: -14, model: "Rogue" },
+  { x: 18, z: 0, model: "Knight" },
+  { x: -18, z: 6, model: "Mage" },
+  { x: 6, z: 18, model: "Ranger" },
+  { x: -14, z: -12, model: "Rogue_Hooded" },
+  { x: 14, z: -16, model: "Barbarian" },
+  { x: -6, z: 20, model: "Knight" },
+];
+
+/** A few champion skins strolling the expanded yard (subset — keeps load light). */
+export const CAMP_YARD_FIGHTER_NPCS: CampFighterNpcLayout[] = [
+  { fighterId: "racalvin", skinId: "racalvin", name: "Racalvin", x: 14, z: 2, wanderRadius: 6, faceY: -0.4 },
+  { fighterId: "shanks", skinId: "shanks", name: "Shanks", x: -20, z: -34, wanderRadius: 5 },
+  { fighterId: "law", skinId: "law", name: "Law", x: 26, z: -30, wanderRadius: 4.5 },
+  { fighterId: "koby", skinId: "koby", name: "Koby", x: 18, z: 20, wanderRadius: 6 },
+  { fighterId: "marco", skinId: "marco", name: "Marco", x: -50, z: -14, wanderRadius: 4 },
+  { fighterId: "smoker", skinId: "smoker", name: "Smoker", x: 4, z: 44, wanderRadius: 5 },
+];
+
 export const CAMP_DUMMY_SPOTS: { x: number; z: number; name: string }[] = [
   { x: 46, z: 48, name: "Training Dummy" },
   { x: 54, z: 54, name: "Straw Knight" },
   { x: 48, z: 62, name: "Practice Post" },
   { x: 58, z: 46, name: "Spar Target" },
+];
+
+/** Training dummies beside the central campfire (2× yard). */
+export const CAMP_YARD_DUMMY_SPOTS: { x: number; z: number; name: string }[] = [
+  { x: -6.4, z: 6.8, name: "Training Dummy" },
+  { x: 0, z: 8.4, name: "Straw Knight" },
+  { x: 6.4, z: 6.8, name: "Practice Post" },
+  { x: -4, z: 12, name: "Spar Target" },
 ];
 
 export const CAMP_STATION_BY_ID = new Map(CAMP_STATION_LAYOUTS.map((s) => [s.id, s]));

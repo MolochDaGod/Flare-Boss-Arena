@@ -7,6 +7,7 @@ import {
   type HeroLike,
 } from "./kaykitHero";
 import { Townsperson } from "./Townsfolk";
+import { FighterTownsperson } from "./FighterTownsperson";
 import { SkillVfx } from "./skillVfx";
 import { archetypeForSkill } from "./combat/skillArchetypes";
 import { pointInShape, type ShapeQuery } from "./combat/damageShapes";
@@ -19,13 +20,17 @@ import { CAMP_PROP_PLACEMENTS } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
 import { canDodge } from "./combatInput";
 import {
-  CAMP_BOUNDS,
   CAMP_STATION_BY_ID,
-  campStationMarkers,
+  campSceneCoord,
+  CAMP_YARD_BOUNDS,
+  CAMP_YARD_DUMMY_SPOTS,
+  CAMP_YARD_FIGHTER_NPCS,
+  CAMP_YARD_KAYKIT_NPCS,
   type CampStationCategory,
 } from "../data/campTown";
 import { CAMP_TILEABLE_FLOOR, CAMP_TILEABLE_SCATTER } from "../data/tileablePixelPack";
 import { buildTileableCamp, type TileablePackHandle } from "./TileablePackLoader";
+import { createCampSky, type CampSkyHandle } from "./CampSky";
 
 export type CampStationId =
   | "anvil"
@@ -172,8 +177,10 @@ export class CampScene {
   private campfireMesh!: THREE.Mesh;
   private embers: { mesh: THREE.Mesh; vel: THREE.Vector3; life: number; max: number }[] = [];
 
-  // ── Ambient townsfolk (KayKit heroes, non-targetable) ──
+  // ── Ambient townsfolk (KayKit heroes + champion skins, non-targetable) ──
   private townsfolk: Townsperson[] = [];
+  private fighterNpcs: FighterTownsperson[] = [];
+  private campSky: CampSkyHandle | null = null;
 
   // ── Perk machines, collectable symbols, environment props ──
   private worldProps: LoadedWorldProp[] = [];
@@ -207,9 +214,11 @@ export class CampScene {
   private stateAccum = 0;
   private readonly stateInterval = 1 / 30; // throttle HUD updates to ~30 Hz
 
-  private readonly STATION_RADIUS = 6.2; // engage marker (doorway) distance from centre
-  private readonly BUILDING_RADIUS = 9.2; // building distance from centre
-  private readonly BOUNDS = 18;
+  private readonly STATION_RADIUS = 12.4; // engage marker (doorway) distance from centre
+  private readonly BUILDING_RADIUS = 18.4; // building distance from centre
+  private readonly BOUNDS = CAMP_YARD_BOUNDS;
+  private readonly CAMERA_HALF = 15;
+  private readonly CAM_OFFSET = 22;
 
   private options: CampSceneOptions;
   private _engaged = false;
@@ -231,18 +240,17 @@ export class CampScene {
     const w = container.clientWidth;
     const h = container.clientHeight;
     const aspect = w / h;
-    const d = 11;
+    const d = this.CAMERA_HALF;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x05050a);
-    this.scene.fog = new THREE.FogExp2(0x06060c, 0.025);
+    this.scene.fog = new THREE.FogExp2(0x8eb8e8, 0.006);
     this.skillVfx = new SkillVfx(this.scene, new GLTFLoader());
     this.telegraphs = new TelegraphField(this.scene);
     this.particles = new ParticleVfx(this.scene);
     this.combatVfx = new CombatVfx(this.scene);
 
-    this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 200);
-    this.camera.position.set(18, 18, 18);
+    this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 280);
+    this.camera.position.set(this.CAM_OFFSET, this.CAM_OFFSET, this.CAM_OFFSET);
     this.camera.lookAt(0, 0, 0);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -255,6 +263,7 @@ export class CampScene {
     container.appendChild(this.renderer.domElement);
     this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h);
 
+    this.campSky = createCampSky({ scene: this.scene, renderer: this.renderer });
     this.buildEnvironment();
     this.buildTileableWorld();
     this.buildStations();
@@ -275,12 +284,6 @@ export class CampScene {
   }
 
   private buildEnvironment() {
-    const moon = new THREE.HemisphereLight(0x6a78a8, 0x0a0a14, 0.45);
-    this.scene.add(moon);
-    const moonDir = new THREE.DirectionalLight(0x8caaff, 0.35);
-    moonDir.position.set(-15, 20, -10);
-    this.scene.add(moonDir);
-
     // Dark underlay — visible until the tileable floor grid streams in.
     const floorGeom = new THREE.CircleGeometry(this.BOUNDS, 64);
     const floorMat = new THREE.MeshStandardMaterial({
@@ -340,7 +343,7 @@ export class CampScene {
     this.scene.add(inner);
     (this.campfireMesh.userData as { inner: THREE.Mesh }).inner = inner;
 
-    this.campfireLight = new THREE.PointLight(0xff9c44, 6, 18, 1.8);
+    this.campfireLight = new THREE.PointLight(0xff9c44, 6, 28, 1.8);
     this.campfireLight.position.set(0, 1.4, 0);
     this.campfireLight.castShadow = true;
     this.scene.add(this.campfireLight);
@@ -348,12 +351,9 @@ export class CampScene {
 
   // ── Training dummies ──────────────────────────────────────────────────────
   private buildDummies() {
-    const spots: { x: number; z: number; name: string }[] = [
-      { x: -3.2, z: 3.4, name: "Training Dummy" },
-      { x: 0, z: 4.2, name: "Straw Knight" },
-      { x: 3.2, z: 3.4, name: "Practice Post" },
-    ];
-    spots.forEach((s, i) => this.dummies.push(this.makeDummy(`dummy_${i}`, s.name, s.x, s.z)));
+    CAMP_YARD_DUMMY_SPOTS.forEach((s, i) =>
+      this.dummies.push(this.makeDummy(`dummy_${i}`, s.name, s.x, s.z)),
+    );
   }
 
   // ── Ambient townsfolk ─────────────────────────────────────────────────────
@@ -361,22 +361,27 @@ export class CampScene {
    *  wander. They carry no `enemyId`, so they can never be targeted or hit. */
   private buildTownsfolk() {
     const loader = new GLTFLoader();
-    const anchors: { x: number; z: number; model?: string }[] = [
-      { x: -7.5, z: -2.0, model: "Knight" },
-      { x: 6.8, z: -3.5, model: "Mage" },
-      { x: -5.0, z: 6.5, model: "Ranger" },
-      { x: 5.5, z: 6.0, model: "Rogue" },
-      { x: 8.0, z: 2.0, model: "Barbarian" },
-    ];
-    for (const a of anchors) {
+    for (const a of CAMP_YARD_KAYKIT_NPCS) {
       const t = new Townsperson(loader, {
         home: new THREE.Vector3(a.x, 0, a.z),
         model: a.model,
         height: 1.8,
-        wanderRadius: 2.6,
+        wanderRadius: 5 + Math.random() * 2,
+        speed: 1.0 + Math.random() * 0.25,
       });
       this.scene.add(t.group);
       this.townsfolk.push(t);
+    }
+    for (const f of CAMP_YARD_FIGHTER_NPCS) {
+      const pos = campSceneCoord(f.x, f.z, this.BOUNDS);
+      const npc = new FighterTownsperson(loader, {
+        skinId: f.skinId,
+        home: new THREE.Vector3(pos.x, 0, pos.z),
+        wanderRadius: ((f.wanderRadius ?? 5) * this.BOUNDS) / 90,
+        faceY: f.faceY,
+      });
+      this.scene.add(npc.group);
+      this.fighterNpcs.push(npc);
     }
   }
 
@@ -548,15 +553,16 @@ export class CampScene {
   /** Perk machines, gumball, weapon panel, trenches — from `worldProps` catalog. */
   private buildWorldProps() {
     for (const place of CAMP_PROP_PLACEMENTS) {
+      const pos = campSceneCoord(place.x, place.z, this.BOUNDS);
       const loaded = loadWorldProp(place.propId, this.propLoader, {
-        position: new THREE.Vector3(place.x, 0, place.z),
+        position: new THREE.Vector3(pos.x, 0, pos.z),
         rotationY: place.rotY,
       });
       this.scene.add(loaded.holder);
       this.worldProps.push(loaded);
 
       if (place.stationId && place.label && place.hint && place.color != null) {
-        this.addStationAt(place.x, place.z, {
+        this.addStationAt(pos.x, pos.z, {
           id: place.stationId as CampStationId,
           label: place.label,
           hint: place.hint,
@@ -1183,7 +1189,10 @@ export class CampScene {
     this.telegraphs?.update(delta);
     this.particles?.update(delta);
 
+    this.campSky?.update(elapsed, this.playerPos);
+
     for (const t of this.townsfolk) t.update(delta);
+    for (const f of this.fighterNpcs) f.update(delta);
 
     // Dummies: hit-flash decay, death tip-over + respawn.
     for (const d of this.dummies) {
@@ -1235,7 +1244,7 @@ export class CampScene {
     }
 
     // Camera follow (gentle)
-    const camOffset = new THREE.Vector3(18, 18, 18);
+    const camOffset = new THREE.Vector3(this.CAM_OFFSET, this.CAM_OFFSET, this.CAM_OFFSET);
     const camTarget = new THREE.Vector3(this.playerPos.x * 0.4, 0, this.playerPos.z * 0.4).add(camOffset);
     this.camera.position.lerp(camTarget, 0.04);
     this.camera.lookAt(this.playerPos.x * 0.4, 0, this.playerPos.z * 0.4);
@@ -1250,9 +1259,11 @@ export class CampScene {
       }
     }
 
-    // Campfire flicker
+    // Campfire flicker — brighter at night
     if (this.campfireLight) {
-      this.campfireLight.intensity = 5.2 + Math.sin(elapsed * 6.3) * 0.7 + Math.sin(elapsed * 17) * 0.35;
+      const night = this.campSky && (this.campSky.phase > 0.62 || this.campSky.phase < 0.12) ? 1.55 : 1;
+      this.campfireLight.intensity =
+        night * (5.2 + Math.sin(elapsed * 6.3) * 0.7 + Math.sin(elapsed * 17) * 0.35);
     }
     if (this.campfireMesh) {
       const s = 1 + Math.sin(elapsed * 7.1) * 0.06;
@@ -1300,7 +1311,7 @@ export class CampScene {
       const pulse = 0.45 + 0.2 * Math.sin(elapsed * 2.5 + st.position.x * 0.3);
       if (ring) (ring.material as THREE.MeshBasicMaterial).opacity = pulse;
       st.glow.intensity = 1.0 + 0.5 * Math.sin(elapsed * 3 + st.position.z * 0.2);
-      if (d < 3.4 && (!closest || d < closest.d)) closest = { st, d };
+      if (d < 4.8 && (!closest || d < closest.d)) closest = { st, d };
     }
 
     const newNearbyId = closest?.st.id ?? null;
@@ -1329,7 +1340,7 @@ export class CampScene {
     if (this.disposed || !this.options.onStateUpdate) return;
     const st = this.stations.find((s) => s.id === this.currentNearbyId) ?? null;
     const layout = this.currentNearbyId ? CAMP_STATION_BY_ID.get(this.currentNearbyId) : undefined;
-    const bounds = CAMP_BOUNDS;
+    const bounds = this.BOUNDS;
     const now = performance.now();
     this.options.onStateUpdate({
       nearbyStationId: this.currentNearbyId,
@@ -1340,13 +1351,16 @@ export class CampScene {
       nearbyStationAction: layout?.action ?? null,
       playerMapX: bounds > 0 ? this.playerPos.x / bounds : 0,
       playerMapZ: bounds > 0 ? this.playerPos.z / bounds : 0,
-      mapMarkers: campStationMarkers().map((m) => ({
-        id: m.id,
-        nx: bounds > 0 ? m.x / bounds : 0,
-        nz: bounds > 0 ? m.z / bounds : 0,
-        color: m.color,
-        category: m.category,
-      })),
+      mapMarkers: this.stations.map((s) => {
+        const meta = CAMP_STATION_BY_ID.get(s.id);
+        return {
+          id: s.id,
+          nx: bounds > 0 ? s.position.x / bounds : 0,
+          nz: bounds > 0 ? s.position.z / bounds : 0,
+          color: s.color,
+          category: meta?.category ?? ("service" as CampStationCategory),
+        };
+      }),
       promptKey: "E",
       loaded: this.loaded,
       playerHp: this.playerHp,
@@ -1382,7 +1396,7 @@ export class CampScene {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
     const aspect = w / h;
-    const d = 11;
+    const d = this.CAMERA_HALF;
     this.camera.left = -d * aspect;
     this.camera.right = d * aspect;
     this.camera.top = d;
@@ -1413,11 +1427,18 @@ export class CampScene {
     this.combatVfx?.dispose();
     this.telegraphs?.dispose();
     this.particles?.dispose();
+    this.campSky?.dispose();
+    this.campSky = null;
     for (const t of this.townsfolk) {
       this.scene.remove(t.group);
       t.dispose();
     }
     this.townsfolk = [];
+    for (const f of this.fighterNpcs) {
+      this.scene.remove(f.group);
+      f.dispose();
+    }
+    this.fighterNpcs = [];
     for (const wp of this.worldProps) {
       this.scene.remove(wp.holder);
       disposeWorldProp(wp);
