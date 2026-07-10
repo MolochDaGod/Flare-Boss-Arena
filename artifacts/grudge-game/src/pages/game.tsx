@@ -15,6 +15,7 @@ import { BarGauge, OrbGauge, Separator, WarningBanner } from "@/components/Craft
 import loadingSpinner from "@assets/grudgestudio_1782639192041.gif";
 import { bootArmadaEngine } from "@/data/armadaEngine";
 import { IslandBeatOverlay } from "@/components/IslandBeatOverlay";
+import { FogMinimap } from "@/components/FogMinimap";
 import { PERKS } from "@/data/perks";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
@@ -580,6 +581,28 @@ function Game() {
               <p className="text-lg font-mono text-[#c5a059]">↗ {Math.round(gameState.coveBearing)}°</p>
             </div>
           )}
+          {gameState.shrineBuffActive && (
+            <div className="rounded border border-amber-500/40 bg-amber-950/40 px-2.5 py-1 text-[9px] font-serif text-amber-200 uppercase tracking-widest text-center">
+              Shrine Blessing
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Fog-of-war minimap */}
+      {gameState?.fogMinimap && gameState.loaded && (
+        <div className="absolute bottom-24 right-4 z-10 pointer-events-none">
+          <FogMinimap snapshot={gameState.fogMinimap} exploredPct={gameState.exploredPct} />
+        </div>
+      )}
+
+      {/* Active island event ticker */}
+      {gameState?.activeEvent && !gameState.beat && (
+        <div className="absolute top-28 left-1/2 -translate-x-1/2 z-10 pointer-events-none max-w-sm">
+          <div className="rounded border border-amber-500/35 bg-black/70 backdrop-blur-sm px-4 py-2 text-center">
+            <p className="text-[10px] font-serif uppercase tracking-widest text-amber-200">{gameState.activeEvent.title}</p>
+            <p className="text-[9px] text-muted-foreground mt-0.5">{gameState.activeEvent.description}</p>
+          </div>
         </div>
       )}
 
@@ -664,6 +687,7 @@ function Game() {
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">1–5 — Skills</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">E — Cove interact (vendor / sail)</p>
               <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Left Click Ground — Move To</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Fog reveals as you explore — follow cobble roads</p>
             </div>
           </motion.div>
         )}

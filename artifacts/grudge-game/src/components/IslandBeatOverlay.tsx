@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Anchor, Skull, Swords, Trophy } from "lucide-react";
+import { Anchor, Skull, Sparkles, Swords, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { GameBeat } from "@/game/GameEngine";
 
@@ -96,6 +96,15 @@ export function IslandBeatOverlay({
                     Loot the Cove
                   </Button>
                 </div>
+              </>
+            ) : beat?.kind === "island_event" ? (
+              <>
+                <Sparkles className="mx-auto h-9 w-9 mb-3 text-amber-300" />
+                <h2 className="font-serif text-xl uppercase tracking-widest text-amber-200">{beat.title}</h2>
+                <p className="mt-2 text-sm text-muted-foreground">{beat.subtitle}</p>
+                <Button variant="outline" className="mt-5 font-serif tracking-widest border-amber-500/40" onClick={onDismiss}>
+                  Press On
+                </Button>
               </>
             ) : beat?.kind === "sail" ? (
               <>

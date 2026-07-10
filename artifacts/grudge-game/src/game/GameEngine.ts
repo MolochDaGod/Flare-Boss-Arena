@@ -61,6 +61,9 @@ import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import { FX2D } from "./FX2D";
 import { DUNGEON_COLLECTABLES } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
+import { FogOfWar, type FogMinimapSnapshot } from "./FogOfWar";
+import { generateIslandPaths, type IslandPathMap } from "./IslandPathMap";
+import type { ActiveIslandEvent } from "../data/islandEvents";
 
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
 
@@ -131,7 +134,8 @@ export type GameBeatKind =
   | "boss_defeated"
   | "victory"
   | "sail"
-  | "mission_complete";
+  | "mission_complete"
+  | "island_event";
 
 export interface GameBeat {
   kind: GameBeatKind;
@@ -169,6 +173,10 @@ export interface GameState {
   stone: number;
   partyNames: string[];
   coveBearing: number | null;
+  fogMinimap: FogMinimapSnapshot | null;
+  activeEvent: ActiveIslandEvent | null;
+  shrineBuffActive: boolean;
+  exploredPct: number;
 }
 
 export interface PlayerInitStats {
@@ -282,6 +290,11 @@ export class GameEngine {
   private coveLabel: THREE.Sprite | null = null;
   private coveCenter = new THREE.Vector3(70, 0, -14);
   private runDirector = new RunDirector();
+  private fogOfWar: FogOfWar | null = null;
+  private pathMap: IslandPathMap | null = null;
+  private pathGroup: THREE.Group | null = null;
+  private activeIslandEvent: ActiveIslandEvent | null = null;
+  private fogSaveAccum = 0;
   private nearbyInteract: string | null = null;
   private bossSpawnTimer = 0;
   private disposed = false;
@@ -384,9 +397,21 @@ export class GameEngine {
     // Noise-displaced terrain ringing the flat arena — rolling foothills rising
     // into a distant mountain ridge. The inner `D` half stays flat so all
     // gameplay (player + enemies clamp to ±(D-1)) keeps walking on y≈0.
+    this.pathMap = generateIslandPaths(this.runDirector.run.seed, D);
     const terrain = makeTerrainSkirt(D);
+    this.pathMap.flattenTerrain(terrain);
     this.scene.add(terrain);
     this.terrainMesh = terrain;
+
+    this.pathGroup = this.pathMap.buildVisual(aniso);
+    this.scene.add(this.pathGroup);
+
+    this.fogOfWar = new FogOfWar(this.scene, D);
+    if (this.runDirector.run.exploredCells?.length) {
+      this.fogOfWar.loadExplored(this.runDirector.run.exploredCells);
+    }
+    this.fogOfWar.revealAt(0, 0, 16);
+    this.fogOfWar.revealAt(this.coveCenter.x, this.coveCenter.z, 12);
 
     // Hundreds of scattered rocks in a single InstancedMesh draw call (fills
     // the now-much-larger map without tanking performance).
@@ -853,17 +878,25 @@ export class GameEngine {
       configs.push({ template: extra.template, count: bonus });
     }
 
+    const rng = () => Math.random();
     for (const { template, count } of configs) {
       for (let i = 0; i < count; i++) {
         const D = this.DUNGEON - 3;
-        let x = 0, z = 0;
-        let attempts = 0;
-        do {
-          x = (Math.random() * 2 - 1) * D;
-          z = (Math.random() * 2 - 1) * D;
-          attempts++;
-        } while (Math.sqrt(x * x + z * z) < 6 && attempts < 20);
-        this.createEnemy(template, new THREE.Vector3(x, 0, z));
+        let pos: THREE.Vector3;
+        if (this.pathMap && Math.random() < 0.72) {
+          pos = this.pathMap.sampleSpawnPoint(rng);
+        } else {
+          let x = 0;
+          let z = 0;
+          let attempts = 0;
+          do {
+            x = (Math.random() * 2 - 1) * D;
+            z = (Math.random() * 2 - 1) * D;
+            attempts++;
+          } while (Math.sqrt(x * x + z * z) < 6 && attempts < 20);
+          pos = new THREE.Vector3(x, 0, z);
+        }
+        this.createEnemy(template, pos);
       }
     }
   }
@@ -1544,8 +1577,64 @@ export class GameEngine {
         subtitle: `New seed ${ev.seed.toString(16).slice(0, 6)} — hostiles scale harder.`,
       };
       this.log(`Sailing to Island Round ${ev.round}…`);
+    } else if (ev.type === "island_event") {
+      this.activeIslandEvent = ev.event;
+      this.beatOverlay = {
+        kind: "island_event",
+        title: ev.event.title,
+        subtitle: ev.event.description,
+      };
+      this.log(`Event: ${ev.event.title}`);
+      this.applyIslandEvent(ev.event);
     }
     this.notifyState();
+  }
+
+  private applyIslandEvent(ev: ActiveIslandEvent) {
+    switch (ev.kind) {
+      case "supply_cache":
+        addResource("wood", 12 + this.runDirector.run.round * 2);
+        addResource("stone", 8 + this.runDirector.run.round);
+        this.playerMana = Math.min(this.playerMaxMana, this.playerMana + this.playerMaxMana * 0.35);
+        break;
+      case "ambush_wave": {
+        const count = ev.charges ?? 3;
+        for (let i = 0; i < count; i++) {
+          const t = this.enemyTemplates[Math.floor(Math.random() * this.enemyTemplates.length)];
+          if (!t) break;
+          const off = new THREE.Vector3(ev.x + (Math.random() - 0.5) * 8, 0, ev.z + (Math.random() - 0.5) * 8);
+          this.clampToArena(off);
+          this.createEnemy(t, off);
+        }
+        break;
+      }
+      case "shrine_buff":
+        this.runDirector.applyShrineBuff(45);
+        this.playerHp = Math.min(this.playerMaxHp, this.playerHp + this.playerMaxHp * 0.25);
+        break;
+      case "merchant_visit": {
+        const r = vendorQuickTrade();
+        this.log(r.message);
+        break;
+      }
+      case "storm_front":
+        if (this.scene.fog) (this.scene.fog as THREE.FogExp2).density = 0.016;
+        break;
+      case "relic_find":
+        this.playerXp += 80 + this.runDirector.run.round * 20;
+        this.log("The relic whispers of islands yet to chart…");
+        break;
+      case "patrol_elite": {
+        const elite = [...this.enemyTemplates].sort((a, b) => b.tier - a.tier)[0];
+        if (elite) {
+          const pos = new THREE.Vector3(ev.x, 0, ev.z);
+          this.clampToArena(pos);
+          this.createEnemy({ ...elite, tier: Math.min(8, elite.tier + 1) }, pos);
+        }
+        break;
+      }
+    }
+    this.runDirector.clearActiveEvent();
   }
 
   private spawnIslandBoss(bossId: string) {
@@ -1573,6 +1662,35 @@ export class GameEngine {
     this.hoveredEnemy = null;
   }
 
+  private rebuildIslandLayout() {
+    if (this.pathGroup) {
+      this.scene.remove(this.pathGroup);
+      this.pathGroup.traverse((c) => {
+        const m = c as THREE.Mesh;
+        if (!m.isMesh) return;
+        m.geometry?.dispose();
+        const mats = Array.isArray(m.material) ? m.material : [m.material];
+        for (const mat of mats) mat?.dispose();
+      });
+      this.pathGroup = null;
+    }
+    if (this.fogOfWar) {
+      this.fogOfWar.dispose();
+      this.fogOfWar = null;
+    }
+    this.pathMap = generateIslandPaths(this.runDirector.run.seed, this.DUNGEON);
+    if (this.terrainMesh) {
+      this.pathMap.flattenTerrain(this.terrainMesh);
+    }
+    const aniso = this.renderer.capabilities.getMaxAnisotropy();
+    this.pathGroup = this.pathMap.buildVisual(aniso);
+    this.scene.add(this.pathGroup);
+    this.fogOfWar = new FogOfWar(this.scene, this.DUNGEON);
+    this.fogOfWar.revealAt(0, 0, 16);
+    this.fogOfWar.revealAt(this.coveCenter.x, this.coveCenter.z, 12);
+    if (this.scene.fog) (this.scene.fog as THREE.FogExp2).density = 0.009;
+  }
+
   private rebuildHarvestField() {
     if (this.harvestField) {
       this.scene.remove(this.harvestField.root);
@@ -1596,6 +1714,8 @@ export class GameEngine {
     this.clearHostileEnemies();
     this.bossSpawnTimer = 0;
     this.beatOverlay = null;
+    this.activeIslandEvent = null;
+    this.rebuildIslandLayout();
     this.rebuildHarvestField();
     this.spawnInitialEnemies();
     this.playerHp = Math.min(this.playerMaxHp, this.playerHp + this.playerMaxHp * 0.35);
@@ -1706,6 +1826,7 @@ export class GameEngine {
 
   dismissBeat() {
     this.beatOverlay = null;
+    this.activeIslandEvent = null;
     this.notifyState();
   }
 
@@ -1948,7 +2069,21 @@ export class GameEngine {
 
     if (!this.playerDead && this.playerHp < this.playerMaxHp) {
       const mods = getActivePerkMods();
-      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + delta * (6 + mods.regenPerSec));
+      const shrine = this.runDirector.hasShrineBuff() ? 4 : 0;
+      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + delta * (6 + mods.regenPerSec + shrine));
+    }
+
+    if (this.fogOfWar) {
+      const sources = [{ x: this.playerPos.x, z: this.playerPos.z, radius: 15 }];
+      for (const a of this.allies) {
+        sources.push({ x: a.pos.x, z: a.pos.z, radius: 9 });
+      }
+      this.fogOfWar.update(sources);
+      this.fogSaveAccum += delta;
+      if (this.fogSaveAccum > 2) {
+        this.fogSaveAccum = 0;
+        this.runDirector.setExploredCells(this.fogOfWar.exportExplored());
+      }
     }
 
     this.notifyState();
@@ -2144,6 +2279,14 @@ export class GameEngine {
       stone: getResources().stone,
       partyNames: this.allies.map((a) => a.instance.def.displayName),
       coveBearing: this.computeCoveBearing(),
+      fogMinimap: this.fogOfWar
+        ? this.fogOfWar.getMinimap(this.playerPos.x, this.playerPos.z, this.coveCenter.x, this.coveCenter.z)
+        : null,
+      activeEvent: this.activeIslandEvent,
+      shrineBuffActive: this.runDirector.hasShrineBuff(),
+      exploredPct: this.fogOfWar
+        ? Math.round((this.fogOfWar.exploredCount() / (this.fogOfWar.gridW * this.fogOfWar.gridH)) * 100)
+        : 0,
     });
   }
 
@@ -2205,6 +2348,19 @@ export class GameEngine {
       gm.map?.dispose();
       gm.bumpMap?.dispose();
       gm.dispose();
+    }
+    this.fogOfWar?.dispose();
+    this.fogOfWar = null;
+    if (this.pathGroup) {
+      this.scene.remove(this.pathGroup);
+      this.pathGroup.traverse((c) => {
+        const m = c as THREE.Mesh;
+        if (!m.isMesh) return;
+        m.geometry?.dispose();
+        const mats = Array.isArray(m.material) ? m.material : [m.material];
+        for (const mat of mats) mat?.dispose();
+      });
+      this.pathGroup = null;
     }
     if (this.terrainMesh) {
       this.terrainMesh.geometry.dispose();

@@ -12,6 +12,16 @@ export interface IslandRun {
   killsThisRound: number;
   bossId: string | null;
   bossDefeated: boolean;
+  /** Sparse fog-of-war explored cell indices (persisted between sessions). */
+  exploredCells?: number[];
+  /** Active random island event id from {@link ISLAND_EVENT_DEFS}. */
+  activeEventId?: string | null;
+  /** Kills since the last event roll. */
+  killsSinceEvent?: number;
+  /** How many events have fired this round. */
+  eventsThisRound?: number;
+  /** Temporary buff flags from shrine/relic events. */
+  shrineBuffUntil?: number;
 }
 
 const STORAGE_KEY = "flare:island-run";
@@ -28,6 +38,11 @@ export function createFreshRun(seed = defaultSeed()): IslandRun {
     killsThisRound: 0,
     bossId: null,
     bossDefeated: false,
+    exploredCells: [],
+    activeEventId: null,
+    killsSinceEvent: 0,
+    eventsThisRound: 0,
+    shrineBuffUntil: 0,
   };
 }
 
@@ -44,6 +59,11 @@ export function loadIslandRun(): IslandRun {
       killsThisRound: Math.max(0, Number(parsed.killsThisRound) || 0),
       bossId: parsed.bossId ?? null,
       bossDefeated: Boolean(parsed.bossDefeated),
+      exploredCells: Array.isArray(parsed.exploredCells) ? parsed.exploredCells.map(Number) : [],
+      activeEventId: parsed.activeEventId ?? null,
+      killsSinceEvent: Math.max(0, Number(parsed.killsSinceEvent) || 0),
+      eventsThisRound: Math.max(0, Number(parsed.eventsThisRound) || 0),
+      shrineBuffUntil: Number(parsed.shrineBuffUntil) || 0,
     };
   } catch {
     return createFreshRun();

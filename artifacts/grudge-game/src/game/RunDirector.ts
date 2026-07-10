@@ -10,12 +10,18 @@ import {
 } from "@/data/islandRun";
 import { missionForRound, type RoundMission } from "@/data/missions";
 import { pickDungeonBossId } from "@/data/bossMonsters";
+import {
+  eventRollInterval,
+  rollIslandEvent,
+  type ActiveIslandEvent,
+} from "@/data/islandEvents";
 
 export type RunEvent =
   | { type: "mission_progress"; kills: number; goal: number }
   | { type: "boss_alert"; bossId: string }
   | { type: "boss_defeated" }
-  | { type: "sail"; round: number; seed: number };
+  | { type: "sail"; round: number; seed: number }
+  | { type: "island_event"; event: ActiveIslandEvent };
 
 export class RunDirector {
   run: IslandRun;
@@ -62,12 +68,35 @@ export class RunDirector {
     }
 
     this.run.killsThisRound += 1;
+    this.run.killsSinceEvent = (this.run.killsSinceEvent ?? 0) + 1;
     saveIslandRun(this.run);
     events.push({
       type: "mission_progress",
       kills: this.run.killsThisRound,
       goal: this.mission.killGoal,
     });
+
+    const interval = eventRollInterval(this.run.round);
+    const maxEvents = 2 + Math.floor(this.run.round / 2);
+    if (
+      !this.run.activeEventId &&
+      (this.run.eventsThisRound ?? 0) < maxEvents &&
+      (this.run.killsSinceEvent ?? 0) >= interval
+    ) {
+      const ev = rollIslandEvent(
+        this.run.seed,
+        this.run.round,
+        this.run.killsThisRound,
+        this.run.eventsThisRound ?? 0,
+      );
+      if (ev) {
+        this.run.activeEventId = ev.defId;
+        this.run.killsSinceEvent = 0;
+        this.run.eventsThisRound = (this.run.eventsThisRound ?? 0) + 1;
+        saveIslandRun(this.run);
+        events.push({ type: "island_event", event: ev });
+      }
+    }
 
     if (this.run.killsThisRound >= this.mission.killGoal && !this.run.bossId) {
       const bossId = pickDungeonBossId(this.run.seed, this.run.round);
@@ -100,6 +129,11 @@ export class RunDirector {
       killsThisRound: 0,
       bossId: null,
       bossDefeated: false,
+      exploredCells: [],
+      activeEventId: null,
+      killsSinceEvent: 0,
+      eventsThisRound: 0,
+      shrineBuffUntil: 0,
     };
     this.mission = missionForRound(this.run.round);
     saveIslandRun(this.run);
@@ -110,5 +144,24 @@ export class RunDirector {
     this.run = createFreshRun();
     this.mission = missionForRound(this.run.round);
     saveIslandRun(this.run);
+  }
+
+  clearActiveEvent(): void {
+    this.run.activeEventId = null;
+    saveIslandRun(this.run);
+  }
+
+  setExploredCells(cells: number[]): void {
+    this.run.exploredCells = cells;
+    saveIslandRun(this.run);
+  }
+
+  applyShrineBuff(durationSec: number): void {
+    this.run.shrineBuffUntil = Date.now() + durationSec * 1000;
+    saveIslandRun(this.run);
+  }
+
+  hasShrineBuff(): boolean {
+    return (this.run.shrineBuffUntil ?? 0) > Date.now();
   }
 }
