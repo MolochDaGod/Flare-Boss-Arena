@@ -16,6 +16,7 @@ import loadingSpinner from "@assets/grudgestudio_1782639192041.gif";
 import { bootArmadaEngine } from "@/data/armadaEngine";
 import { IslandBeatOverlay } from "@/components/IslandBeatOverlay";
 import { FogMinimap } from "@/components/FogMinimap";
+import { PartyHud } from "@/components/PartyHud";
 import { PERKS } from "@/data/perks";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
@@ -543,36 +544,35 @@ function Game() {
 
       {/* Build identity — perks, party, resources */}
       {gameState && gameState.loaded && (
-        <div className="absolute top-14 left-4 z-10 pointer-events-none space-y-2 max-w-[11rem]">
-          {(gameState.activePerkIds.length > 0 || gameState.partyNames.length > 0) && (
-            <div className="rounded border border-white/10 bg-black/65 backdrop-blur-sm px-2.5 py-2 space-y-1.5">
-              {gameState.activePerkIds.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {gameState.activePerkIds.map((id) => {
-                    const p = PERKS.find((x) => x.id === id);
-                    return (
-                      <span
-                        key={id}
-                        className="text-[8px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border"
-                        style={{
-                          borderColor: `#${(p?.color ?? 0xc5a059).toString(16).padStart(6, "0").slice(0, 6)}55`,
-                          color: `#${(p?.color ?? 0xc5a059).toString(16).padStart(6, "0").slice(0, 6)}`,
-                        }}
-                      >
-                        {p?.name ?? id}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-              {gameState.partyNames.length > 0 && (
-                <p className="text-[9px] font-serif text-muted-foreground">
-                  Party: {gameState.partyNames.join(", ")}
-                </p>
-              )}
+        <div className="absolute top-14 left-4 z-10 space-y-2 max-w-[11rem]">
+          {gameState.activePerkIds.length > 0 && (
+            <div className="rounded border border-white/10 bg-black/65 backdrop-blur-sm px-2.5 py-2 pointer-events-none">
+              <div className="flex flex-wrap gap-1">
+                {gameState.activePerkIds.map((id) => {
+                  const p = PERKS.find((x) => x.id === id);
+                  return (
+                    <span
+                      key={id}
+                      className="text-[8px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border"
+                      style={{
+                        borderColor: `#${(p?.color ?? 0xc5a059).toString(16).padStart(6, "0").slice(0, 6)}55`,
+                        color: `#${(p?.color ?? 0xc5a059).toString(16).padStart(6, "0").slice(0, 6)}`,
+                      }}
+                    >
+                      {p?.name ?? id}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           )}
-          <div className="rounded border border-white/10 bg-black/55 px-2.5 py-1.5 text-[9px] font-mono text-muted-foreground">
+          {(gameState.partyAllies?.length > 0 || gameState.partyLoadErrors?.length > 0) && (
+            <PartyHud
+              allies={gameState.partyAllies ?? []}
+              loadErrors={gameState.partyLoadErrors ?? []}
+            />
+          )}
+          <div className="rounded border border-white/10 bg-black/55 px-2.5 py-1.5 text-[9px] font-mono text-muted-foreground pointer-events-none">
             Wood {gameState.wood} · Stone {gameState.stone}
           </div>
           {gameState.coveBearing != null && (

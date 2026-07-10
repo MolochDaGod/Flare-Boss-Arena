@@ -23,7 +23,8 @@ import {
 } from "./Harvestables";
 import type { RockFieldResult } from "./proceduralTextures";
 import { SlashWaveField } from "./combat/slashVfx";
-import { Grudge6Factory } from "./grudge6/Grudge6Character";
+import { Grudge6Factory, type Grudge6PrefabDebug } from "./grudge6/Grudge6Character";
+import type { AllyState } from "./grudge6/AllyBrain";
 import { getGrudge6Hero, getPartyAllyIds } from "../data/grudge6Roster";
 import {
   createAllyAgent,
@@ -172,11 +173,26 @@ export interface GameState {
   wood: number;
   stone: number;
   partyNames: string[];
+  partyAllies: AllyHudSnapshot[];
+  partyLoadErrors: string[];
   coveBearing: number | null;
   fogMinimap: FogMinimapSnapshot | null;
   activeEvent: ActiveIslandEvent | null;
   shrineBuffActive: boolean;
   exploredPct: number;
+}
+
+export interface AllyHudSnapshot {
+  id: string;
+  name: string;
+  role: string;
+  race: string;
+  hp: number;
+  maxHp: number;
+  state: AllyState;
+  brain: string;
+  loadOk: boolean;
+  debug: Grudge6PrefabDebug | null;
 }
 
 export interface PlayerInitStats {
@@ -276,6 +292,7 @@ export class GameEngine {
   private harvestField: HarvestField | null = null;
   private slashWaves: SlashWaveField | null = null;
   private allies: AllyAgent[] = [];
+  private partyLoadErrors: string[] = [];
   private grudge6Factory = new Grudge6Factory();
   private beatOverlay: GameBeat | null = null;
   private playerDead = false;
@@ -805,23 +822,38 @@ export class GameEngine {
   }
 
   private async spawnPartyAllies() {
+    this.partyLoadErrors = [];
     const ids = getPartyAllyIds();
     for (let i = 0; i < ids.length; i++) {
       const def = getGrudge6Hero(ids[i]!);
-      if (!def) continue;
+      if (!def) {
+        this.partyLoadErrors.push(`Unknown hero id: ${ids[i]}`);
+        continue;
+      }
       try {
         const inst = await this.grudge6Factory.create(def, 1.75);
+        if (!inst.animator) {
+          this.partyLoadErrors.push(`${def.displayName}: no animator (${inst.debug.animSource})`);
+        }
+        if (inst.debug.texturedSlots === 0) {
+          this.partyLoadErrors.push(`${def.displayName}: untextured (${inst.debug.errors.join(", ") || "atlas missing"})`);
+        }
         const agent = createAllyAgent(inst, i);
         agent.pos.copy(this.playerPos).add(new THREE.Vector3(i === 0 ? -2 : 2, 0, -1.5));
         inst.group.position.copy(agent.pos);
         this.scene.add(inst.group);
         this.allies.push(agent);
-      } catch {
-        /* CDN race GLB may fail offline — skip ally */
+        const src = inst.debug.animSource;
+        const tex = inst.debug.texturedSlots;
+        this.log(`${def.displayName} deployed — ${src} anim, ${tex} tex slots, ${inst.debug.visibleMeshes.length} meshes`);
+      } catch (err) {
+        const msg = `${def.displayName}: ${(err as Error).message || "load failed"}`;
+        this.partyLoadErrors.push(msg);
+        this.log(msg);
       }
     }
-    if (this.allies.length) {
-      this.log(`${this.allies.length} party ally/allies deployed.`);
+    if (this.allies.length || this.partyLoadErrors.length) {
+      if (this.allies.length) this.log(`${this.allies.length} party ally/allies deployed.`);
       this.notifyState();
     }
   }
@@ -2278,6 +2310,19 @@ export class GameEngine {
       wood: getResources().wood,
       stone: getResources().stone,
       partyNames: this.allies.map((a) => a.instance.def.displayName),
+      partyAllies: this.allies.map((a) => ({
+        id: a.instance.id,
+        name: a.instance.def.displayName,
+        role: a.instance.def.role,
+        race: a.instance.def.race,
+        hp: Math.round(a.hp),
+        maxHp: a.maxHp,
+        state: a.state,
+        brain: a.instance.def.brain,
+        loadOk: !!a.instance.animator && a.instance.debug.texturedSlots > 0,
+        debug: a.instance.debug,
+      })),
+      partyLoadErrors: [...this.partyLoadErrors],
       coveBearing: this.computeCoveBearing(),
       fogMinimap: this.fogOfWar
         ? this.fogOfWar.getMinimap(this.playerPos.x, this.playerPos.z, this.coveCenter.x, this.coveCenter.z)
