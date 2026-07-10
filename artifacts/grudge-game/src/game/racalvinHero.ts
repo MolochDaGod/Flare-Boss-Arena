@@ -128,6 +128,13 @@ export class RacalvinWeapons {
     this.applySwordMount(tuning);
     propToMount(this.pistolMount, tuning.pistol);
   }
+
+  /** Re-apply transforms after the hand bone moves (idle freeze / clip change). */
+  refreshAttachment() {
+    if (!this.weapons) return;
+    this.applySwordMount(this.weapons);
+    propToMount(this.pistolMount, this.weapons.pistol);
+  }
 }
 
 export function racalvinSwordPoseForClip(clipName: string): RacalvinSwordPose {
@@ -292,11 +299,26 @@ function buildPropHolder(prop: THREE.Object3D, tuning: PropTuning): THREE.Group 
   return holder;
 }
 
-function handCompensation(hand: THREE.Object3D): number {
+function handCompensation(hand: THREE.Object3D, root: THREE.Object3D): number {
   hand.updateWorldMatrix(true, false);
-  const sc = new THREE.Vector3();
-  hand.getWorldScale(sc);
-  return sc.x > 1e-6 ? 1 / sc.x : 1;
+  root.updateWorldMatrix(true, false);
+  const handSc = new THREE.Vector3();
+  const rootSc = new THREE.Vector3();
+  hand.getWorldScale(handSc);
+  root.getWorldScale(rootSc);
+  // Counter only the root uniform scale so mounts stay in hand-local units.
+  const rootUniform = rootSc.x > 1e-6 ? rootSc.x : 1;
+  return 1 / rootUniform;
+}
+
+/** Re-parent weapon mounts after skeleton pose changes (idle freeze / clips). */
+export function refreshRacalvinWeaponMounts(root: THREE.Object3D) {
+  const rig = getRacalvinWeapons(root);
+  const hand = findRacalvinRightHand(root);
+  if (!rig || !hand) return;
+  ensureMountsOnHand(rig, hand);
+  root.updateMatrixWorld(true);
+  rig.refreshAttachment();
 }
 
 export interface RacalvinAttachOpts {
@@ -330,7 +352,7 @@ export function attachRacalvinWeapons(
     return null;
   }
 
-  const comp = handCompensation(hand);
+  const comp = handCompensation(hand, root);
   const swordMount = new THREE.Group();
   swordMount.name = "RacalvinSwordMount";
   swordMount.scale.setScalar(comp);

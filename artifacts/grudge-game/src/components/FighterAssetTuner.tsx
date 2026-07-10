@@ -397,8 +397,8 @@ export function FighterAssetTuner({
           </SheetTitle>
           <SheetDescription className="text-[11px] leading-relaxed">
             {fighterName} — both sword grips parent to the same Mixamo{" "}
-            <span className="font-mono text-emerald-300">RightHand</span> bone. T-pose is frozen
-            while this panel is open; drag the canvas to orbit.
+            <span className="font-mono text-emerald-300">RightHand</span> bone. Opening this panel
+            freezes the idle pose for placement; drag the canvas to orbit.
           </SheetDescription>
         </SheetHeader>
 
@@ -420,7 +420,9 @@ export function FighterAssetTuner({
               <p className="font-serif text-[10px] uppercase tracking-widest text-[#c5a059]/90">
                 Preview
               </p>
-              <p className="text-[9px] text-muted-foreground">Stop spin to orbit the hand in 3D.</p>
+              <p className="text-[9px] text-muted-foreground">
+                Pause spin only stops rotation — model stays visible. Stop spin to orbit the hand.
+              </p>
             </div>
             <Button
               size="sm"

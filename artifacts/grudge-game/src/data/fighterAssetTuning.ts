@@ -36,20 +36,20 @@ export interface FighterAssetTuning {
 
 const STORAGE_KEY = "grudge:fighter-asset-tuning";
 
-/** Mixamo RightHand grip used by the sword-and-shield animation pack. */
+/** Mixamo RightHand grip — tuned for Racalvin + Brothers' Keeper on RightHand. */
 export const MIXAMO_SWORD_HELD: WeaponMountTuning = {
   targetLength: 1.36,
-  position: [0, 0.02, -0.03],
-  rotation: [90, 0, 90],
-  gripYOffset: 0.02,
+  position: [0.04, 0.04, -0.02],
+  rotation: [90, 3.4, 90],
+  gripYOffset: 0.03,
 };
 
-/** Same hand bone, blade resting along the thigh for idle / walk. */
+/** Same hand bone, blade lowered for idle / walk (small delta from held). */
 export const MIXAMO_SWORD_REST: WeaponMountTuning = {
   targetLength: 1.36,
-  position: [0.05, -0.1, 0.04],
-  rotation: [12, 88, 108],
-  gripYOffset: 0.02,
+  position: [0.05, -0.02, 0.03],
+  rotation: [72, 3.4, 98],
+  gripYOffset: 0.03,
 };
 
 export const DEFAULT_PISTOL_WEAPON: WeaponMountTuning = {

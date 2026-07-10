@@ -117,6 +117,28 @@ export function resetSkinnedToBindPose(root: THREE.Object3D) {
   root.updateMatrixWorld(true);
 }
 
+/**
+ * Hold the first frame of `clip` on `mixer` — reliable for weapon placement on
+ * Mixamo rigs (bind-pose matrix inversion often collapses the mesh).
+ */
+export function sampleClipPose(
+  root: THREE.Object3D,
+  mixer: THREE.AnimationMixer,
+  clip: THREE.AnimationClip,
+): THREE.AnimationAction {
+  mixer.stopAllAction();
+  const action = mixer.clipAction(clip);
+  action.reset();
+  action.setLoop(THREE.LoopOnce, 1);
+  action.clampWhenFinished = true;
+  action.setEffectiveWeight(1);
+  action.play();
+  action.time = 0;
+  mixer.update(0);
+  root.updateMatrixWorld(true);
+  return action;
+}
+
 export function attachWeaponToBone(
   weaponRoot: THREE.Object3D,
   bone: THREE.Bone,

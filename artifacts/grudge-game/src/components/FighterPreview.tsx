@@ -11,10 +11,11 @@ import {
   attachRacalvinWeapons,
   getRacalvinWeapons,
   loadRacalvinClips,
+  refreshRacalvinWeaponMounts,
 } from "@/game/racalvinHero";
 import { getFighterAssetTuning, type FighterAssetTuning } from "@/data/fighterAssetTuning";
 import { collectMeshNames, setupFighterMeshVisibility, syncHiddenMeshesForClip } from "@/game/assetVisibility";
-import { resetSkinnedToBindPose } from "@/game/assets";
+import { sampleClipPose } from "@/game/assets";
 
 export type RacalvinWeaponPreview = "swordHeld" | "swordRest" | "pistol";
 
@@ -81,10 +82,14 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
 
   const snapBindPose = () => {
     const s = sceneRef.current;
-    if (!s.model) return;
-    s.mixer?.stopAllAction();
-    s.activeAction = null;
-    resetSkinnedToBindPose(s.model);
+    if (!s.model || !s.mixer || !s.clips.length) return;
+    const idle = s.clips.find((c) => c.name === "idle") ?? s.clips[0];
+    if (!idle) return;
+    s.activeAction = sampleClipPose(s.model, s.mixer, idle);
+    if (fighterId === RACALVIN_ID) {
+      applyRacalvinAssetTuning(s.model, tuning);
+      refreshRacalvinWeaponMounts(s.model);
+    }
   };
 
   const playIdle = () => {
@@ -124,6 +129,7 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
       }
       rig.setMode("sword");
       rig.setSwordPose(mode === "swordHeld" ? "held" : "rest");
+      refreshRacalvinWeaponMounts(sceneRef.current.model!);
     },
     freezeToBindPose: snapBindPose,
     resumeAnimation: playIdle,
@@ -290,7 +296,12 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
               sceneRef.current.clips = loaded;
               onClipsReady?.([...RACALVIN_ANIMS]);
               if (freezePoseRef.current) {
-                resetSkinnedToBindPose(m);
+                const idleClip = loaded.find((c) => c.name === "idle") ?? loaded[0];
+                if (idleClip && mixer) {
+                  activeAction = sampleClipPose(m, mixer, idleClip);
+                  sceneRef.current.activeAction = activeAction;
+                  refreshRacalvinWeaponMounts(m);
+                }
                 return;
               }
               const idle = loaded.find((c) => c.name === "idle") ?? loaded[0];

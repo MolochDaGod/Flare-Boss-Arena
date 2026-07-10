@@ -201,7 +201,7 @@ export default function Select() {
               fighterId={selected.id}
               tuning={assetTuning}
               pauseRotation={!previewSpin}
-              freezePose={tunerOpen || !previewSpin}
+              freezePose={tunerOpen}
               onMeshesReady={setMeshNames}
               onClipsReady={(clips) => setClipNames(clips.length ? clips : [...RACALVIN_ANIMS])}
               onHandBoneReady={setHandBoneName}
