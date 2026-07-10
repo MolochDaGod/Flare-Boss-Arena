@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Copy, Move3d, Pause, Play, RotateCw, RotateCcw, Scaling, Settings2 } from "lucide-react";
+import { Copy, Move3d, Pause, Play, RotateCw, RotateCcw, Scaling, Settings2, Swords } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   Sheet,
@@ -16,11 +16,15 @@ import {
   type FighterAssetTuning,
   type HiddenMeshRule,
   type WeaponMountTuning,
+  MIXAMO_SWORD_HELD,
+  MIXAMO_SWORD_REST,
   defaultTuningFor,
   resetFighterAssetTuning,
   saveFighterAssetTuning,
 } from "@/data/fighterAssetTuning";
 import { useToast } from "@/hooks/use-toast";
+
+export type RacalvinWeaponPreview = "swordHeld" | "swordRest" | "pistol";
 
 export interface FighterAssetTunerProps {
   fighterId: string;
@@ -28,15 +32,17 @@ export interface FighterAssetTunerProps {
   tuning: FighterAssetTuning;
   meshNames: string[];
   clipNames: string[];
-  weaponPreview: "sword" | "pistol";
+  weaponPreview: RacalvinWeaponPreview;
   onTuningChange: (next: FighterAssetTuning) => void;
-  onWeaponPreviewChange: (mode: "sword" | "pistol") => void;
+  onWeaponPreviewChange: (mode: RacalvinWeaponPreview) => void;
   onPreviewClip: (clip: string) => void;
   onOpenChange?: (open: boolean) => void;
   previewSpin: boolean;
   onPreviewSpinChange: (spin: boolean) => void;
   handBoneName?: string | null;
 }
+
+type EditorTab = RacalvinWeaponPreview | "meshes";
 
 function clampNum(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v));
@@ -50,8 +56,6 @@ function AxisSliders({
   step,
   labels,
   onChange,
-  fmt = (v: number) => String(v),
-  parse = (raw: string) => Number(raw),
 }: {
   title: string;
   values: [number, number, number];
@@ -60,11 +64,9 @@ function AxisSliders({
   step: number;
   labels: [string, string, string];
   onChange: (next: [number, number, number]) => void;
-  fmt?: (v: number) => string;
-  parse?: (raw: string) => number;
 }) {
   const setAxis = (i: number, raw: string) => {
-    const n = parse(raw);
+    const n = Number(raw);
     if (!Number.isFinite(n)) return;
     const next = [...values] as [number, number, number];
     next[i] = clampNum(n, min, max);
@@ -72,7 +74,7 @@ function AxisSliders({
   };
 
   return (
-    <div className="space-y-2 rounded border border-white/10 bg-black/30 p-3">
+    <div className="space-y-2 rounded-lg border border-white/10 bg-black/35 p-3">
       <p className="font-serif text-[10px] uppercase tracking-widest text-[#c5a059]/90">{title}</p>
       {values.map((v, i) => (
         <div key={labels[i]} className="space-y-1">
@@ -151,23 +153,46 @@ function ScalarControl({
 
 function WeaponEditor({
   label,
+  hint,
   weapon,
   onChange,
+  onApplyPreset,
+  onCopyFrom,
 }: {
   label: string;
+  hint: string;
   weapon: WeaponMountTuning;
   onChange: (w: WeaponMountTuning) => void;
+  onApplyPreset?: () => void;
+  onCopyFrom?: () => void;
 }) {
   return (
     <div className="space-y-3">
-      <p className="font-serif text-xs uppercase tracking-widest text-[#e8c87a]">{label}</p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="font-serif text-sm uppercase tracking-widest text-[#e8c87a]">{label}</p>
+          <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">{hint}</p>
+        </div>
+        <div className="flex shrink-0 flex-col gap-1">
+          {onApplyPreset && (
+            <Button size="sm" variant="outline" className="h-7 text-[9px]" onClick={onApplyPreset}>
+              Mixamo preset
+            </Button>
+          )}
+          {onCopyFrom && (
+            <Button size="sm" variant="ghost" className="h-7 text-[9px] text-muted-foreground" onClick={onCopyFrom}>
+              Copy other grip
+            </Button>
+          )}
+        </div>
+      </div>
 
       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
         <Move3d className="h-3.5 w-3.5 text-[#c5a059]" />
-        <span className="font-serif uppercase tracking-widest">Move</span>
+        <span className="font-serif uppercase tracking-widest">Position</span>
       </div>
       <AxisSliders
-        title="Position (hand local)"
+        title="Local offset on hand bone"
         values={weapon.position}
         min={-2}
         max={2}
@@ -178,10 +203,10 @@ function WeaponEditor({
 
       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
         <RotateCw className="h-3.5 w-3.5 text-[#c5a059]" />
-        <span className="font-serif uppercase tracking-widest">Rotate</span>
+        <span className="font-serif uppercase tracking-widest">Rotation</span>
       </div>
       <AxisSliders
-        title="Rotation (degrees)"
+        title="Euler degrees"
         values={weapon.rotation}
         min={-360}
         max={360}
@@ -194,7 +219,7 @@ function WeaponEditor({
         <Scaling className="h-3.5 w-3.5 text-[#c5a059]" />
         <span className="font-serif uppercase tracking-widest">Scale</span>
       </div>
-      <div className="space-y-2 rounded border border-white/10 bg-black/30 p-3">
+      <div className="space-y-2 rounded-lg border border-white/10 bg-black/35 p-3">
         <ScalarControl
           label="Weapon length"
           value={weapon.targetLength}
@@ -237,7 +262,7 @@ function MeshRuleRow({
   };
 
   return (
-    <div className="rounded border border-white/10 bg-black/30 p-2 text-[10px]">
+    <div className="rounded-lg border border-white/10 bg-black/30 p-2 text-[10px]">
       <p className="truncate font-mono text-foreground">{meshName}</p>
       <label className="mt-1 flex items-center gap-2 text-muted-foreground">
         <input
@@ -269,6 +294,13 @@ function MeshRuleRow({
   );
 }
 
+const RACALVIN_TABS: { id: EditorTab; label: string; short: string }[] = [
+  { id: "swordHeld", label: "Sword — held", short: "Held" },
+  { id: "swordRest", label: "Sword — rest", short: "Rest" },
+  { id: "pistol", label: "Pistol", short: "Pistol" },
+  { id: "meshes", label: "Hidden parts", short: "Meshes" },
+];
+
 export function FighterAssetTuner({
   fighterId,
   fighterName,
@@ -291,7 +323,7 @@ export function FighterAssetTuner({
     onOpenChange?.(v);
     if (v) onPreviewSpinChange(false);
   };
-  const [tab, setTab] = useState<"sword" | "pistol" | "meshes">("sword");
+  const [tab, setTab] = useState<EditorTab>("swordHeld");
 
   const meshRules = useMemo(() => {
     const byName = new Map(tuning.hiddenMeshes.map((r) => [r.meshName, r]));
@@ -311,7 +343,7 @@ export function FighterAssetTuner({
     saveFighterAssetTuning(fighterId, next);
   };
 
-  const updateWeapon = (key: "sword" | "pistol", w: WeaponMountTuning) => {
+  const updateWeapon = (key: keyof FighterAssetTuning["weapons"], w: WeaponMountTuning) => {
     persist({ ...tuning, weapons: { ...tuning.weapons, [key]: w } });
   };
 
@@ -333,6 +365,13 @@ export function FighterAssetTuner({
     toast({ title: "Reset", description: "Asset tuning restored to defaults." });
   };
 
+  const selectTab = (t: EditorTab) => {
+    setTab(t);
+    if (t === "swordHeld" || t === "swordRest" || t === "pistol") {
+      onWeaponPreviewChange(t);
+    }
+  };
+
   const showWeapons = fighterId === RACALVIN_ID;
 
   return (
@@ -349,33 +388,39 @@ export function FighterAssetTuner({
       </SheetTrigger>
       <SheetContent
         side="right"
-        className="z-50 w-[min(440px,94vw)] overflow-y-auto border-[#c5a059]/25 bg-[#0a0806] text-foreground"
+        className="z-50 flex w-[min(460px,96vw)] flex-col gap-0 overflow-hidden border-[#c5a059]/25 bg-[#0a0806] p-0 text-foreground"
       >
-        <SheetHeader>
-          <SheetTitle className="font-serif uppercase tracking-widest text-[#c5a059]">
+        <SheetHeader className="shrink-0 border-b border-[#c5a059]/20 bg-[#0d0b09] px-6 py-4">
+          <SheetTitle className="flex items-center gap-2 font-serif uppercase tracking-widest text-[#c5a059]">
+            <Swords className="h-4 w-4" />
             Weapon Editor
           </SheetTitle>
-          <SheetDescription>
-            Rig freezes in bind pose (T-pose) so weapons stay on the hand bone while you
-            move, rotate, and scale. Changes save automatically.
+          <SheetDescription className="text-[11px] leading-relaxed">
+            {fighterName} — both sword grips parent to the same Mixamo{" "}
+            <span className="font-mono text-emerald-300">RightHand</span> bone. T-pose is frozen
+            while this panel is open; drag the canvas to orbit.
           </SheetDescription>
         </SheetHeader>
 
-        <div className="mt-5 space-y-4">
+        <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
           {showWeapons && handBoneName && (
-            <p className="rounded border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 font-mono text-[10px] text-emerald-200">
-              Parent bone: <span className="text-emerald-100">{handBoneName}</span>
-            </p>
+            <div className="rounded-lg border border-emerald-500/35 bg-emerald-950/40 px-3 py-2.5">
+              <p className="font-serif text-[9px] uppercase tracking-widest text-emerald-400/90">
+                Attach bone
+              </p>
+              <p className="font-mono text-xs text-emerald-100">{handBoneName}</p>
+              <p className="mt-1 text-[9px] text-emerald-200/70">
+                Same joint Mixamo uses for sword-and-shield packs.
+              </p>
+            </div>
           )}
 
-          <div className="flex items-center justify-between rounded border border-white/10 bg-black/30 px-3 py-2">
+          <div className="flex items-center justify-between rounded-lg border border-white/10 bg-black/35 px-3 py-2.5">
             <div>
               <p className="font-serif text-[10px] uppercase tracking-widest text-[#c5a059]/90">
-                Preview spin
+                Preview
               </p>
-              <p className="text-[9px] text-muted-foreground">
-                Pausing spin also freezes T-pose. Drag the canvas to orbit the hand.
-              </p>
+              <p className="text-[9px] text-muted-foreground">Stop spin to orbit the hand in 3D.</p>
             </div>
             <Button
               size="sm"
@@ -389,56 +434,59 @@ export function FighterAssetTuner({
           </div>
 
           {showWeapons && (
-            <div className="flex gap-1">
-              {(["sword", "pistol", "meshes"] as const).map((t) => (
+            <div className="grid grid-cols-4 gap-1 rounded-lg border border-white/10 bg-black/40 p-1">
+              {RACALVIN_TABS.map((t) => (
                 <button
-                  key={t}
+                  key={t.id}
                   type="button"
-                  onClick={() => setTab(t)}
-                  className={`flex-1 rounded px-2 py-2 font-serif text-[10px] uppercase tracking-widest ${
-                    tab === t
-                      ? "bg-[#c5a059]/25 text-[#e8c87a] ring-1 ring-[#c5a059]/50"
-                      : "bg-black/50 text-muted-foreground hover:text-foreground"
+                  onClick={() => selectTab(t.id)}
+                  className={`rounded-md px-1 py-2 font-serif text-[9px] uppercase leading-tight tracking-wide ${
+                    tab === t.id
+                      ? "bg-[#c5a059]/30 text-[#e8c87a] ring-1 ring-[#c5a059]/55"
+                      : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
                   }`}
                 >
-                  {t === "meshes" ? "Hidden parts" : t}
+                  {t.short}
                 </button>
               ))}
             </div>
           )}
 
-          {showWeapons && tab !== "meshes" && (
-            <>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant={weaponPreview === "sword" ? "default" : "outline"}
-                  className="flex-1 text-[10px]"
-                  onClick={() => onWeaponPreviewChange("sword")}
-                >
-                  Show sword
-                </Button>
-                <Button
-                  size="sm"
-                  variant={weaponPreview === "pistol" ? "default" : "outline"}
-                  className="flex-1 text-[10px]"
-                  onClick={() => onWeaponPreviewChange("pistol")}
-                >
-                  Show pistol
-                </Button>
-              </div>
-              <WeaponEditor
-                label={tab === "sword" ? "Brothers' Keeper" : "Corsair Pistol"}
-                weapon={tuning.weapons[tab]}
-                onChange={(w) => updateWeapon(tab, w)}
-              />
-            </>
+          {showWeapons && tab === "swordHeld" && (
+            <WeaponEditor
+              label="Brothers' Keeper — combat grip"
+              hint="Used during attack, combo, hammer, and cast clips. Matches Mixamo sword-and-shield right-hand orientation."
+              weapon={tuning.weapons.swordHeld}
+              onChange={(w) => updateWeapon("swordHeld", w)}
+              onApplyPreset={() => updateWeapon("swordHeld", { ...MIXAMO_SWORD_HELD })}
+              onCopyFrom={() => updateWeapon("swordHeld", { ...tuning.weapons.swordRest })}
+            />
+          )}
+
+          {showWeapons && tab === "swordRest" && (
+            <WeaponEditor
+              label="Brothers' Keeper — rest grip"
+              hint="Used during idle, walk, run, dodge, and hit. Blade rests along the leg on the same hand bone."
+              weapon={tuning.weapons.swordRest}
+              onChange={(w) => updateWeapon("swordRest", w)}
+              onApplyPreset={() => updateWeapon("swordRest", { ...MIXAMO_SWORD_REST })}
+              onCopyFrom={() => updateWeapon("swordRest", { ...tuning.weapons.swordHeld })}
+            />
+          )}
+
+          {showWeapons && tab === "pistol" && (
+            <WeaponEditor
+              label="Corsair Pistol"
+              hint="Shown on psychic skills and Mind Shot. Shares the right hand mount."
+              weapon={tuning.weapons.pistol}
+              onChange={(w) => updateWeapon("pistol", w)}
+            />
           )}
 
           {(tab === "meshes" || !showWeapons) && (
             <div className="space-y-2">
               <p className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground">
-                Hide parts until an animation reveals them.
+                Hide parts until an animation reveals them
               </p>
               {meshRules.length === 0 ? (
                 <p className="text-xs text-muted-foreground">Waiting for model meshes…</p>
@@ -458,7 +506,10 @@ export function FighterAssetTuner({
 
           <div className="space-y-2 border-t border-white/10 pt-4">
             <p className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground">
-              Preview clip (resume spin first)
+              Test animation clip
+            </p>
+            <p className="text-[9px] text-muted-foreground">
+              Resume spin first, then pick a clip to see held vs rest swap in motion.
             </p>
             <div className="flex flex-wrap gap-1">
               {clipNames.map((clip) => (
@@ -466,22 +517,22 @@ export function FighterAssetTuner({
                   key={clip}
                   type="button"
                   onClick={() => onPreviewClip(clip)}
-                  className="rounded bg-black/50 px-2 py-1 font-mono text-[9px] uppercase text-[#c5a059] hover:bg-[#c5a059]/15"
+                  className="rounded-md bg-black/50 px-2 py-1 font-mono text-[9px] uppercase text-[#c5a059] ring-1 ring-transparent transition hover:bg-[#c5a059]/15 hover:ring-[#c5a059]/30"
                 >
                   {clip}
                 </button>
               ))}
             </div>
           </div>
+        </div>
 
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" className="flex-1 gap-1 text-[10px]" onClick={copyJson}>
-              <Copy className="h-3 w-3" /> Copy JSON
-            </Button>
-            <Button size="sm" variant="outline" className="flex-1 gap-1 text-[10px]" onClick={reset}>
-              <RotateCcw className="h-3 w-3" /> Reset
-            </Button>
-          </div>
+        <div className="shrink-0 flex gap-2 border-t border-white/10 bg-[#0d0b09] px-6 py-4">
+          <Button size="sm" variant="outline" className="flex-1 gap-1 text-[10px]" onClick={copyJson}>
+            <Copy className="h-3 w-3" /> Copy JSON
+          </Button>
+          <Button size="sm" variant="outline" className="flex-1 gap-1 text-[10px]" onClick={reset}>
+            <RotateCcw className="h-3 w-3" /> Reset defaults
+          </Button>
         </div>
       </SheetContent>
     </Sheet>

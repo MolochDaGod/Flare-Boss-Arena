@@ -6,7 +6,7 @@ import { getActiveFighter, RACALVIN_ID } from "../data/fighters";
 import { getFighterAssetTuning } from "../data/fighterAssetTuning";
 import { getSkin, skinUrl } from "../data/skins";
 import { setupFighterMeshVisibility } from "./assetVisibility";
-import { loadRacalvinBase, loadRacalvinClips } from "./racalvinHero";
+import { loadRacalvinBase, loadRacalvinClips, syncRacalvinSwordPose } from "./racalvinHero";
 
 /**
  * Shared KayKit hero utilities used by the real-time 3D scenes (`/camp`,
@@ -214,6 +214,7 @@ export class HeroAnimator implements HeroLike {
         if (back) {
           back.reset().fadeIn(0.12).play();
           this.current = this.wantMoving ? this.locomotion() : "idle";
+          this.syncRacalvinPose(back.getClip().name);
         }
       }
     };
@@ -226,7 +227,14 @@ export class HeroAnimator implements HeroLike {
     if (idle) {
       idle.reset().play();
       this.current = this.actions.idle ? "idle" : "walk";
+      this.syncRacalvinPose(idle.getClip().name);
     }
+  }
+
+  private syncRacalvinPose(clipName?: string) {
+    const action = this.oneShot ?? this.actions[this.current];
+    const name = clipName ?? action?.getClip().name;
+    if (name) syncRacalvinSwordPose(this.root, name);
   }
 
   private indexClips(clips: THREE.AnimationClip[]) {
@@ -279,6 +287,7 @@ export class HeroAnimator implements HeroLike {
     prev?.fadeOut(0.12);
     nextA.reset().fadeIn(0.12).play();
     this.current = next;
+    this.syncRacalvinPose(nextA.getClip().name);
   }
 
   setMoving(moving: boolean) {
@@ -292,6 +301,7 @@ export class HeroAnimator implements HeroLike {
     prev?.fadeOut(0.18);
     nextA.reset().fadeIn(0.18).play();
     this.current = next;
+    this.syncRacalvinPose(nextA.getClip().name);
   }
 
   /** Play a one-shot state. Returns false if no clip resolves or one is active. */
@@ -306,6 +316,7 @@ export class HeroAnimator implements HeroLike {
     a.fadeIn(0.06).play();
     this.actions[this.current]?.fadeOut(0.06);
     this.rm.begin();
+    this.syncRacalvinPose(a.getClip().name);
     return true;
   }
 
@@ -331,6 +342,7 @@ export class HeroAnimator implements HeroLike {
     a.fadeIn(0.06).play();
     this.actions[this.current]?.fadeOut(0.06);
     this.rm.begin();
+    this.syncRacalvinPose(clip.name);
     return true;
   }
 

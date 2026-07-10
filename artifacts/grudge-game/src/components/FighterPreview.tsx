@@ -16,9 +16,11 @@ import { getFighterAssetTuning, type FighterAssetTuning } from "@/data/fighterAs
 import { collectMeshNames, setupFighterMeshVisibility, syncHiddenMeshesForClip } from "@/game/assetVisibility";
 import { resetSkinnedToBindPose } from "@/game/assets";
 
+export type RacalvinWeaponPreview = "swordHeld" | "swordRest" | "pistol";
+
 export interface FighterPreviewHandle {
   previewClip: (name: string) => void;
-  setWeaponPreview: (mode: "sword" | "pistol") => void;
+  setWeaponPreview: (mode: RacalvinWeaponPreview) => void;
   /** Stop clips and snap skeleton to bind pose for weapon placement. */
   freezeToBindPose: () => void;
   /** Resume idle loop after placement. */
@@ -113,9 +115,15 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
       s.activeAction = action;
       syncHiddenMeshesForClip(s.model, name);
     },
-    setWeaponPreview(mode: "sword" | "pistol") {
+    setWeaponPreview(mode: RacalvinWeaponPreview) {
       const rig = sceneRef.current.model ? getRacalvinWeapons(sceneRef.current.model) : null;
-      rig?.setMode(mode);
+      if (!rig) return;
+      if (mode === "pistol") {
+        rig.setMode("pistol");
+        return;
+      }
+      rig.setMode("sword");
+      rig.setSwordPose(mode === "swordHeld" ? "held" : "rest");
     },
     freezeToBindPose: snapBindPose,
     resumeAnimation: playIdle,

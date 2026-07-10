@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { SKIN_CLIP_SUFFIX, KOBY_CLIPS, type SkinScheme } from "../data/skins";
 import { syncHiddenMeshesForClip } from "./assetVisibility";
+import { syncRacalvinSwordPose } from "./racalvinHero";
 import { RootMotion } from "./rootMotion";
 
 /**
@@ -99,7 +100,10 @@ export class PlayerAnimator {
       this.oneShot?.getClip().name ??
       this.oneShotBlend[0]?.getClip().name ??
       this.actions[this.current]?.getClip().name;
-    if (name) syncHiddenMeshesForClip(root, name);
+    if (name) {
+      syncHiddenMeshesForClip(root, name);
+      syncRacalvinSwordPose(root, name);
+    }
   }
 
   /**

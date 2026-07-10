@@ -135,7 +135,7 @@ export default function Select() {
   );
   const [meshNames, setMeshNames] = useState<string[]>([]);
   const [clipNames, setClipNames] = useState<string[]>([...RACALVIN_ANIMS]);
-  const [weaponPreview, setWeaponPreview] = useState<"sword" | "pistol">("sword");
+  const [weaponPreview, setWeaponPreview] = useState<"swordHeld" | "swordRest" | "pistol">("swordHeld");
   const [tunerOpen, setTunerOpen] = useState(false);
   const [previewSpin, setPreviewSpin] = useState(true);
   const [handBoneName, setHandBoneName] = useState<string | null>(null);
@@ -162,7 +162,7 @@ export default function Select() {
     setAssetTuning(getFighterAssetTuning(id));
     setMeshNames([]);
     setClipNames(id === RACALVIN_ID ? [...RACALVIN_ANIMS] : []);
-    setWeaponPreview("sword");
+    setWeaponPreview("swordHeld");
     setHandBoneName(null);
   };
 

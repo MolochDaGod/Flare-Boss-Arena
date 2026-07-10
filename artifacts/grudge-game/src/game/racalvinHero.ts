@@ -40,7 +40,12 @@ export type RacalvinClipName = (typeof RACALVIN_ANIMS)[number];
 
 export type RacalvinWeaponMode = "sword" | "pistol";
 
+/** Which RightHand sword transform is active (combat vs idle locomotion). */
+export type RacalvinSwordPose = "held" | "rest";
+
 export const RACALVIN_BASE_URL = base;
+
+const SWORD_HELD_CLIP = /attack|combo|hammer|punch|cast|slash|chop|stab/i;
 
 const USERDATA_KEY = "racalvinWeapons";
 
@@ -83,6 +88,8 @@ function propToMount(mount: THREE.Object3D, w: WeaponMountTuning) {
 
 export class RacalvinWeapons {
   private mode: RacalvinWeaponMode = "sword";
+  private swordPose: RacalvinSwordPose = "rest";
+  private weapons: FighterAssetTuning["weapons"] | null = null;
 
   constructor(
     readonly swordMount: THREE.Object3D,
@@ -95,16 +102,43 @@ export class RacalvinWeapons {
     return this.mode;
   }
 
+  getSwordPose(): RacalvinSwordPose {
+    return this.swordPose;
+  }
+
   setMode(mode: RacalvinWeaponMode) {
     this.mode = mode;
     this.swordMount.visible = mode === "sword";
     this.pistolMount.visible = mode === "pistol";
   }
 
+  setSwordPose(pose: RacalvinSwordPose) {
+    if (this.swordPose === pose && this.weapons) return;
+    this.swordPose = pose;
+    if (this.weapons) this.applySwordMount(this.weapons);
+  }
+
+  private applySwordMount(tuning: FighterAssetTuning["weapons"]) {
+    const w = this.swordPose === "held" ? tuning.swordHeld : tuning.swordRest;
+    propToMount(this.swordMount, w);
+  }
+
   applyMountTuning(tuning: FighterAssetTuning["weapons"]) {
-    propToMount(this.swordMount, tuning.sword);
+    this.weapons = tuning;
+    this.applySwordMount(tuning);
     propToMount(this.pistolMount, tuning.pistol);
   }
+}
+
+export function racalvinSwordPoseForClip(clipName: string): RacalvinSwordPose {
+  return SWORD_HELD_CLIP.test(clipName.toLowerCase()) ? "held" : "rest";
+}
+
+/** Swap held/rest sword grip when the active animation clip changes. */
+export function syncRacalvinSwordPose(root: THREE.Object3D, clipName: string) {
+  const rig = getRacalvinWeapons(root);
+  if (!rig || rig.getMode() !== "sword") return;
+  rig.setSwordPose(racalvinSwordPoseForClip(clipName));
 }
 
 export function applyRacalvinAssetTuning(root: THREE.Object3D, tuning: FighterAssetTuning) {
@@ -322,9 +356,10 @@ export function attachRacalvinWeapons(
     steelMaterial(gltf.scene);
     ensureMountsOnHand(rig, hand);
     swordMount.clear();
-    swordMount.add(buildPropHolder(gltf.scene, weaponToProp(tuning.weapons.sword)));
-    swordMount.userData.bakedLength = tuning.weapons.sword.targetLength;
-    propToMount(swordMount, tuning.weapons.sword);
+    const swordTuning = tuning.weapons.swordHeld;
+    swordMount.add(buildPropHolder(gltf.scene, weaponToProp(swordTuning)));
+    swordMount.userData.bakedLength = swordTuning.targetLength;
+    rig.applyMountTuning(tuning.weapons);
   });
 
   loader.load(pistolUrl(), (gltf) => {

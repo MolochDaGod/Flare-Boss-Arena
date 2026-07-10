@@ -20,22 +20,36 @@ export interface HiddenMeshRule {
   showOnClips: string[];
 }
 
+export interface RacalvinWeaponTuning {
+  /** Combat grip on RightHand — Mixamo sword-and-shield pack orientation. */
+  swordHeld: WeaponMountTuning;
+  /** Idle / locomotion grip on the same hand bone (blade at rest). */
+  swordRest: WeaponMountTuning;
+  pistol: WeaponMountTuning;
+}
+
 export interface FighterAssetTuning {
   version: 1;
-  weapons: {
-    sword: WeaponMountTuning;
-    pistol: WeaponMountTuning;
-  };
+  weapons: RacalvinWeaponTuning;
   hiddenMeshes: HiddenMeshRule[];
 }
 
 const STORAGE_KEY = "grudge:fighter-asset-tuning";
 
-export const DEFAULT_SWORD_WEAPON: WeaponMountTuning = {
+/** Mixamo RightHand grip used by the sword-and-shield animation pack. */
+export const MIXAMO_SWORD_HELD: WeaponMountTuning = {
   targetLength: 1.36,
-  position: [0.04, 0.04, -0.02],
-  rotation: [90, 3.4, 90],
-  gripYOffset: 0.03,
+  position: [0, 0.02, -0.03],
+  rotation: [90, 0, 90],
+  gripYOffset: 0.02,
+};
+
+/** Same hand bone, blade resting along the thigh for idle / walk. */
+export const MIXAMO_SWORD_REST: WeaponMountTuning = {
+  targetLength: 1.36,
+  position: [0.05, -0.1, 0.04],
+  rotation: [12, 88, 108],
+  gripYOffset: 0.02,
 };
 
 export const DEFAULT_PISTOL_WEAPON: WeaponMountTuning = {
@@ -45,11 +59,15 @@ export const DEFAULT_PISTOL_WEAPON: WeaponMountTuning = {
   gripYOffset: 0,
 };
 
+/** @deprecated Use MIXAMO_SWORD_HELD — kept for imports that still reference it. */
+export const DEFAULT_SWORD_WEAPON = MIXAMO_SWORD_HELD;
+
 export const DEFAULT_RACALVIN_TUNING: FighterAssetTuning = {
   version: 1,
   weapons: {
-    sword: DEFAULT_SWORD_WEAPON,
-    pistol: DEFAULT_PISTOL_WEAPON,
+    swordHeld: { ...MIXAMO_SWORD_HELD },
+    swordRest: { ...MIXAMO_SWORD_REST },
+    pistol: { ...DEFAULT_PISTOL_WEAPON },
   },
   hiddenMeshes: [],
 };
@@ -64,12 +82,25 @@ function mergeWeapon(base: WeaponMountTuning, patch?: Partial<WeaponMountTuning>
   };
 }
 
+/** Legacy localStorage may still store `weapons.sword` instead of swordHeld. */
+type SavedWeapons = Partial<RacalvinWeaponTuning> & { sword?: WeaponMountTuning };
+
+function mergeWeapons(base: RacalvinWeaponTuning, saved?: SavedWeapons): RacalvinWeaponTuning {
+  const legacySword = saved?.sword;
+  return {
+    swordHeld: mergeWeapon(base.swordHeld, saved?.swordHeld ?? legacySword),
+    swordRest: mergeWeapon(base.swordRest, saved?.swordRest),
+    pistol: mergeWeapon(base.pistol, saved?.pistol),
+  };
+}
+
 export function defaultTuningFor(fighterId: string): FighterAssetTuning {
   if (fighterId === RACALVIN_ID) return structuredClone(DEFAULT_RACALVIN_TUNING);
   return {
     version: 1,
     weapons: {
-      sword: { ...DEFAULT_SWORD_WEAPON },
+      swordHeld: { ...MIXAMO_SWORD_HELD },
+      swordRest: { ...MIXAMO_SWORD_REST },
       pistol: { ...DEFAULT_PISTOL_WEAPON },
     },
     hiddenMeshes: [],
@@ -95,15 +126,12 @@ function writeStore(store: TuningStore) {
 }
 
 export function getFighterAssetTuning(fighterId: string): FighterAssetTuning {
-  const saved = readStore()[fighterId];
+  const saved = readStore()[fighterId] as (FighterAssetTuning & { weapons?: SavedWeapons }) | undefined;
   const base = defaultTuningFor(fighterId);
   if (!saved || saved.version !== 1) return base;
   return {
     version: 1,
-    weapons: {
-      sword: mergeWeapon(base.weapons.sword, saved.weapons?.sword),
-      pistol: mergeWeapon(base.weapons.pistol, saved.weapons?.pistol),
-    },
+    weapons: mergeWeapons(base.weapons, saved.weapons),
     hiddenMeshes: saved.hiddenMeshes ?? [],
   };
 }
