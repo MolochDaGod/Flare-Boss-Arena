@@ -3,6 +3,7 @@ import type { CombatTarget } from "./types";
 import type { DeployableKind } from "./skillArchetypes";
 import { ParticleVfx } from "./particles";
 import { TelegraphField } from "./telegraphs";
+import { createHotZoneMaterial } from "./hotZoneMaterial";
 
 /**
  * Deployable entity system: player-summoned constructs that act on their own.
@@ -82,7 +83,8 @@ abstract class Deployable {
 class FireTotem extends Deployable {
   private interval = 1.5;
   private timer = 0.6;
-  private core?: THREE.Mesh;
+  private flameMat?: THREE.ShaderMaterial;
+  private flameDisc?: THREE.Mesh;
 
   constructor(color: number, baseDamage: number, radius: number) {
     super(12, color, baseDamage, radius);
@@ -95,20 +97,19 @@ class FireTotem extends Deployable {
     );
     pole.position.y = 0.7;
     pole.castShadow = true;
-    const core = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.34, 1),
-      new THREE.MeshStandardMaterial({ color: this.color, emissive: this.color, emissiveIntensity: 1.4, roughness: 0.3 }),
-    );
-    core.position.y = 1.55;
-    this.core = core;
-    this.group.add(pole, core);
+    this.flameMat = createHotZoneMaterial(this.color, false, 0.55);
+    this.flameDisc = new THREE.Mesh(new THREE.CircleGeometry(0.55, 32), this.flameMat);
+    this.flameDisc.rotation.x = -Math.PI / 2;
+    this.flameDisc.position.y = 1.45;
+    const light = new THREE.PointLight(this.color, 3, 6, 2);
+    light.position.y = 1.5;
+    this.group.add(pole, this.flameDisc, light);
   }
 
   protected step(delta: number, ctx: DeployContext) {
-    if (this.core) {
-      this.core.rotation.y += delta * 1.5;
-      const pulse = 1 + 0.12 * Math.sin(this.age * 6);
-      this.core.scale.setScalar(pulse);
+    if (this.flameMat) {
+      this.flameMat.uniforms.uTime!.value = this.age;
+      this.flameMat.uniforms.uOpacity!.value = 0.45 + Math.sin(this.age * 5) * 0.15;
     }
     this.timer -= delta;
     if (this.timer > 0) return;

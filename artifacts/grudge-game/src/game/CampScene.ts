@@ -12,6 +12,7 @@ import { archetypeForSkill } from "./combat/skillArchetypes";
 import { pointInShape, type ShapeQuery } from "./combat/damageShapes";
 import { TelegraphField } from "./combat/telegraphs";
 import { ParticleVfx } from "./combat/particles";
+import { CombatVfx, statusFromSkill } from "./combat/combatVfx";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import type { ClassSkill } from "../data/classSkills";
 import { CAMP_PROP_PLACEMENTS } from "../data/worldProps";
@@ -153,6 +154,7 @@ export class CampScene {
   private skillVfx!: SkillVfx;
   private telegraphs!: TelegraphField;
   private particles!: ParticleVfx;
+  private combatVfx!: CombatVfx;
   /** Resolved HUD skills for archetype mapping; idx fallback works if unset. */
   private hudSkills: (ClassSkill | undefined)[] = [];
 
@@ -237,6 +239,7 @@ export class CampScene {
     this.skillVfx = new SkillVfx(this.scene, new GLTFLoader());
     this.telegraphs = new TelegraphField(this.scene);
     this.particles = new ParticleVfx(this.scene);
+    this.combatVfx = new CombatVfx(this.scene);
 
     this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 200);
     this.camera.position.set(18, 18, 18);
@@ -914,7 +917,8 @@ export class CampScene {
     this.skillCdUntil[idx] = now + (this.skillCdLen[idx] ?? 5) * 1000;
 
     // Resolve the skill's archetype shape (idx fallback gives a broad mix).
-    const arch = archetypeForSkill(this.hudSkills[idx], idx);
+    const skill = this.hudSkills[idx];
+    const arch = archetypeForSkill(skill, idx);
     const isCast = arch.shape === "circle" || arch.shape === "nova" || arch.shape === "deployable";
     if (this.heroAnim) {
       const played = this.heroAnim.triggerNamed(skillAnimCandidates(idx, isCast));
@@ -934,6 +938,7 @@ export class CampScene {
     if (nearest) this.playerFacing = Math.atan2(nearest.pos.x - this.playerPos.x, nearest.pos.z - this.playerPos.z);
     const dir = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
     const origin = this.playerPos.clone();
+    this.combatVfx.pulseCastAura(origin, arch.element);
 
     // The Training Ground keeps deployables as an instant AoE pulse (no spawns).
     const kind = arch.shape === "deployable" ? "nova" : arch.shape;
@@ -953,7 +958,17 @@ export class CampScene {
       kind === "circle" || kind === "nova"
         ? origin.clone()
         : origin.clone().add(dir.clone().multiplyScalar(reach * 0.5));
-    if (kind === "nova" || kind === "circle") this.skillVfx.spawn("cloud", center, 4, 1.0);
+    if (kind === "nova" || kind === "circle") {
+      this.skillVfx.spawn("cloud", center, 4);
+      if (arch.element === "fire") this.skillVfx.spawn("tornado", center, 3.5);
+    }
+    if (kind === "line" && nearest) {
+      this.combatVfx.fireProjectile(
+        origin.clone().setY(1.2),
+        nearest.pos.clone().setY(1.2),
+        { element: arch.element, skillTags: [skill?.id, skill?.name].join(" ") },
+      );
+    }
     this.particles?.castSkillVfx({
       element: arch.element,
       shape: kind,
@@ -1164,6 +1179,7 @@ export class CampScene {
     }
 
     this.skillVfx.update(delta);
+    this.combatVfx.update(delta);
     this.telegraphs?.update(delta);
     this.particles?.update(delta);
 
@@ -1394,6 +1410,7 @@ export class CampScene {
       this.heroAnim = null;
     }
     this.skillVfx?.dispose();
+    this.combatVfx?.dispose();
     this.telegraphs?.dispose();
     this.particles?.dispose();
     for (const t of this.townsfolk) {

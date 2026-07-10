@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { heroVfxTtl } from "./combat/combatVfx";
 
 /**
  * SkillVfx — spawns short-lived GLB visual effects (fire tornado, cloud ring)
@@ -45,11 +46,19 @@ interface ActiveVfx {
   baseScale: number;
 }
 
+interface PendingSpawn {
+  kind: VfxKind;
+  pos: THREE.Vector3;
+  radius: number;
+  ttl: number;
+}
+
 export class SkillVfx {
   private scene: THREE.Scene;
   private templates: Partial<Record<VfxKind, THREE.Object3D>> = {};
   private clips: Partial<Record<VfxKind, THREE.AnimationClip[]>> = {};
   private active: ActiveVfx[] = [];
+  private pending: PendingSpawn[] = [];
   private disposed = false;
 
   constructor(scene: THREE.Scene, loader: GLTFLoader) {
@@ -68,6 +77,7 @@ export class SkillVfx {
           });
           this.templates[kind] = gltf.scene;
           this.clips[kind] = gltf.animations;
+          this.flushPending(kind);
         },
         undefined,
         () => {}, // missing VFX must never break gameplay
@@ -75,10 +85,21 @@ export class SkillVfx {
     });
   }
 
+  private flushPending(kind: VfxKind) {
+    const ready = this.pending.filter((p) => p.kind === kind);
+    this.pending = this.pending.filter((p) => p.kind !== kind);
+    for (const p of ready) this.spawn(p.kind, p.pos, p.radius, p.ttl);
+  }
+
   /** Spawn a VFX at `pos`. `radius` sizes the effect; `ttl` seconds to live. */
-  spawn(kind: VfxKind, pos: THREE.Vector3, radius = 3, ttl = 1.2) {
+  spawn(kind: VfxKind, pos: THREE.Vector3, radius = 3, ttl?: number) {
+    const life = ttl ?? heroVfxTtl();
     const tpl = this.templates[kind];
-    if (!tpl || this.disposed) return;
+    if (!tpl) {
+      if (!this.disposed) this.pending.push({ kind, pos: pos.clone(), radius, ttl: life });
+      return;
+    }
+    if (this.disposed) return;
     const inst = tpl.clone(true);
 
     // Fit: tornado scales to a column height ~ 1.6x radius; cloud ring to a flat
@@ -108,7 +129,7 @@ export class SkillVfx {
       const action = mixer.clipAction(clips[0]);
       action.play();
     }
-    this.active.push({ group: inst, mixer, age: 0, ttl, baseScale });
+    this.active.push({ group: inst, mixer, age: 0, ttl: life, baseScale });
   }
 
   update(delta: number) {
@@ -143,5 +164,6 @@ export class SkillVfx {
     }
     this.templates = {};
     this.clips = {};
+    this.pending = [];
   }
 }

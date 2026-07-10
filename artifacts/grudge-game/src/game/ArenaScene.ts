@@ -11,6 +11,7 @@ import { archetypeForSkill } from "./combat/skillArchetypes";
 import { pointInShape, type ShapeQuery } from "./combat/damageShapes";
 import { TelegraphField } from "./combat/telegraphs";
 import { ParticleVfx } from "./combat/particles";
+import { CombatVfx } from "./combat/combatVfx";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import { canDodge } from "./combatInput";
 import type { ClassSkill } from "../data/classSkills";
@@ -204,6 +205,7 @@ export class ArenaScene {
   private skillVfx!: SkillVfx;
   private skillTelegraphs!: TelegraphField;
   private particles!: ParticleVfx;
+  private combatVfx!: CombatVfx;
   /** Resolved HUD skills for archetype mapping; idx fallback works if unset. */
   private hudSkills: (ClassSkill | undefined)[] = [];
   private animFrameId = 0;
@@ -302,6 +304,7 @@ export class ArenaScene {
     this.skillVfx = new SkillVfx(this.scene, new GLTFLoader());
     this.skillTelegraphs = new TelegraphField(this.scene);
     this.particles = new ParticleVfx(this.scene);
+    this.combatVfx = new CombatVfx(this.scene);
 
     this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 400);
     this.camera.position.set(22, 24, 22);
@@ -704,7 +707,18 @@ export class ArenaScene {
       kind === "circle" || kind === "nova"
         ? origin.clone()
         : origin.clone().add(dir.clone().multiplyScalar(reach * 0.5));
-    if (kind === "nova" || kind === "circle") this.skillVfx.spawn("cloud", center, 4, 1.0);
+    if (kind === "nova" || kind === "circle") {
+      this.skillVfx.spawn("cloud", center, 4);
+      if (arch.element === "fire") this.skillVfx.spawn("tornado", center, 3.5);
+    }
+    this.combatVfx.pulseCastAura(origin, arch.element);
+    if (kind === "line") {
+      this.combatVfx.fireProjectile(
+        origin.clone().setY(1.2),
+        this.bossPos.clone().setY(this.bossWorldHeight * 0.5),
+        { element: arch.element, skillTags: this.hudSkills[idx]?.name },
+      );
+    }
     this.particles?.castSkillVfx({
       element: arch.element,
       shape: kind,
@@ -811,23 +825,36 @@ export class ArenaScene {
   private spawnProjectile(ability: ArenaBossAbility, dmg: number, homing: boolean) {
     const color = homing ? 0xaa44ff : 0xff5522;
     const start = this.bossPos.clone().add(new THREE.Vector3(0, this.bossWorldHeight * 0.55, 0));
-    // Glowing additive billboard (shared particle texture) — not a primitive sphere.
-    const sprite = this.particles.projectileSprite(color, homing ? 1.5 : 1.25);
+    this.particles?.impact(start.clone(), color, 0.7);
+
+    const target = this.playerPos.clone().add(new THREE.Vector3(0, 1, 0));
+
+    if (!homing) {
+      this.combatVfx.fireProjectile(start, target, {
+        element: homing ? "arcane" : "fire",
+        skillTags: ability.name,
+        preset: { primary: color, secondary: 0xffeeaa, speed: 18, gravity: 1.5, size: 0.4, spin: 10 },
+        onHit: () => {
+          if (this.outcome === "fighting") {
+            this.damagePlayer(dmg, `${this.boss.name}'s bolt`);
+            this.spawnVfx(this.playerPos.clone(), color, 2, 0.4);
+          }
+        },
+      });
+      return;
+    }
+
+    const sprite = this.particles.projectileSprite(color, 1.5);
     sprite.position.copy(start);
     this.scene.add(sprite);
     const light = new THREE.PointLight(color, 2.4, 9, 2);
     sprite.add(light);
-    // Muzzle flash where the bolt is born.
-    this.particles?.impact(start.clone(), color, 0.7);
-
-    const target = this.playerPos.clone().add(new THREE.Vector3(0, 1, 0));
     const dir = new THREE.Vector3().subVectors(target, start).normalize();
-    const speed = homing ? 12 : 16;
     this.projectiles.push({
       sprite,
       light,
       pos: start.clone(),
-      vel: dir.multiplyScalar(speed),
+      vel: dir.multiplyScalar(12),
       life: 0,
       max: 3.2,
       damage: dmg,
@@ -1040,6 +1067,7 @@ export class ArenaScene {
     }
 
     this.skillVfx.update(delta);
+    this.combatVfx.update(delta);
     this.skillTelegraphs?.update(delta);
     this.particles?.update(delta);
 
@@ -1249,6 +1277,7 @@ export class ArenaScene {
     }
     if (this.heroAnim) { this.heroAnim.dispose(); this.heroAnim = null; }
     this.skillVfx?.dispose();
+    this.combatVfx?.dispose();
     this.skillTelegraphs?.dispose();
     this.particles?.dispose();
     if (this.bossGroup) this.bossGroup.userData.disposed = true;

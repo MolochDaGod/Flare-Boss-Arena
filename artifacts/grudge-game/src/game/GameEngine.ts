@@ -53,6 +53,9 @@ import { targetsInShape, type ShapeQuery } from "./combat/damageShapes";
 import type { CombatTarget } from "./combat/types";
 import { ParticleVfx } from "./combat/particles";
 import { TelegraphField } from "./combat/telegraphs";
+import { CombatVfx, statusFromSkill, type StatusSpec } from "./combat/combatVfx";
+import { resolveHitProcs, resolveKillProcs } from "../data/procs";
+import { getStoneCombatMods } from "../data/stones";
 import { DeployableManager } from "./combat/deployables";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import { FX2D } from "./FX2D";
@@ -197,6 +200,8 @@ export class GameEngine {
   private particles!: ParticleVfx;
   private telegraphs!: TelegraphField;
   private deployables!: DeployableManager;
+  private combatVfx!: CombatVfx;
+  private enemyStatus = new Map<string, StatusSpec & { until: number; tick: number }>();
   private bloom: BloomComposer | null = null;
   /** Resolved HUD skills for archetype mapping; idx fallback works if unset. */
   private hudSkills: (ClassSkill | undefined)[] = [];
@@ -339,6 +344,7 @@ export class GameEngine {
     this.particles = new ParticleVfx(this.scene);
     this.telegraphs = new TelegraphField(this.scene);
     this.deployables = new DeployableManager(this.scene);
+    this.combatVfx = new CombatVfx(this.scene);
     this.slashWaves = new SlashWaveField(this.scene, this.particles);
     // Selective bloom so the additive particle VFX glow without washing out the
     // dark scene. Null (graceful fallback to direct render) if setup fails headless.
@@ -1197,20 +1203,76 @@ export class GameEngine {
 
   /** Apply skill/deployable damage to one enemy (tier mitigation, damage number,
    *  hurt/death). Marks state dirty so off-cast hits refresh the HUD once/frame. */
-  private damageEnemy(en: EnemyInstance, amount: number, isCrit: boolean) {
+  private damageEnemy(en: EnemyInstance, amount: number, isCrit: boolean, isSkill = false) {
     if (en.state === "dead" || en.state === "death") return;
-    const dmg = Math.max(1, Math.floor(amount) - Math.floor(en.template.tier * 2));
+    const stones = getStoneCombatMods();
+    const procs = resolveHitProcs({
+      isCrit,
+      isSkill,
+      baseDamage: amount,
+      spellPower: 1 + stones.spellDamage,
+    });
+    let dmg = Math.max(1, Math.floor(amount + procs.extraDamage) - Math.floor(en.template.tier * 2));
     en.hp = Math.max(0, en.hp - dmg);
     const wp = en.model.group.position.clone();
     wp.y += en.model.height * 0.7;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dmg, worldPos: wp, age: 0, isPlayer: false, isCrit });
-    this.particles?.impact(wp, isCrit ? 0xffd54a : 0xff7a1e);
+    this.particles?.impact(wp, procs.elementColor);
+    if (procs.fireBolt) {
+      const tgt = wp.clone();
+      this.combatVfx.fireProjectile(this.playerPos.clone().setY(1.2), tgt, {
+        element: "lightning",
+        skillTags: "bolt",
+      });
+    }
+    if (procs.nova) this.particles?.nova(en.position.clone().setY(0.4), 3.2, procs.elementColor);
+    if (procs.burn) this.applyEnemyStatus(en, { kind: "burn", element: "fire", color: 0xff5522, duration: 4 });
+    if (procs.frost) this.applyEnemyStatus(en, { kind: "frost", element: "ice", color: 0x6fd2ff, duration: 4 });
+    if (procs.shock) this.applyEnemyStatus(en, { kind: "shock", element: "lightning", color: 0x9ad8ff, duration: 3 });
+    if (procs.heal > 0) this.playerHp = Math.min(this.playerMaxHp, this.playerHp + procs.heal);
+    if (procs.labels.length) this.log(procs.labels.join(" · "));
     if (en.hp <= 0) {
+      const kill = resolveKillProcs();
+      if (kill.labels.length) this.log(kill.labels.join(" · "));
       this.killEnemy(en);
     } else {
       en.anim.hurtPhase = 1;
       en.state = "hurt";
       en.hurtTimer = 0.4;
+    }
+  }
+
+  private applyEnemyStatus(en: EnemyInstance, spec: StatusSpec) {
+    const until = performance.now() + spec.duration * 1000;
+    this.enemyStatus.set(en.id, { ...spec, until, tick: 0 });
+    this.combatVfx.attachStatusZone(en.model.group, spec);
+  }
+
+  private tickEnemyStatus(delta: number) {
+    const now = performance.now();
+    for (const [id, st] of this.enemyStatus) {
+      if (now >= st.until) {
+        this.enemyStatus.delete(id);
+        continue;
+      }
+      const en = this.enemies.find((e) => e.id === id);
+      if (!en || en.state === "dead" || en.state === "death") {
+        this.enemyStatus.delete(id);
+        continue;
+      }
+      st.tick += delta;
+      if (st.tick < 1) continue;
+      st.tick = 0;
+      if (st.kind === "hot") return;
+      const dot = Math.max(1, Math.floor(this.playerBaseDamage * 0.12));
+      en.hp = Math.max(0, en.hp - dot);
+      const wp = en.model.group.position.clone();
+      wp.y += en.model.height * 0.5;
+      this.damageNumbers.push({ id: `d${this.idCounter++}`, value: dot, worldPos: wp, age: 0, isPlayer: false, isCrit: false });
+      if (en.hp <= 0) {
+        this.enemyStatus.delete(id);
+        this.killEnemy(en);
+      }
     }
   }
 
@@ -1240,7 +1302,8 @@ export class GameEngine {
    *  strike every enemy inside the shape. */
   useSkill(idx: number) {
     if (this.playerAttackCooldown > 0) return;
-    const arch = archetypeForSkill(this.hudSkills[idx], idx);
+    const skill = this.hudSkills[idx];
+    const arch = archetypeForSkill(skill, idx);
     const dir = this.resolveAimDir();
     this.playerFacing = Math.atan2(dir.x, dir.z);
 
@@ -1250,6 +1313,7 @@ export class GameEngine {
     this.playerAttackCooldown = this.playerMaxAttackCooldown;
 
     const origin = this.playerPos.clone();
+    this.combatVfx.pulseCastAura(origin, arch.element);
 
     if (arch.shape === "deployable") {
       const dep = arch.deployable ?? "fire_totem";
@@ -1257,6 +1321,7 @@ export class GameEngine {
       this.clampToArena(place);
       this.deployables.deploy(dep, place, arch.color, this.playerBaseDamage * arch.damageMult, arch.radius ?? 4);
       this.particles?.castSkillVfx({ element: arch.element, shape: "deployable", center: place.clone(), origin, dir, reach: arch.radius ?? 4 });
+      if (dep === "fire_totem") this.skillVfx.spawn("tornado", place.clone(), arch.radius ?? 4);
       this.log(`You deploy a ${dep.replace("_", " ")}.`);
       this.notifyState();
       return;
@@ -1277,7 +1342,7 @@ export class GameEngine {
     // area (origin for circle/nova; cone/line project forward inside castSkillVfx).
     const reach = arch.radius ?? arch.length ?? 4;
     const center = origin.clone();
-    this.spawnSkillVfx(center, arch.shape);
+    this.spawnSkillVfx(center, arch.shape, arch.element);
     this.particles?.castSkillVfx({
       element: arch.element,
       shape: arch.shape,
@@ -1288,20 +1353,40 @@ export class GameEngine {
       halfAngle: arch.halfAngle,
     });
 
+    const skillTags = [skill?.id, skill?.name, ...(skill?.effects ?? [])].join(" ");
+    const status = statusFromSkill(skill);
+    const nearest = this.nearestEnemy(arch.length ?? arch.radius ?? 12);
+    if (arch.shape === "line" && nearest) {
+      const tgt = nearest.position.clone().setY(1.2);
+      const from = origin.clone().setY(1.2);
+      this.combatVfx.fireProjectile(from, tgt, {
+        element: arch.element,
+        skillTags,
+        onHit: () => {
+          this.particles?.impact(tgt, arch.color, 1.1);
+          if (arch.element === "fire") this.skillVfx.spawn("tornado", tgt.clone().setY(0.1), 2.5);
+        },
+      });
+    }
+
     const hits = targetsInShape(q, this.enemies, (en) => en.state !== "dead" && en.state !== "death");
     for (const en of hits) {
       const isCrit = Math.random() < this.playerCritChance + 0.05;
       const raw = this.playerBaseDamage * arch.damageMult * (0.85 + Math.random() * 0.3) * (isCrit ? 1.75 : 1);
-      this.damageEnemy(en, raw, isCrit);
+      this.damageEnemy(en, raw, isCrit, true);
+      if (status) this.applyEnemyStatus(en, status);
+    }
+    if (status?.kind === "hot") {
+      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + Math.floor(this.playerMaxHp * 0.08));
     }
     this.notifyState();
   }
 
-  /** GLB flavor only for area shapes (a cloud ring on nova/circle). cone/line
-   *  rely on the element particle silhouette so the GLBs don't read as repetitive. */
-  private spawnSkillVfx(pos: THREE.Vector3, shape: SkillShapeKind) {
+  /** GLB flavor for area shapes — hero-scaled 3–5s lifetime from combat profile. */
+  private spawnSkillVfx(pos: THREE.Vector3, shape: SkillShapeKind, element?: string) {
     if (shape === "nova" || shape === "circle") {
-      this.skillVfx.spawn("cloud", pos, 4, 1.0);
+      this.skillVfx.spawn("cloud", pos, 4);
+      if (element === "fire") this.skillVfx.spawn("tornado", pos, 3.5);
     }
   }
 
@@ -1798,6 +1883,8 @@ export class GameEngine {
     }
 
     this.skillVfx.update(delta);
+    this.combatVfx.update(delta);
+    this.tickEnemyStatus(delta);
     this.particles?.update(delta);
     this.telegraphs?.update(delta);
     this.deployables?.update(delta, {
@@ -2106,7 +2193,9 @@ export class GameEngine {
     this.fx = null;
     this.heroAnim?.dispose();
     this.skillVfx?.dispose();
+    this.combatVfx?.dispose();
     this.particles?.dispose();
+    this.enemyStatus.clear();
     this.telegraphs?.dispose();
     this.deployables?.dispose();
     // Dispose the procedural ground + rock field.
