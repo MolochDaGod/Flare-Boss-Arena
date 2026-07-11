@@ -1552,9 +1552,15 @@ export class GameEngine {
   }
 
   /**
-   * Shift — dodge dash toward the **mouse ground point** (not WASD / facing).
-   * Fixed 4m travel, independent cooldown, short i-frames. Movement keys never
-   * redirect this dash (unlike older A/D strafe-dodge).
+   * Shift — 4m dodge with cooldown + i-frames.
+   *
+   * Direction priority (all work together):
+   *  1. A / ← — strafe left of current facing
+   *  2. D / → — strafe right of current facing
+   *  3. else mouse ground point (cursor) when available
+   *  4. else forward along facing
+   *
+   * W/S do not steer the dash (move keys stay for locomotion only).
    */
   doDodge() {
     const now = performance.now();
@@ -1562,22 +1568,32 @@ export class GameEngine {
     if (this.playerHp <= 0) return;
     if (!this.combatFsm.dodge(0.38)) return;
 
-    // Aim at cursor on the floor; fall back to current facing only if no pick yet.
     const dir = this._tmpV3a;
-    if (this.pointerGround) {
+    const faceSin = Math.sin(this.playerFacing);
+    const faceCos = Math.cos(this.playerFacing);
+    const holdA = this.keys.has("KeyA") || this.keys.has("ArrowLeft");
+    const holdD = this.keys.has("KeyD") || this.keys.has("ArrowRight");
+
+    if (holdA && !holdD) {
+      // Left of facing (old strafe-dodge)
+      dir.set(-faceCos, 0, faceSin);
+    } else if (holdD && !holdA) {
+      // Right of facing
+      dir.set(faceCos, 0, -faceSin);
+    } else if (this.pointerGround) {
+      // Cursor aim (default when not strafing)
       dir.set(
         this.pointerGround.x - this.playerPos.x,
         0,
         this.pointerGround.z - this.playerPos.z,
       );
+      if (dir.lengthSq() < 1e-6) dir.set(faceSin, 0, faceCos);
     } else {
-      dir.set(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    }
-    if (dir.lengthSq() < 1e-6) {
-      dir.set(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+      dir.set(faceSin, 0, faceCos);
     }
     dir.normalize();
 
+    // Face the dash direction so the body matches the roll.
     this.playerFacing = Math.atan2(dir.x, dir.z);
     this.playerPos.x += dir.x * this.DODGE_DISTANCE;
     this.playerPos.z += dir.z * this.DODGE_DISTANCE;
