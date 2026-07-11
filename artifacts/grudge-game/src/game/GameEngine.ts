@@ -69,12 +69,13 @@ import {
 } from "../data/procs";
 import { getGameLoadout } from "../data/gameCombat";
 import { getPartyAllyIds, getGrudge6Hero, MAX_PARTY_ALLIES } from "../data/grudge6Roster";
-import { Grudge6Factory } from "./grudge6/Grudge6Character";
+import { Grudge6Factory, type Grudge6PrefabDebug } from "./grudge6/Grudge6Character";
 import {
   createAllyAgent,
   thinkAlly,
   stepAllyMovement,
   type AllyAgent,
+  type AllyState,
 } from "./grudge6/AllyBrain";
 import { FX2D } from "./FX2D";
 import { DUNGEON_COLLECTABLES } from "../data/worldProps";
@@ -161,6 +162,38 @@ export interface NearbyPirateInfo {
   title: string;
   role: PirateRole;
   prompt: string;
+}
+
+/** Island beat cards (boss alert / victory / sail). Kept for Party / overlay consumers. */
+export type GameBeatKind =
+  | "boss_alert"
+  | "boss_defeated"
+  | "victory"
+  | "sail"
+  | "mission_complete"
+  | "island_event";
+
+export interface GameBeat {
+  kind: GameBeatKind;
+  title: string;
+  subtitle: string;
+}
+
+/** Party ally row for PartyHud. */
+export interface AllyHudSnapshot {
+  id: string;
+  name: string;
+  role: string;
+  race: string;
+  hp: number;
+  maxHp: number;
+  state: AllyState;
+  brain: string;
+  loadOk: boolean;
+  dead: boolean;
+  respawnSec: number;
+  gait: number | null;
+  debug: Grudge6PrefabDebug | null;
 }
 
 export interface GameState {
@@ -371,6 +404,12 @@ export class GameEngine {
   private jumpVel = 0;
   private playerY = 0;
   private dodgeIframeUntil = 0;
+  /** Next time Shift dodge may fire (ms, performance.now). */
+  private dodgeCdUntil = 0;
+  /** World units (meters) of mouse-aimed dodge dash. */
+  private readonly DODGE_DISTANCE = 4;
+  /** Seconds between dodges. */
+  private readonly DODGE_COOLDOWN = 0.95;
   /** Tag-based combat FSM (annihilate Maria pattern). */
   private combatFsm = new CombatStateMachine();
   private skillCursor: THREE.Mesh | null = null;
@@ -1512,22 +1551,50 @@ export class GameEngine {
     this.playerAnimator?.triggerNamed(["jump", "jump_full"]);
   }
 
-  /** Shift — dodge with i-frames via committed dash (annihilate canMove+invulnerable). */
+  /**
+   * Shift — dodge dash toward the **mouse ground point** (not WASD / facing).
+   * Fixed 4m travel, independent cooldown, short i-frames. Movement keys never
+   * redirect this dash (unlike older A/D strafe-dodge).
+   */
   doDodge() {
+    const now = performance.now();
+    if (now < this.dodgeCdUntil) return;
+    if (this.playerHp <= 0) return;
     if (!this.combatFsm.dodge(0.38)) return;
-    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
-    if (this.keys.has("KeyA") || this.keys.has("ArrowLeft")) {
-      forward.set(-Math.cos(this.playerFacing), 0, Math.sin(this.playerFacing));
-    } else if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) {
-      forward.set(Math.cos(this.playerFacing), 0, -Math.sin(this.playerFacing));
+
+    // Aim at cursor on the floor; fall back to current facing only if no pick yet.
+    const dir = this._tmpV3a;
+    if (this.pointerGround) {
+      dir.set(
+        this.pointerGround.x - this.playerPos.x,
+        0,
+        this.pointerGround.z - this.playerPos.z,
+      );
+    } else {
+      dir.set(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
     }
-    this.playerPos.x += forward.x * 3.2;
-    this.playerPos.z += forward.z * 3.2;
+    if (dir.lengthSq() < 1e-6) {
+      dir.set(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    }
+    dir.normalize();
+
+    this.playerFacing = Math.atan2(dir.x, dir.z);
+    this.playerPos.x += dir.x * this.DODGE_DISTANCE;
+    this.playerPos.z += dir.z * this.DODGE_DISTANCE;
     this.clampToArena(this.playerPos);
+    this.resolvePlayer();
+
     this.playerAnimator?.triggerRole("dodge");
     this.playerAnimator?.triggerNamed(["dodge", "roll"]);
     this.playerTarget = null;
-    this.dodgeIframeUntil = performance.now() + 380;
+    this.attackHeld = false;
+    this.targetEnemy = null;
+    if (this.indicatorRing) this.indicatorRing.visible = false;
+
+    this.dodgeIframeUntil = now + 380;
+    this.dodgeCdUntil = now + this.DODGE_COOLDOWN * 1000;
+    this.particles?.impact(this.playerPos.clone().setY(0.35), 0xc5e8ff, 0.55);
+    this.notifyState(true);
   }
 
   private isDodging(): boolean {
@@ -2213,6 +2280,8 @@ export class GameEngine {
     }
     this.playerY = 0;
     this.jumpVel = 0;
+    this.dodgeCdUntil = 0;
+    this.dodgeIframeUntil = 0;
     this.combatFsm.reset();
     if (this.playerGroup) {
       this.playerGroup.position.set(this.playerPos.x, 0, this.playerPos.z);

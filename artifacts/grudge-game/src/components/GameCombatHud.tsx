@@ -318,7 +318,7 @@ export const GameCombatHud = memo(function GameCombatHud({
             </button>
           </div>
           <p className="text-[10px] text-[#9ab0c6] text-center max-w-[280px] leading-snug">
-            WASD move · LMB select · RMB attack · Q block · Shift dodge · Space jump · 1–5 skills · R special · E interact
+            WASD move · mouse aim · Shift dodge 4m to cursor · Q block · Space jump · LMB select · RMB attack · 1–5 · R · E
           </p>
         </div>
 

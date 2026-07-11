@@ -59,7 +59,7 @@ function buildSceneBoneLookup(scene: THREE.Object3D): Map<string, string> {
   root.traverse((node) => {
     if ((node as THREE.Bone).isBone) indexBoneName(lookup, node.name);
     const sm = node as THREE.SkinnedMesh;
-    if (sm.isSkinnedMesh?.skeleton?.bones) {
+    if (sm.isSkinnedMesh && sm.skeleton?.bones) {
       for (const bone of sm.skeleton.bones) indexBoneName(lookup, bone.name);
     }
   });

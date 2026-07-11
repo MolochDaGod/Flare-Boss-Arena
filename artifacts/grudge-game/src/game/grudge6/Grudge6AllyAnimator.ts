@@ -48,7 +48,7 @@ function pickBandClip(band: LocoBand, dir: AllyLocoDir, clips: AllyLocoClips): T
   if (dir === "left" && band === "walk" && clips.strafeLeft) return clips.strafeLeft;
   if (dir === "right" && band === "walk" && clips.strafeRight) return clips.strafeRight;
   if (band === "sprint") return clips.sprint;
-  return clips[band === "sprint" ? "run" : band];
+  return clips[band];
 }
 
 export class Grudge6AllyAnimator {
@@ -100,7 +100,7 @@ export class Grudge6AllyAnimator {
     this.locoDir = dir;
     this.activeBandKeys = key;
 
-    const next = new Map<string, THREE.AnimationAction>();
+    const next = new Map<LocoBand, THREE.AnimationAction>();
     for (const { state } of BANDS) {
       const clip = pickBandClip(state, dir, this.clips);
       const cacheId = `${dir}:${state}:${clip.uuid}`;

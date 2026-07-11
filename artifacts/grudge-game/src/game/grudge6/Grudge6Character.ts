@@ -207,14 +207,15 @@ function applyAtlasToScene(scene: THREE.Object3D, atlas: THREE.Texture): number 
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     for (const mat of mats) {
       if (!mat) continue;
-      mat.map = atlas;
-      mat.color.set(0xffffff);
-      if ((mat as THREE.MeshBasicMaterial).isMeshBasicMaterial) {
-        mat.toneMapped = false;
+      const m = mat as THREE.MeshStandardMaterial & { isMeshBasicMaterial?: boolean };
+      m.map = atlas;
+      if (m.color) m.color.set(0xffffff);
+      if (m.isMeshBasicMaterial) {
+        m.toneMapped = false;
       }
-      if (mat.metalness !== undefined) mat.metalness = Math.min(mat.metalness, 0.3);
-      if (mat.roughness !== undefined) mat.roughness = Math.max(mat.roughness, 0.5);
-      mat.needsUpdate = true;
+      if (typeof m.metalness === "number") m.metalness = Math.min(m.metalness, 0.3);
+      if (typeof m.roughness === "number") m.roughness = Math.max(m.roughness, 0.5);
+      m.needsUpdate = true;
       patched++;
     }
   });
