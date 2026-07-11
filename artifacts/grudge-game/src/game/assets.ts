@@ -1,10 +1,13 @@
 import * as THREE from "three";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
+import type { GLTF, GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 const BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
 
 const fbxLoader = new FBXLoader();
 const fbxCache = new Map<string, Promise<THREE.Group>>();
+/** Shared GLB/GLTF promise cache — one network parse per URL per session. */
+const gltfCache = new Map<string, Promise<GLTF>>();
 
 export function loadFBX(path: string): Promise<THREE.Group> {
   const url = `${BASE}${path.startsWith("/") ? path : "/" + path}`;
@@ -16,6 +19,29 @@ export function loadFBX(path: string): Promise<THREE.Group> {
     fbxCache.set(url, p);
   }
   return p.then((g) => cloneSkinned(g));
+}
+
+/**
+ * Load a GLTF once and reuse the parsed result. Callers must clone `gltf.scene`
+ * (and re-bind skins) before mutating — the cached root is shared.
+ */
+export function loadGLTFCached(loader: GLTFLoader, url: string): Promise<GLTF> {
+  let p = gltfCache.get(url);
+  if (!p) {
+    p = new Promise<GLTF>((resolve, reject) => {
+      loader.load(url, resolve, undefined, reject);
+    }).catch((err) => {
+      gltfCache.delete(url);
+      throw err;
+    });
+    gltfCache.set(url, p);
+  }
+  return p;
+}
+
+/** Drop a failed entry so a later retry can re-fetch (e.g. after CDN blip). */
+export function invalidateGLTFCache(url: string) {
+  gltfCache.delete(url);
 }
 
 function cloneSkinned(src: THREE.Group): THREE.Group {
@@ -157,13 +183,19 @@ export function attachWeaponToBone(
 
 /** Centre+scale-normalise an FBX group so its tallest dimension == targetHeight */
 export function normaliseHeight(g: THREE.Object3D, targetHeight: number) {
+  g.updateWorldMatrix(true, true);
   const box = new THREE.Box3().setFromObject(g);
-  const size = new THREE.Vector3(); box.getSize(size);
+  const size = new THREE.Vector3();
+  box.getSize(size);
   const h = Math.max(size.y, 0.001);
-  const scale = targetHeight / h;
-  g.scale.multiplyScalar(scale);
-  // Re-box after scaling, then move so feet sit at y=0
+  g.scale.multiplyScalar(targetHeight / h);
+  // Re-box after scaling — feet to y=0 and XZ center on origin.
+  g.updateWorldMatrix(true, true);
   const box2 = new THREE.Box3().setFromObject(g);
+  const center = new THREE.Vector3();
+  box2.getCenter(center);
+  g.position.x -= center.x;
+  g.position.z -= center.z;
   g.position.y -= box2.min.y;
 }
 

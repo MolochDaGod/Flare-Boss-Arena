@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { EnemyModel, Archetype, KitAnimator } from "./EnemyFactory";
+import { normalizeCharacterRoot } from "./modelNormalize";
 
 /**
  * KayKit animated-character system.
@@ -269,30 +270,16 @@ export function loadKitMonster(
       }
       const inner = gltf.scene;
 
-      const bbox = new THREE.Box3().setFromObject(inner);
-      const size = new THREE.Vector3(); bbox.getSize(size);
-      const center = new THREE.Vector3(); bbox.getCenter(center);
-
-      const scale = def.height / (size.y || 1);
-      inner.scale.setScalar(scale);
-      inner.position.set(-center.x * scale, -bbox.min.y * scale, -center.z * scale);
-
-      inner.traverse((child) => {
-        const mesh = child as THREE.Mesh & { isSkinnedMesh?: boolean };
-        if (mesh.isMesh) {
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-          if (mesh.isSkinnedMesh) mesh.frustumCulled = false;
-          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          for (const m of mats) {
-            if (m && (m as THREE.MeshStandardMaterial).color) {
-              const sm = m as THREE.MeshStandardMaterial;
-              model.bodyMats.push(sm);
-              model.originalColors.push(sm.color.getHex());
-            }
-          }
-        }
+      const norm = normalizeCharacterRoot(inner, {
+        targetHeight: def.height,
+        pinRootHorizontal: true,
       });
+      model.height = norm.height;
+      model.bodyMats.push(...norm.bodyMats);
+      model.originalColors.push(...norm.originalColors);
+      model.baseY = 0;
+      group.userData.baseY = 0;
+      group.userData.rootBone = norm.rootBone;
 
       group.add(inner);
 

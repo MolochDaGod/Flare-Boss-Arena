@@ -41,6 +41,18 @@ export interface EnemyModel {
    * hit/death) through it instead of the single-clip `mixer` path.
    */
   kit?: KitAnimator | null;
+  /**
+   * Multi-clip bank for GLBs that ship idle/walk/attack tracks (MonsterModels).
+   * Preferred over a single looping mixer when present.
+   */
+  clipBank?: {
+    update(delta: number): void;
+    setMoving(moving: boolean): void;
+    playAttack(): void;
+    playHit(): void;
+    playDeath(): void;
+    dispose(): void;
+  } | null;
 }
 
 /**
@@ -799,8 +811,37 @@ export function updateEnemyAnimation(model: EnemyModel, state: AnimState, delta:
       return;
     }
 
-    // Skeletal clip playback (rigged GLBs) — always advances so the model
-    // breathes/idles even when standing still.
+    // ─── Multi-clip GLB bank (idle / walk / attack / death) ───────────────
+    if (model.clipBank) {
+      const bank = model.clipBank;
+      bank.update(delta);
+
+      if (state.hurtPhase > 0) {
+        state.hurtPhase = Math.max(0, state.hurtPhase - delta * 4);
+        applyHurtFlash(bodyMats, originalColors, state.hurtPhase);
+        if (state.hurtPhase > 0.9) bank.playHit();
+      }
+
+      if (state.deathPhase > 0) {
+        state.deathPhase = Math.min(1, state.deathPhase + delta * 1.8);
+        bank.playDeath();
+        // Soft sink only if no death clip (playDeath is no-op without clip).
+        group.position.y = (group.userData.baseY ?? 0) - state.deathPhase * 0.15;
+        return;
+      }
+
+      if (state.isAttacking) {
+        state.attackPhase = Math.min(1, state.attackPhase + delta * 4);
+        if (state.attackPhase >= 1) { state.attackPhase = 0; state.isAttacking = false; }
+        bank.playAttack();
+      }
+      bank.setMoving(state.isWalking);
+      const lunge = Math.sin(state.attackPhase * Math.PI);
+      group.position.y = (group.userData.baseY ?? 0) + lunge * 0.12;
+      return;
+    }
+
+    // Single looping mixer (legacy one-clip monsters).
     if (model.mixer) model.mixer.update(delta);
 
     // Hurt flash fade-out.
@@ -831,8 +872,12 @@ export function updateEnemyAnimation(model: EnemyModel, state: AnimState, delta:
     // the facing yaw that GameEngine writes onto the group itself.
     if (!model.mixer) {
       const inner = group.children[0];
-      if (inner) inner.rotation.y = Math.sin(elapsed * 1.1) * 0.08;
-      group.position.y = (group.userData.baseY ?? 0) + Math.sin(elapsed * 1.6) * 0.04 + lunge * 0.15;
+      if (inner) {
+        // Subtle bob on the inner root only — never group.rotation (facing).
+        inner.rotation.y = Math.sin(elapsed * 1.1) * 0.06;
+        inner.position.y = Math.sin(elapsed * 1.6) * 0.03;
+      }
+      group.position.y = (group.userData.baseY ?? 0) + lunge * 0.15;
     }
     return;
   }

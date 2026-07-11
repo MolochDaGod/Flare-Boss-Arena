@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { WORLD_PROP_BY_ID, type WorldPropDef } from "../data/worldProps";
+import { loadGLTFCached } from "./assets";
 
 export interface LoadedWorldProp {
   holder: THREE.Group;
@@ -73,23 +74,14 @@ export function loadWorldProp(
   holder.userData.collectable = def.kind === "collectable" || def.kind === "perk_symbol";
 
   const loaded: LoadedWorldProp = { holder, mixer: null, def };
+  const url = `${MODELS_BASE}/${def.folder}/${def.file}`;
 
-  loader.load(
-    `${MODELS_BASE}/${def.folder}/${def.file}`,
+  loadGLTFCached(loader, url).then(
     (gltf) => {
-      if (holder.userData.disposed) {
-        gltf.scene.traverse((c) => {
-          const mesh = c as THREE.Mesh;
-          if (mesh.geometry) mesh.geometry.dispose();
-          if (mesh.material) {
-            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-            for (const m of mats) m.dispose();
-          }
-        });
-        return;
-      }
+      if (holder.userData.disposed) return;
 
-      const root = gltf.scene;
+      // Cached template is shared — clone before normalize / scene attach.
+      const root = gltf.scene.clone(true);
       normalizeRoot(root, def);
       applyShadows(root);
       holder.add(root);
@@ -108,7 +100,6 @@ export function loadWorldProp(
 
       opts.onReady?.(loaded);
     },
-    undefined,
     (err) => {
       if (import.meta.env.DEV) console.warn(`[WorldProp] failed to load ${propId}:`, err);
     },

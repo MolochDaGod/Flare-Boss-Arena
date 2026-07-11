@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { EnemyModel, Archetype } from "./EnemyFactory";
 import { CDN_MONSTER_BY_ID, isCdnMonsterId } from "../data/cdnMonsters";
-import { BOSS_MONSTER_BY_ID, isBossMonsterId } from "../data/bossMonsters";
+import { normalizeCharacterRoot, GlbClipBank } from "./modelNormalize";
 
 /**
  * GLB monster registry.
@@ -22,7 +22,7 @@ export interface MonsterDef {
   tier: number;
   hp: number;
   damage: number;
-  /** File under public/models/monsters/ or bosses/. */
+  /** File under public/models/monsters/. */
   file: string;
   /** Logical archetype — drives AI speed / attack range in GameEngine. */
   archetype: Archetype;
@@ -30,10 +30,6 @@ export interface MonsterDef {
   height: number;
   /** Name of the skeletal clip to loop, or null for static (rig-less) GLBs. */
   clip: string | null;
-  /** Subfolder under public/models/ (default monsters). */
-  subdir?: "monsters" | "bosses";
-  spawnRotY?: number;
-  bossScale?: number;
 }
 
 export const MONSTER_DEFS: MonsterDef[] = [
@@ -86,40 +82,24 @@ export const ANIMATED_MONSTER_TEMPLATES = MONSTER_DEFS.filter((d) => d.clip).map
 }));
 
 export function isMonsterId(id: string): boolean {
-  return MONSTER_BY_ID.has(id) || isBossMonsterId(id) || isCdnMonsterId(id);
+  return MONSTER_BY_ID.has(id) || isCdnMonsterId(id);
 }
 
-const MODELS_BASE = `${import.meta.env.BASE_URL}models`;
+const MODELS_BASE = `${import.meta.env.BASE_URL}models/monsters`;
 
 function resolveMonsterLoad(id: string): {
   url: string;
   height: number;
   archetype: Archetype;
   clip: string | null;
-  spawnRotY?: number;
-  bossScale?: number;
 } | null {
-  const boss = BOSS_MONSTER_BY_ID.get(id);
-  if (boss) {
-    return {
-      url: `${MODELS_BASE}/bosses/${boss.file}`,
-      height: boss.height,
-      archetype: boss.archetype,
-      clip: boss.clip,
-      spawnRotY: boss.spawnRotY,
-      bossScale: boss.bossScale,
-    };
-  }
   const local = MONSTER_BY_ID.get(id);
   if (local) {
-    const sub = local.subdir ?? "monsters";
     return {
-      url: `${MODELS_BASE}/${sub}/${local.file}`,
+      url: `${MODELS_BASE}/${local.file}`,
       height: local.height,
       archetype: local.archetype,
       clip: local.clip,
-      spawnRotY: local.spawnRotY,
-      bossScale: local.bossScale,
     };
   }
   const cdn = CDN_MONSTER_BY_ID.get(id);
@@ -149,6 +129,10 @@ function disposeMaterialTextures(mat: THREE.Material) {
  * whether or not the GLB has finished streaming in.
  */
 export function disposeMonsterModel(model: EnemyModel) {
+  if (model.clipBank) {
+    model.clipBank.dispose();
+    model.clipBank = null;
+  }
   if (model.mixer) {
     model.mixer.stopAllAction();
     model.mixer.uncacheRoot(model.mixer.getRoot());
@@ -219,47 +203,31 @@ export function loadMonsterModel(
       }
       const inner = gltf.scene;
 
-      // Measure pre-scale bbox to derive uniform scale + recenter offsets.
-      const bbox = new THREE.Box3().setFromObject(inner);
-      const size = new THREE.Vector3(); bbox.getSize(size);
-      const center = new THREE.Vector3(); bbox.getCenter(center);
-
-      const scale = def.height / (size.y || 1);
-      inner.scale.setScalar(scale);
-      // Recenter XZ to origin; drop feet (min Y) to y=0.
-      inner.position.set(-center.x * scale, -bbox.min.y * scale, -center.z * scale);
-      if (def.spawnRotY) inner.rotation.y = def.spawnRotY;
-
-      // Collect materials for the hurt-flash tint + enable shadows/culling.
-      inner.traverse((child) => {
-        const mesh = child as THREE.Mesh & { isSkinnedMesh?: boolean };
-        if (mesh.isMesh) {
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-          if (mesh.isSkinnedMesh) mesh.frustumCulled = false;
-          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          for (const m of mats) {
-            if (m && (m as THREE.MeshStandardMaterial).color) {
-              const sm = m as THREE.MeshStandardMaterial;
-              model.bodyMats.push(sm);
-              model.originalColors.push(sm.color.getHex());
-            }
-          }
-        }
+      // Canonical center + root + feet-to-floor (modelNormalize).
+      const norm = normalizeCharacterRoot(inner, {
+        targetHeight: def.height,
+        pinRootHorizontal: true,
       });
+      model.height = norm.height;
+      model.bodyMats.push(...norm.bodyMats);
+      model.originalColors.push(...norm.originalColors);
+      model.baseY = 0;
+      group.userData.baseY = 0;
+      group.userData.rootBone = norm.rootBone;
 
       group.add(inner);
 
-      // Skeletal clip → AnimationMixer (rigged GLBs only).
-      if (gltf.animations.length > 0) {
-        const hint = def.clip;
+      // Multi-clip bank when the GLB ships several tracks; else single idle loop.
+      if (gltf.animations.length > 1) {
+        model.clipBank = new GlbClipBank(inner, gltf.animations, def.clip);
+      } else if (gltf.animations.length === 1) {
         const clip =
-          (hint
-            ? gltf.animations.find((a) => a.name === hint) ??
-              gltf.animations.find((a) => a.name.toLowerCase().includes(hint.toLowerCase()))
-            : undefined) ??
-          gltf.animations.find((a) => /idle/i.test(a.name)) ??
-          gltf.animations[0];
+          (def.clip
+            ? gltf.animations.find((a) => a.name === def.clip) ??
+              gltf.animations.find((a) =>
+                a.name.toLowerCase().includes((def.clip ?? "").toLowerCase()),
+              )
+            : undefined) ?? gltf.animations[0];
         if (clip) {
           const mixer = new THREE.AnimationMixer(inner);
           const action = mixer.clipAction(clip);
