@@ -1165,9 +1165,15 @@ export class GameEngine {
     // Spawn the KayKit skeleton minions (real shared-library skeletal animation / uMMORPG undead).
     for (const m of KIT_TEMPLATES) configs.push({ template: m, count: m.tier === 1 ? 3 : 2 });
 
-    // Dark-elf warband near their camp (purple-tinted KayKit skeletons).
+    // Real uMMORPG / three-port skeleton GLBs (heavy mesh + lightweight warrior).
+    configs.push(
+      { template: { id: "mon_skeleton_ummo", name: "uMMORPG Skeleton", type: "undead", tier: 2, hp: 200, damage: 16 }, count: 2 },
+      { template: { id: "mon_skeleton_warrior_ummo", name: "Bone Legionnaire", type: "undead", tier: 2, hp: 210, damage: 18 }, count: 2 },
+    );
+
+    // Dark-elf warband near their camp (dark_elf.glb + tinted KayKit pack).
     for (const m of DARK_ELF_SPAWN_TEMPLATES) {
-      configs.push({ template: m, count: m.tier >= 4 ? 1 : 2 });
+      configs.push({ template: m, count: m.id === "mon_dark_elf" ? 2 : m.tier >= 4 ? 1 : 2 });
     }
 
     // Spider den — pincher brood + matriarch.
@@ -1319,10 +1325,10 @@ export class GameEngine {
       case "flying": pool = ["kit_skel_mage", "mon_sky_wraith"]; break;
       case "humanoid":
       default:
-        if (t <= 1) pool = ["kit_skel_minion"];
-        else if (t === 2) pool = ["kit_skel_warrior", "kit_skel_rogue", "mon_cultist"];
-        else if (t === 3) pool = ["kit_skel_mage", "kit_skel_rogue", "mon_cultist"];
-        else pool = ["mon_medusa", "mon_cultist", "kit_skel_mage"];
+        if (t <= 1) pool = ["kit_skel_minion", "mon_skeleton_warrior_ummo"];
+        else if (t === 2) pool = ["kit_skel_warrior", "kit_skel_rogue", "mon_skeleton_ummo", "mon_cultist"];
+        else if (t === 3) pool = ["kit_skel_mage", "mon_dark_elf", "mon_cultist"];
+        else pool = ["mon_dark_elf", "mon_medusa", "mon_cultist", "kit_skel_mage"];
         break;
     }
     const chosen = pool[seed % pool.length] ?? KIT_BY_TIER[t - 1] ?? "kit_skel_warrior";

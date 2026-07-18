@@ -34,8 +34,20 @@ export interface CatalogEntry {
   tint?: number;
 }
 
-/** Dark-elf warband — uses KayKit enemy meshes with purple/cyan tint. */
+/** Dark-elf warband — real dark_elf.glb + KayKit tinted pack leaders. */
 export const DARK_ELF_TEMPLATES: CatalogEntry[] = [
+  {
+    id: "mon_dark_elf",
+    name: "Dark Elf Warband",
+    type: "humanoid",
+    tier: 3,
+    hp: 280,
+    damage: 22,
+    faction: "dark_elf",
+    source: "local_glb",
+    archetype: "humanoid",
+    camps: ["dark_elf"],
+  },
   {
     id: "kit_delf_scout",
     name: "Dark Elf Scout",
@@ -83,7 +95,7 @@ export const DARK_ELF_TEMPLATES: CatalogEntry[] = [
     hp: 320,
     damage: 28,
     faction: "dark_elf",
-    source: "kaykit",
+    source: "local_glb",
     archetype: "humanoid",
     camps: ["dark_elf"],
     tint: 0x1a0a30,
@@ -203,11 +215,13 @@ export function seededUnit(seed: number, salt = 0): number {
 /** Map catalog id → actual loader id (spider broodling → pincher mesh, etc.). */
 export function resolveCatalogModelId(id: string): string {
   if (id === "mon_spider_broodling" || id === "mon_spider_matriarch") return "mon_pincher";
-  // Dark elves reuse skeleton kit meshes with tints applied post-load.
+  // Captain uses full dark_elf.glb mesh; scouts use tinted KayKit skeletons.
   if (id === "kit_delf_scout") return "kit_skel_rogue";
   if (id === "kit_delf_bladedancer") return "kit_skel_warrior";
   if (id === "kit_delf_shadowmage") return "kit_skel_mage";
-  if (id === "kit_delf_captain") return "kit_skel_warrior";
+  if (id === "kit_delf_captain") return "mon_dark_elf";
+  // Prefer real uMMORPG skeleton GLBs when bestiary maps undead generics.
+  if (id === "mon_skeleton" || id === "skeleton") return "mon_skeleton_ummo";
   return id;
 }
 
@@ -218,6 +232,7 @@ export function catalogTint(id: string): number | undefined {
 export function catalogScale(id: string): number {
   if (id === "mon_spider_broodling") return 0.55;
   if (id === "mon_spider_matriarch") return 1.65;
-  if (id === "kit_delf_captain") return 1.12;
+  if (id === "kit_delf_captain") return 1.08;
+  if (id === "mon_dark_elf") return 1.0;
   return 1;
 }

@@ -69,6 +69,22 @@ export const MONSTER_DEFS: MonsterDef[] = [
     hp: 420, damage: 26, file: "pincher.glb", archetype: "flying",
     height: 2.2, clip: "pincheranim", // flying AI + elevated combat
   },
+  // ── Discovered real GLBs (grudge-three-port / prim-sandbox / uMMORPG path) ─
+  {
+    id: "mon_dark_elf", name: "Dark Elf Warband", type: "humanoid", tier: 3,
+    hp: 280, damage: 22, file: "dark_elf.glb", archetype: "humanoid",
+    height: 2.05, clip: null, // Mixamo retarget when no authored clips
+  },
+  {
+    id: "mon_skeleton_ummo", name: "uMMORPG Skeleton", type: "undead", tier: 2,
+    hp: 200, damage: 16, file: "skeleton.glb", archetype: "humanoid",
+    height: 1.95, clip: null,
+  },
+  {
+    id: "mon_skeleton_warrior_ummo", name: "Bone Legionnaire", type: "undead", tier: 2,
+    hp: 210, damage: 18, file: "skeleton_warrior_ummo.glb", archetype: "humanoid",
+    height: 1.9, clip: null,
+  },
 ];
 
 const MONSTER_BY_ID = new Map(MONSTER_DEFS.map((d) => [d.id, d]));
