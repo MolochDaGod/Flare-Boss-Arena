@@ -13,6 +13,7 @@ import type { FighterKit, FighterSkillDef, FighterSpecialDef } from "./fighterSk
 import type { CombatProfile, BrainArchetype, AbilityDesign } from "./characterCombatProfiles";
 import type { SkillElement } from "../game/combat/particles";
 import { getWarlordsLoadout } from "./warlordsEquipment";
+import { animCandidatesForSkill, categoryToFamily, warriorFamily } from "./weaponSkillAnims";
 
 export type AnnihilateRace = "human" | "barbarian" | "elf" | "dwarf" | "orc" | "undead";
 export type AnnihilateClass = "warrior" | "mage" | "ranger" | "worge";
@@ -123,7 +124,8 @@ const CLASS_KITS: Record<
     special: {
       name: "War Cry Cleave",
       description: "A frontline shockwave slash that opens the fight.",
-      anim: ["attack", "skill_a", "combo"],
+      // Mixamo: sword+shield slash / great slash (uMMORPG cleave)
+      anim: ["cleave", "great_slash", "slash", "attack"],
       damageMult: 2.5,
       manaCost: 26,
       cooldown: 8,
@@ -133,18 +135,18 @@ const CLASS_KITS: Record<
       color: 0xef4444,
     },
     skills: [
-      sk({ id: "slash", name: "Slash", description: "Steady blade strike.", glyph: "⚔", anim: ["attack", "combo_a"], targeting: "instant", shape: "cone", element: "physical", damageMult: 1.3, manaCost: 6, cooldown: 1.2, aoeRadius: 3.5 }),
-      sk({ id: "power_strike", name: "Power Strike", description: "Heavy overhead blow.", glyph: "💥", anim: ["combo_b", "skill_a"], targeting: "instant", shape: "cone", element: "physical", damageMult: 2.0, manaCost: 14, cooldown: 3, aoeRadius: 4 }),
-      sk({ id: "shield_bash", name: "Shield Bash", description: "Stun cone bash.", glyph: "🛡", anim: ["skill_b", "boost"], targeting: "instant", shape: "cone", element: "physical", damageMult: 1.5, manaCost: 12, cooldown: 4, aoeRadius: 4 }),
-      sk({ id: "war_cry", name: "War Cry", description: "Self power nova.", glyph: "📢", anim: ["boost"], targeting: "self", shape: "nova", element: "physical", damageMult: 0.3, manaCost: 16, cooldown: 7, aoeRadius: 3 }),
-      sk({ id: "cleave_line", name: "Cleave Line", description: "Piercing sword line.", glyph: "🗡", anim: ["skill_a", "combo_c"], targeting: "instant", shape: "line", element: "physical", damageMult: 1.8, manaCost: 14, cooldown: 4 }),
+      sk({ id: "slash", name: "Slash", description: "Steady blade strike.", glyph: "⚔", anim: animCandidatesForSkill("slash", "sword_shield"), targeting: "instant", shape: "cone", element: "physical", damageMult: 1.3, manaCost: 6, cooldown: 1.2, aoeRadius: 3.5 }),
+      sk({ id: "power_strike", name: "Power Strike", description: "Heavy overhead blow.", glyph: "💥", anim: animCandidatesForSkill("power-strike", "sword_shield"), targeting: "instant", shape: "cone", element: "physical", damageMult: 2.0, manaCost: 14, cooldown: 3, aoeRadius: 4 }),
+      sk({ id: "shield_bash", name: "Shield Bash", description: "Stun cone bash.", glyph: "🛡", anim: ["block", "power_strike", "attack"], targeting: "instant", shape: "cone", element: "physical", damageMult: 1.5, manaCost: 12, cooldown: 4, aoeRadius: 4 }),
+      sk({ id: "war_cry", name: "War Cry", description: "Self power nova.", glyph: "📢", anim: ["power_up", "block_idle", "attack"], targeting: "self", shape: "nova", element: "physical", damageMult: 0.3, manaCost: 16, cooldown: 7, aoeRadius: 3 }),
+      sk({ id: "cleave_line", name: "Cleave Line", description: "Piercing sword line.", glyph: "🗡", anim: animCandidatesForSkill("cleave", "sword"), targeting: "instant", shape: "line", element: "physical", damageMult: 1.8, manaCost: 14, cooldown: 4 }),
     ],
   },
   mage: {
     special: {
       name: "Meteor Storm",
       description: "Rain arcane meteors as a traveling slash of starfire.",
-      anim: ["cast", "skill_a", "skill_b"],
+      anim: ["nova", "aoe", "cast2h", "cast", "attack"],
       damageMult: 2.8,
       manaCost: 32,
       cooldown: 9,
@@ -154,18 +156,18 @@ const CLASS_KITS: Record<
       color: 0x8b5cf6,
     },
     skills: [
-      sk({ id: "fireball", name: "Fireball", description: "Ground fire circle.", glyph: "🔥", anim: ["cast", "skill_a"], targeting: "ground_aoe", shape: "circle", element: "fire", damageMult: 1.8, manaCost: 12, cooldown: 2.5, aoeRadius: 4, placeRange: 10 }),
-      sk({ id: "frost", name: "Frost Bolt", description: "Slowing ice line.", glyph: "❄", anim: ["cast", "combo_a"], targeting: "instant", shape: "line", element: "arcane", damageMult: 1.5, manaCost: 10, cooldown: 2 }),
-      sk({ id: "chain", name: "Chain Lightning", description: "Forking lightning cone.", glyph: "⚡", anim: ["skill_b", "cast"], targeting: "instant", shape: "cone", element: "lightning", damageMult: 1.9, manaCost: 16, cooldown: 4, aoeRadius: 5.5 }),
-      sk({ id: "mana_shield", name: "Mana Shield", description: "Self arcane barrier.", glyph: "🔮", anim: ["boost", "skill_b"], targeting: "self", shape: "nova", element: "arcane", damageMult: 0.2, manaCost: 18, cooldown: 8, aoeRadius: 2.5 }),
-      sk({ id: "meteor", name: "Meteor", description: "Heavy ground nova.", glyph: "☄", anim: ["skill_a", "skill_b"], targeting: "ground_aoe", shape: "nova", element: "fire", damageMult: 2.5, manaCost: 28, cooldown: 8, aoeRadius: 5.5, placeRange: 11 }),
+      sk({ id: "fireball", name: "Fireball", description: "Ground fire circle.", glyph: "🔥", anim: animCandidatesForSkill("fireball", "staff"), targeting: "ground_aoe", shape: "circle", element: "fire", damageMult: 1.8, manaCost: 12, cooldown: 2.5, aoeRadius: 4, placeRange: 10 }),
+      sk({ id: "frost", name: "Frost Bolt", description: "Slowing ice line.", glyph: "❄", anim: animCandidatesForSkill("ice-spike", "staff"), targeting: "instant", shape: "line", element: "arcane", damageMult: 1.5, manaCost: 10, cooldown: 2 }),
+      sk({ id: "chain", name: "Chain Lightning", description: "Forking lightning cone.", glyph: "⚡", anim: animCandidatesForSkill("chain-lightning", "staff"), targeting: "instant", shape: "cone", element: "lightning", damageMult: 1.9, manaCost: 16, cooldown: 4, aoeRadius: 5.5 }),
+      sk({ id: "mana_shield", name: "Mana Shield", description: "Self arcane barrier.", glyph: "🔮", anim: animCandidatesForSkill("barrier", "staff"), targeting: "self", shape: "nova", element: "arcane", damageMult: 0.2, manaCost: 18, cooldown: 8, aoeRadius: 2.5 }),
+      sk({ id: "meteor", name: "Meteor", description: "Heavy ground nova.", glyph: "☄", anim: ["nova", "aoe", "cast2h", "attack"], targeting: "ground_aoe", shape: "nova", element: "fire", damageMult: 2.5, manaCost: 28, cooldown: 8, aoeRadius: 5.5, placeRange: 11 }),
     ],
   },
   ranger: {
     special: {
       name: "Rain of Arrows",
       description: "A volley slash-wave of piercing shafts.",
-      anim: ["attack", "skill_a", "combo"],
+      anim: ["volley", "aimed", "attack"],
       damageMult: 2.6,
       manaCost: 28,
       cooldown: 8,
@@ -175,18 +177,18 @@ const CLASS_KITS: Record<
       color: 0x22c55e,
     },
     skills: [
-      sk({ id: "aimed", name: "Aimed Shot", description: "Long line shot.", glyph: "🎯", anim: ["attack", "combo_a"], targeting: "instant", shape: "line", element: "physical", damageMult: 1.6, manaCost: 8, cooldown: 1.5 }),
-      sk({ id: "poison", name: "Poison Arrow", description: "Toxic cone spray.", glyph: "☠", anim: ["skill_a", "combo_b"], targeting: "instant", shape: "cone", element: "poison", damageMult: 1.5, manaCost: 12, cooldown: 3, aoeRadius: 4.5 }),
-      sk({ id: "volley", name: "Volley", description: "Ground arrow rain.", glyph: "🏹", anim: ["skill_b", "boost"], targeting: "ground_aoe", shape: "circle", element: "physical", damageMult: 2.0, manaCost: 18, cooldown: 5, aoeRadius: 4.5, placeRange: 12 }),
-      sk({ id: "evasion", name: "Evasion", description: "Self mobility nova.", glyph: "💨", anim: ["dodge", "boost"], targeting: "self", shape: "nova", element: "physical", damageMult: 0.2, manaCost: 10, cooldown: 6, aoeRadius: 2 }),
-      sk({ id: "eagle", name: "Eagle Eye Barrage", description: "Precision multi-line.", glyph: "🦅", anim: ["skill_a", "skill_b"], targeting: "instant", shape: "line", element: "physical", damageMult: 2.2, manaCost: 22, cooldown: 6 }),
+      sk({ id: "aimed", name: "Aimed Shot", description: "Long line shot.", glyph: "🎯", anim: animCandidatesForSkill("aimed-shot", "bow"), targeting: "instant", shape: "line", element: "physical", damageMult: 1.6, manaCost: 8, cooldown: 1.5 }),
+      sk({ id: "poison", name: "Poison Arrow", description: "Toxic cone spray.", glyph: "☠", anim: ["aimed", "quick_shot", "attack"], targeting: "instant", shape: "cone", element: "poison", damageMult: 1.5, manaCost: 12, cooldown: 3, aoeRadius: 4.5 }),
+      sk({ id: "volley", name: "Volley", description: "Ground arrow rain.", glyph: "🏹", anim: animCandidatesForSkill("rain-of-arrows", "bow"), targeting: "ground_aoe", shape: "circle", element: "physical", damageMult: 2.0, manaCost: 18, cooldown: 5, aoeRadius: 4.5, placeRange: 12 }),
+      sk({ id: "evasion", name: "Evasion", description: "Self mobility nova.", glyph: "💨", anim: animCandidatesForSkill("evasive-roll", "bow"), targeting: "self", shape: "nova", element: "physical", damageMult: 0.2, manaCost: 10, cooldown: 6, aoeRadius: 2 }),
+      sk({ id: "eagle", name: "Eagle Eye Barrage", description: "Precision multi-line.", glyph: "🦅", anim: ["aimed", "volley", "attack"], targeting: "instant", shape: "line", element: "physical", damageMult: 2.2, manaCost: 22, cooldown: 6 }),
     ],
   },
   worge: {
     special: {
       name: "Primal Howl",
       description: "Beast-form shockwave — pack fury as a slash wave.",
-      anim: ["attack", "skill_a", "roar"],
+      anim: ["slam", "whirlwind", "claw", "attack"],
       damageMult: 2.7,
       manaCost: 28,
       cooldown: 8,
@@ -196,11 +198,11 @@ const CLASS_KITS: Record<
       color: 0xf97316,
     },
     skills: [
-      sk({ id: "claw", name: "Claw Swipe", description: "Wide claw cone.", glyph: "🐾", anim: ["attack", "combo_a"], targeting: "instant", shape: "cone", element: "physical", damageMult: 1.5, manaCost: 8, cooldown: 1.4, aoeRadius: 4 }),
-      sk({ id: "pounce", name: "Feral Charge", description: "Gap-close line.", glyph: "🐆", anim: ["run", "combo_b"], targeting: "instant", shape: "line", element: "physical", damageMult: 1.8, manaCost: 12, cooldown: 3.5 }),
-      sk({ id: "howl", name: "Primal Roar", description: "Fear nova.", glyph: "🦁", anim: ["skill_b", "boost"], targeting: "instant", shape: "nova", element: "physical", damageMult: 1.4, manaCost: 14, cooldown: 5, aoeRadius: 5.5 }),
-      sk({ id: "bear", name: "Bear Form Slam", description: "Heavy ground circle.", glyph: "🐻", anim: ["skill_a", "combo_c"], targeting: "ground_aoe", shape: "circle", element: "physical", damageMult: 2.2, manaCost: 20, cooldown: 6, aoeRadius: 5, placeRange: 7 }),
-      sk({ id: "pack", name: "Pack Howl", description: "Buff allies (self nova).", glyph: "🌙", anim: ["boost", "skill_b"], targeting: "self", shape: "nova", element: "arcane", damageMult: 0.3, manaCost: 16, cooldown: 8, aoeRadius: 3 }),
+      sk({ id: "claw", name: "Claw Swipe", description: "Wide claw cone.", glyph: "🐾", anim: ["claw", "punch", "jab", "attack"], targeting: "instant", shape: "cone", element: "physical", damageMult: 1.5, manaCost: 8, cooldown: 1.4, aoeRadius: 4 }),
+      sk({ id: "pounce", name: "Feral Charge", description: "Gap-close line.", glyph: "🐆", anim: ["thrust", "slash", "attack"], targeting: "instant", shape: "line", element: "physical", damageMult: 1.8, manaCost: 12, cooldown: 3.5 }),
+      sk({ id: "howl", name: "Primal Roar", description: "Fear nova.", glyph: "🦁", anim: ["power_up", "nova", "attack"], targeting: "instant", shape: "nova", element: "physical", damageMult: 1.4, manaCost: 14, cooldown: 5, aoeRadius: 5.5 }),
+      sk({ id: "bear", name: "Bear Form Slam", description: "Heavy ground circle.", glyph: "🐻", anim: ["slam", "smash", "power_strike", "attack"], targeting: "ground_aoe", shape: "circle", element: "physical", damageMult: 2.2, manaCost: 20, cooldown: 6, aoeRadius: 5, placeRange: 7 }),
+      sk({ id: "pack", name: "Pack Howl", description: "Buff allies (self nova).", glyph: "🌙", anim: ["power_up", "cast", "attack"], targeting: "self", shape: "nova", element: "arcane", damageMult: 0.3, manaCost: 16, cooldown: 8, aoeRadius: 3 }),
     ],
   },
 };
@@ -209,10 +211,24 @@ export function annihilateFighterKit(fighterId: string): FighterKit | null {
   const parsed = parseAnnihilateHeroId(fighterId);
   if (!parsed) return null;
   const tpl = CLASS_KITS[parsed.classId];
+  const gear = getWarlordsLoadout(parsed.race, parsed.classId);
+  // T0 weapon family → Mixamo clip candidates (uMMORPG skill naming).
+  const family =
+    parsed.classId === "warrior"
+      ? warriorFamily(gear.offhandIsShield)
+      : categoryToFamily(gear.mainhandCategory);
   return {
     fighterId,
-    special: { ...tpl.special },
-    skills: tpl.skills.map((s) => ({ ...s, id: `${fighterId}_${s.id}` })),
+    special: {
+      ...tpl.special,
+      anim: [...tpl.special.anim, ...animCandidatesForSkill(tpl.special.name, family)],
+    },
+    skills: tpl.skills.map((s) => ({
+      ...s,
+      id: `${fighterId}_${s.id}`,
+      // Prefer kit-authored Mixamo keys; fall back through family map.
+      anim: s.anim.length ? s.anim : animCandidatesForSkill(s.id.replace(`${fighterId}_`, ""), family),
+    })),
   };
 }
 
