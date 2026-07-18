@@ -227,6 +227,7 @@ function startSplineAttack(
   mid.y = 2.2 + seededUnit(w.castSeed, 9) * 2;
   const end = playerPos.clone();
   end.y = 1.2;
+  // Arc bolt: light seek + gravity — Shift dodge / side-step clears if timed.
   projectiles?.spawnSpline?.({
     origin,
     control: mid,
@@ -234,24 +235,29 @@ function startSplineAttack(
     damage: 18 + Math.floor(seededUnit(w.castSeed, 11) * 10),
     speed: WISP_PROJECTILE_SPEED,
     color: w.palette.color,
-    radius: 0.9,
-    life: 2.8,
+    radius: 0.58,
+    life: 3.2,
     label: `${w.palette.name} Bolt`,
     team: "enemy",
+    seekAccel: 5.2,
+    gravityScale: 1.05,
   });
-  // Secondary fan bolts on spline path feel
-  projectiles?.spawn({
+  // Secondary ballistic spark (weaker seek, easier to dodge)
+  const sparkCtrl = mid.clone().add(side.clone().multiplyScalar(1.2));
+  sparkCtrl.y += 0.6;
+  projectiles?.spawnSpline?.({
     origin,
-    dir: to,
-    damage: 12,
-    speed: WISP_PROJECTILE_SPEED,
+    control: sparkCtrl,
+    target: end.clone().add(new THREE.Vector3((seededUnit(w.castSeed, 13) - 0.5) * 2.5, 0, 0)),
+    damage: 11,
+    speed: WISP_PROJECTILE_SPEED * 0.92,
     color: w.palette.color,
-    radius: 0.75,
-    homing: 0.12,
-    life: 2.2,
-    y: 1.5,
+    radius: 0.5,
+    life: 2.6,
     label: `${w.palette.name} Spark`,
     team: "enemy",
+    seekAccel: 3.8,
+    gravityScale: 1.15,
   });
 }
 

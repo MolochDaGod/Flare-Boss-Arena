@@ -4,12 +4,18 @@
  * Pattern from ArenaScene + annihilate SwordBlaster / Hadouken:
  *  • bright additive orb + ground shadow ring
  *  • linear or lightly-homing travel
- *  • tight hit radius vs larger visual (generous dodges)
+ *  • tight hit radius vs larger visual (dodges win if timed)
+ *  • spline / arc bolts: physics + gravity + mild seek (dodgeable)
  *  • optional line-beam telegraph before a pierce shot
  */
 import * as THREE from "three";
 import type { ParticleVfx } from "./particles";
 import type { TelegraphField } from "./telegraphs";
+
+/** World gravity for ballistic / spline bolts (m/s²). */
+export const PROJECTILE_GRAVITY = 14.5;
+/** Floor Y — bolts die or skip on impact. */
+export const PROJECTILE_FLOOR_Y = 0.12;
 
 export interface ProjectileOpts {
   origin: THREE.Vector3;
@@ -42,13 +48,30 @@ export interface ActiveProjectile {
   maxLife: number;
   damage: number;
   radius: number;
+  /** Lateral seek strength (0 = none). Linear bolts use this as 0..1 scale. */
   homing: number;
   color: number;
   trailT: number;
   label: string;
   hit: boolean;
   team: "enemy" | "player";
-  /** Optional quadratic Bezier path (uMMORPG wisp-style). */
+  /**
+   * Ballistic arc bolt (wisp spline style).
+   * Mild seek + gravity — not a locked Bezier rail, so dodges work.
+   */
+  ballistic?: {
+    /** Seek acceleration toward live target (units/s²). Low = dodgeable. */
+    seekAccel: number;
+    /** Gravity scale (1 = PROJECTILE_GRAVITY). */
+    gravity: number;
+    /** Air drag 0..1 per second (velocity damp). */
+    drag: number;
+    /** Max turn rate for seek (rad/s) — caps tracking. */
+    maxTurn: number;
+    /** Min height for a hit (player dodge/jump clears low arcs). */
+    hitHeightHalf: number;
+  };
+  /** @deprecated legacy pure-Bezier; migrated to ballistic. */
   spline?: {
     a: THREE.Vector3;
     b: THREE.Vector3;
@@ -142,8 +165,11 @@ export class ProjectileField {
   }
 
   /**
-   * Quadratic Bezier projectile (wisp curved bolts).
-   * Travels along a→b→c at approximately `speed` world units / sec.
+   * Arc / “spline” bolt — ballistic with light target seek + gravity.
+   *
+   * Not a locked Bezier rail: initial loft aims near `control`, then mild
+   * seek steers toward the live target. Side-steps and dodges clear the
+   * small hit sphere when timed well.
    */
   spawnSpline(opts: {
     origin: THREE.Vector3;
@@ -156,16 +182,30 @@ export class ProjectileField {
     life?: number;
     label?: string;
     team?: "enemy" | "player";
+    /** Seek accel toward target (default ~5.5 — light tracking). */
+    seekAccel?: number;
+    /** Gravity mult (default 1). */
+    gravityScale?: number;
   }): ActiveProjectile | null {
     if (this.disposed) return null;
     const color = opts.color ?? 0xaa66ff;
     const a = opts.origin.clone();
     const b = opts.control.clone();
     const c = opts.target.clone();
-    // Approximate curve length for u-speed
-    const len =
-      a.distanceTo(b) + b.distanceTo(c);
     const speed = opts.speed ?? 13.2;
+
+    // Launch toward control point with loft (physics carries the arc).
+    const launch = b.clone().sub(a);
+    if (launch.lengthSq() < 1e-4) launch.copy(c).sub(a);
+    launch.normalize();
+    // Bias upward so gravity creates a readable parabola
+    launch.y = Math.max(0.35, launch.y + 0.55);
+    launch.normalize();
+    const vel = launch.multiplyScalar(speed);
+    // Extra loft for longer shots
+    const horiz = Math.hypot(c.x - a.x, c.z - a.z);
+    vel.y += Math.min(6.5, horiz * 0.22);
+
     const sprite = this.particles?.projectileSprite(color, 1.45) ?? makeFallbackSprite(color);
     sprite.position.copy(a);
     this.scene.add(sprite);
@@ -180,22 +220,38 @@ export class ProjectileField {
     groundRing.rotation.x = -Math.PI / 2;
     groundRing.position.set(a.x, 0.05, a.z);
     this.scene.add(groundRing);
+
+    // Ground telegraph near predicted landing (dodge cue)
+    const team = opts.team ?? "enemy";
+    if (team === "enemy") {
+      const land = c.clone();
+      land.y = 0;
+      this.telegraphs?.showCircle(land, 1.15, 0.7, color, { ring: true, y: 0.05 });
+    }
+
     const p: ActiveProjectile = {
       sprite,
       groundRing,
       pos: a.clone(),
-      vel: new THREE.Vector3(),
+      vel,
       life: 0,
-      maxLife: opts.life ?? Math.max(1.2, len / speed + 0.4),
+      maxLife: opts.life ?? Math.max(1.8, horiz / speed + 1.1),
       damage: opts.damage,
-      radius: opts.radius ?? 0.9,
-      homing: 0,
+      // Tighter than linear bolts so a timed dodge clears
+      radius: opts.radius ?? 0.62,
+      homing: 0.22,
       color,
       trailT: 0,
       label: opts.label ?? "Spline Bolt",
       hit: false,
-      team: opts.team ?? "enemy",
-      spline: { a, b, c, u: 0, speed: speed / Math.max(1, len) },
+      team,
+      ballistic: {
+        seekAccel: opts.seekAccel ?? 5.5,
+        gravity: opts.gravityScale ?? 1,
+        drag: 0.08,
+        maxTurn: 1.35,
+        hitHeightHalf: 1.05,
+      },
     };
     this.active.push(p);
     return p;
@@ -245,28 +301,107 @@ export class ProjectileField {
     const enemyHits: Array<{ enemyId: string; damage: number; pos: THREE.Vector3 }> = [];
     if (this.disposed) return { playerHits, enemyHits };
 
+    const aimY = 1.15; // torso aim for seek / hit checks
     for (let i = this.active.length - 1; i >= 0; i--) {
       const p = this.active[i]!;
       p.life += delta;
+      const dt = Math.min(delta, 0.05);
 
-      if (p.spline) {
-        // Quadratic Bezier: B(u) = (1-u)^2 A + 2(1-u)u B + u^2 C
-        p.spline.u = Math.min(1, p.spline.u + p.spline.speed * delta);
-        const u = p.spline.u;
+      if (p.ballistic) {
+        // ── Physics arc: gravity + light seek toward live target ──────────
+        const bal = p.ballistic;
+        p.vel.y -= PROJECTILE_GRAVITY * bal.gravity * dt;
+
+        // Mild seek — steers but cannot snap; timed dodges break the line
+        if (p.team === "enemy" && bal.seekAccel > 0) {
+          const dx = playerPos.x - p.pos.x;
+          const dy = aimY - p.pos.y;
+          const dz = playerPos.z - p.pos.z;
+          const dist = Math.hypot(dx, dy, dz);
+          if (dist > 0.2) {
+            const inv = 1 / dist;
+            const ux = dx * inv;
+            const uy = dy * inv;
+            const uz = dz * inv;
+            const speed = Math.max(0.5, p.vel.length());
+            // Desired vel toward target (weak pull)
+            let sx = ux * speed - p.vel.x;
+            let sy = uy * speed - p.vel.y;
+            let sz = uz * speed - p.vel.z;
+            const maxDelta = bal.seekAccel * dt;
+            const sl = Math.hypot(sx, sy, sz);
+            if (sl > maxDelta && sl > 1e-6) {
+              const k = maxDelta / sl;
+              sx *= k;
+              sy *= k;
+              sz *= k;
+            }
+            // Horizontal turn clamp
+            const hLen = Math.hypot(p.vel.x, p.vel.z);
+            const wLen = Math.hypot(ux, uz);
+            if (hLen > 1e-4 && wLen > 1e-4) {
+              const hx = p.vel.x / hLen;
+              const hz = p.vel.z / hLen;
+              const wx = ux / wLen;
+              const wz = uz / wLen;
+              const cross = hx * wz - hz * wx;
+              const maxYaw = bal.maxTurn * dt;
+              const yaw = THREE.MathUtils.clamp(cross * 2.2 * dt, -maxYaw, maxYaw);
+              const cs = Math.cos(yaw);
+              const sn = Math.sin(yaw);
+              const vx = p.vel.x * cs - p.vel.z * sn;
+              const vz = p.vel.x * sn + p.vel.z * cs;
+              p.vel.x = vx;
+              p.vel.z = vz;
+            }
+            p.vel.x += sx;
+            p.vel.y += sy * 0.55; // less vertical snatch — gravity owns the arc
+            p.vel.z += sz;
+          }
+        }
+
+        // Light air drag
+        if (bal.drag > 0) {
+          const damp = Math.max(0, 1 - bal.drag * dt);
+          p.vel.multiplyScalar(damp);
+        }
+
+        p.pos.x += p.vel.x * dt;
+        p.pos.y += p.vel.y * dt;
+        p.pos.z += p.vel.z * dt;
+
+        // Ground impact — bolt dies, no hit unless player was already overlapping
+        if (p.pos.y <= PROJECTILE_FLOOR_Y) {
+          p.pos.y = PROJECTILE_FLOOR_Y;
+          this.particles?.impact(p.pos.clone(), p.color, 0.5);
+          this.killAt(i);
+          continue;
+        }
+
+        p.sprite.position.copy(p.pos);
+        if (p.groundRing) {
+          p.groundRing.position.x = p.pos.x;
+          p.groundRing.position.z = p.pos.z;
+          // Shadow scales slightly with height
+          const s = 0.85 + Math.min(1.4, p.pos.y * 0.12);
+          p.groundRing.scale.setScalar(s);
+        }
+      } else if (p.spline) {
+        // Legacy pure-Bezier fallback → convert once to ballistic mid-flight
+        const u = Math.min(1, (p.spline.u += p.spline.speed * dt));
         const omu = 1 - u;
         const { a, b, c } = p.spline;
+        const prev = p.pos.clone();
         p.pos.set(
           omu * omu * a.x + 2 * omu * u * b.x + u * u * c.x,
           omu * omu * a.y + 2 * omu * u * b.y + u * u * c.y,
           omu * omu * a.z + 2 * omu * u * b.z + u * u * c.z,
         );
+        p.vel.copy(p.pos).sub(prev).multiplyScalar(1 / Math.max(1e-4, dt));
         p.sprite.position.copy(p.pos);
         if (p.groundRing) {
           p.groundRing.position.x = p.pos.x;
           p.groundRing.position.z = p.pos.z;
-        }
-        if (u >= 1) {
-          // Final impact check handled below; force hit test at end
         }
       } else {
         if (p.team === "enemy" && p.homing > 0) {
@@ -274,14 +409,14 @@ export class ProjectileField {
           if (to.lengthSq() > 1e-4) {
             to.normalize();
             const speed = p.vel.length();
-            p.vel.x += to.x * p.homing * 18 * delta;
-            p.vel.z += to.z * p.homing * 18 * delta;
+            p.vel.x += to.x * p.homing * 18 * dt;
+            p.vel.z += to.z * p.homing * 18 * dt;
             p.vel.setY(0).normalize().multiplyScalar(speed);
           }
         }
 
-        p.pos.x += p.vel.x * delta;
-        p.pos.z += p.vel.z * delta;
+        p.pos.x += p.vel.x * dt;
+        p.pos.z += p.vel.z * dt;
         p.sprite.position.copy(p.pos);
         if (p.groundRing) {
           p.groundRing.position.x = p.pos.x;
@@ -289,21 +424,28 @@ export class ProjectileField {
         }
       }
 
-      p.trailT += delta;
-      if (p.trailT > 0.06) {
+      p.trailT += dt;
+      if (p.trailT > 0.05) {
         p.trailT = 0;
-        this.particles?.impact(p.pos.clone().setY(0.3), p.color, 0.22);
+        this.particles?.impact(p.pos.clone(), p.color, 0.2);
       }
 
-      const hitR = p.radius + 0.45;
+      // Hit volume: horizontal disk + height band (ballistic) so jumps/dodges clear
+      const hitR = p.ballistic ? p.radius + 0.28 : p.radius + 0.45;
+      const hitY = p.ballistic?.hitHeightHalf ?? 99;
       if (p.team === "enemy" && !p.hit) {
         const dx = p.pos.x - playerPos.x;
         const dz = p.pos.z - playerPos.z;
-        if (dx * dx + dz * dz <= hitR * hitR) {
+        const dy = Math.abs(p.pos.y - aimY);
+        if (dx * dx + dz * dz <= hitR * hitR && dy <= hitY) {
           p.hit = true;
+          // Invulnerable frames (dodge) fully ignore — classic i-frame dodge
           if (!opts?.invulnerable) {
             playerHits.push({ damage: p.damage, label: p.label, pos: p.pos.clone() });
             this.particles?.impact(p.pos.clone(), p.color, 0.85);
+          } else {
+            // Whiff VFX when dodged through
+            this.particles?.impact(p.pos.clone(), 0xffffff, 0.35);
           }
           this.killAt(i);
           continue;
