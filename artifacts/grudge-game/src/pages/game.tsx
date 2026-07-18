@@ -24,6 +24,8 @@ import { toast } from "sonner";
 import { useSystemsHotkey } from "@/hooks/useSystemsHotkey";
 import { GameEscapeMenu, SystemHub } from "@/components/SystemHub";
 import { GameCombatHud } from "@/components/GameCombatHud";
+import { TravelerTutorialHUD } from "@/components/TravelerTutorialHUD";
+import type { RaceId as TutorialRaceId } from "@/data/travelerTutorial";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
 class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -408,6 +410,16 @@ function Game() {
           onSkill={(idx) => {
             if (idx < 0) engineRef.current?.useSpecial();
             else engineRef.current?.selectSkill(idx);
+          }}
+        />
+      )}
+
+      {/* Dock Quest Traveler tutorial opener — same steps for all races */}
+      {gameState && gameState.loaded && (
+        <TravelerTutorialHUD
+          raceId={(playerStats?.charRace as TutorialRaceId | undefined) ?? "human"}
+          onComplete={() => {
+            toast.success("Traveler opener complete — reported to your faction commander.");
           }}
         />
       )}
