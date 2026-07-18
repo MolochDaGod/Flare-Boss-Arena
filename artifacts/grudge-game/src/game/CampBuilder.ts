@@ -93,10 +93,55 @@ function placeHolder(clone: THREE.Object3D, unit: number, x: number, z: number, 
   return holder;
 }
 
-export function buildOrcCamp(loader: GLTFLoader, scene: THREE.Scene, url: string): CampHandle {
+export type CampTheme = "orc" | "dark_elf";
+
+export interface CampBuildOpts {
+  /** World offset for the camp center. */
+  offset?: THREE.Vector3;
+  /** Palette retheme after props are placed. */
+  theme?: CampTheme;
+  /** Uniform scale multiplier on the whole camp. */
+  scale?: number;
+  name?: string;
+}
+
+/** Recolor camp materials for dark-elf faction (deep purple / cold metal). */
+function applyCampTheme(root: THREE.Object3D, theme: CampTheme) {
+  if (theme === "orc") return;
+  root.traverse((c) => {
+    const mesh = c as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.material) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) {
+      const m = mat as THREE.MeshStandardMaterial;
+      if (!m.color) continue;
+      // Shift greens/browns toward void-purple + silver.
+      const hsl = { h: 0, s: 0, l: 0 };
+      m.color.getHSL(hsl);
+      m.color.setHSL(0.78 + hsl.h * 0.05, Math.min(0.55, hsl.s * 0.85 + 0.15), hsl.l * 0.72);
+      if ("emissive" in m && m.emissive) {
+        m.emissive.setHex(0x2a1040);
+        m.emissiveIntensity = 0.18;
+      }
+      if ("metalness" in m) m.metalness = Math.min(1, (m.metalness ?? 0.2) + 0.25);
+      if ("roughness" in m) m.roughness = Math.max(0.25, (m.roughness ?? 0.7) * 0.85);
+    }
+  });
+}
+
+export function buildOrcCamp(
+  loader: GLTFLoader,
+  scene: THREE.Scene,
+  url: string,
+  opts: CampBuildOpts = {},
+): CampHandle {
   const group = new THREE.Group();
-  group.name = "orc_camp";
+  group.name = opts.name ?? (opts.theme === "dark_elf" ? "dark_elf_camp" : "orc_camp");
+  if (opts.offset) group.position.copy(opts.offset);
+  if (opts.scale && opts.scale !== 1) group.scale.setScalar(opts.scale);
   scene.add(group);
+
+  const theme: CampTheme = opts.theme ?? "orc";
 
   const geoms = new Set<THREE.BufferGeometry>();
   const mats = new Set<THREE.Material>();
@@ -168,6 +213,9 @@ export function buildOrcCamp(loader: GLTFLoader, scene: THREE.Scene, url: string
         collect(holder);
         group.add(holder);
       }
+
+      // Faction retheme (dark elf camp uses same atlas, purple palette).
+      applyCampTheme(group, theme);
     },
     undefined,
     () => { /* non-fatal: camp is decorative */ },

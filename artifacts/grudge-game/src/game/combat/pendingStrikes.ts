@@ -10,6 +10,7 @@ import { pointInShape } from "./damageShapes";
 import type { TelegraphField } from "./telegraphs";
 import type { ParticleVfx } from "./particles";
 import type { SkillElement } from "./particles";
+import type { WarningEffectField } from "./warningEffects";
 
 export type StrikeKind = "circle" | "nova" | "line" | "cone";
 
@@ -36,11 +37,17 @@ export class PendingStrikeField {
   private strikes: PendingStrike[] = [];
   private telegraphs: TelegraphField | null;
   private particles: ParticleVfx | null;
+  private warnings: WarningEffectField | null;
   private disposed = false;
 
-  constructor(telegraphs: TelegraphField | null, particles: ParticleVfx | null) {
+  constructor(
+    telegraphs: TelegraphField | null,
+    particles: ParticleVfx | null,
+    warnings: WarningEffectField | null = null,
+  ) {
     this.telegraphs = telegraphs;
     this.particles = particles;
+    this.warnings = warnings;
   }
 
   schedule(opts: {
@@ -58,6 +65,10 @@ export class PendingStrikeField {
     element?: SkillElement;
     sourceId: string;
     ring?: boolean;
+    /** Floating "!" warning above the strike / caster. */
+    warnHeight?: number;
+    /** When true (default), spawn deterministic warning marker. */
+    warn?: boolean;
   }) {
     if (this.disposed) return;
     const dir = (opts.dir ?? new THREE.Vector3(0, 0, 1)).clone().setY(0);
@@ -90,6 +101,16 @@ export class PendingStrikeField {
     this.telegraphs?.show(q, strike.windup, color, { ring: opts.ring, y: 0.07 });
     if (opts.ring && (opts.kind === "circle" || opts.kind === "nova")) {
       this.telegraphs?.show(q, strike.windup, color, { ring: true, y: 0.09 });
+    }
+    if (opts.warn !== false) {
+      this.warnings?.spawn({
+        position: origin,
+        duration: strike.windup,
+        color,
+        height: opts.warnHeight ?? 2.6,
+        label: opts.label,
+        seed: `${opts.sourceId}|${opts.label}`,
+      });
     }
   }
 
@@ -137,6 +158,12 @@ export class PendingStrikeField {
         halfAngle: s.halfAngle,
       });
       this.particles?.impact(s.origin.clone().setY(0.5), s.color, 0.9);
+      this.warnings?.impactFlash(
+        s.origin,
+        s.color,
+        s.kind === "line" ? s.halfWidth * 3 : s.radius * 0.9,
+        `${s.sourceId}|${s.label}|impact`,
+      );
 
       if (!opts?.invulnerable && pointInShape(this.toQuery(s), target)) {
         hits.push({ damage: s.damage, label: s.label, kind: s.kind });

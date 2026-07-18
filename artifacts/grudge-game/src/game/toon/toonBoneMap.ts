@@ -136,7 +136,9 @@ export function discoverToonBoneRoles(root: THREE.Object3D): RoleMap {
   });
   if (!best) return {};
 
-  const bones = best.bones as THREE.Bone[];
+  // Explicit local — TS loses Skeleton type after traverse callback assignment.
+  const skeleton: THREE.Skeleton = best;
+  const bones = skeleton.bones as THREE.Bone[];
   let hips: THREE.Bone | null = null;
   for (const b of bones) {
     const kids = b.children.filter((c) => (c as THREE.Bone).isBone) as THREE.Bone[];
@@ -271,7 +273,8 @@ export function retargetClipToToon(
 }
 
 export function parseBakedClipJson(data: unknown, name?: string): THREE.AnimationClip {
-  const clip = THREE.AnimationClip.parse(data as object);
+  // Baked arena JSON is AnimationClip-shaped; cast for three's strict parse type.
+  const clip = THREE.AnimationClip.parse(data as Parameters<typeof THREE.AnimationClip.parse>[0]);
   if (name) clip.name = name;
   return clip;
 }

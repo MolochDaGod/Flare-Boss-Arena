@@ -5,6 +5,15 @@ import { isMonsterId, loadMonsterModel, disposeMonsterModel, ANIMATED_MONSTER_TE
 import { isKitMonsterId, loadKitMonster, disposeKitModel, KIT_TEMPLATES } from "./KayKitCharacter";
 import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
+import {
+  DARK_ELF_SPAWN_TEMPLATES,
+  SPIDER_SPAWN_TEMPLATES,
+  resolveCatalogModelId,
+  catalogTint,
+  catalogScale,
+  hashString,
+} from "../data/monsterCatalog";
+import { WarningEffectField } from "./combat/warningEffects";
 import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle, type PirateRole } from "./PirateNPC";
 import { Townsperson } from "./Townsfolk";
 import {
@@ -391,8 +400,12 @@ export class GameEngine {
   private auras: AuraField | null = null;
   private projectileField: ProjectileField | null = null;
   private pendingStrikes: PendingStrikeField | null = null;
+  private warningFx: WarningEffectField | null = null;
+  private camps: CampHandle[] = [];
   /** Boss special attack cooldowns by enemy id. */
   private bossSpecialCd = new Map<string, number>();
+  /** Per-enemy special cast counter for deterministic ability picks. */
+  private bossSpecialCount = new Map<string, number>();
   /** fighterId → brain for hero-rival enemies. */
   private enemyBrains = new Map<string, BrainArchetype>();
   private playerAuraElement = getActiveCombatProfile().auraElement;
@@ -522,7 +535,8 @@ export class GameEngine {
     this.slashField = new SlashWaveField(this.scene, this.particles);
     this.auras = new AuraField(this.scene);
     this.projectileField = new ProjectileField(this.scene, this.particles, this.telegraphs);
-    this.pendingStrikes = new PendingStrikeField(this.telegraphs, this.particles);
+    this.warningFx = new WarningEffectField(this.scene);
+    this.pendingStrikes = new PendingStrikeField(this.telegraphs, this.particles, this.warningFx);
     this.fighterKit = getActiveFighterKit();
     this.playerAuraElement = getActiveCombatProfile().auraElement;
     // Ground-AoE placement ring (shown while a skill is pending).
@@ -549,7 +563,23 @@ export class GameEngine {
 
     this.buildDungeon();
     this.loadEnvironment();
-    this.camp = buildOrcCamp(this.loader, this.scene, `${import.meta.env.BASE_URL}models/buildings/orc_camp_set.glb`);
+    const campUrl = `${import.meta.env.BASE_URL}models/buildings/orc_camp_set.glb`;
+    // Green orc war-camp near east ridge.
+    this.camp = buildOrcCamp(this.loader, this.scene, campUrl, {
+      theme: "orc",
+      offset: new THREE.Vector3(38, 0, 28),
+      scale: 0.92,
+      name: "orc_camp",
+    });
+    this.camps.push(this.camp);
+    // Dark-elf camp — same atlas, void-purple retheme, opposite flank.
+    const darkCamp = buildOrcCamp(this.loader, this.scene, campUrl, {
+      theme: "dark_elf",
+      offset: new THREE.Vector3(-42, 0, -32),
+      scale: 0.88,
+      name: "dark_elf_camp",
+    });
+    this.camps.push(darkCamp);
     this.buildPirateCove();
     this.buildHarvestables();
     this.buildWorldCollectables();
@@ -1132,8 +1162,18 @@ export class GameEngine {
     // guaranteed to appear in the dungeon.
     for (const m of ANIMATED_MONSTER_TEMPLATES) configs.push({ template: m, count: 1 });
 
-    // Spawn the KayKit skeleton minions (real shared-library skeletal animation).
+    // Spawn the KayKit skeleton minions (real shared-library skeletal animation / uMMORPG undead).
     for (const m of KIT_TEMPLATES) configs.push({ template: m, count: m.tier === 1 ? 3 : 2 });
+
+    // Dark-elf warband near their camp (purple-tinted KayKit skeletons).
+    for (const m of DARK_ELF_SPAWN_TEMPLATES) {
+      configs.push({ template: m, count: m.tier >= 4 ? 1 : 2 });
+    }
+
+    // Spider den — pincher brood + matriarch.
+    for (const m of SPIDER_SPAWN_TEMPLATES) {
+      configs.push({ template: m, count: m.tier === 1 ? 4 : m.tier >= 4 ? 1 : 2 });
+    }
 
     // Rival heroes (unused fighters) — elite pack with AI brains from combat profiles.
     const rivals = pickHeroEnemies(this.mapSeed ^ 0xc0ffee, Math.min(3, 1 + Math.floor((this.islandRound - 1) / 2)));
@@ -1149,11 +1189,27 @@ export class GameEngine {
     for (const m of cdnPick) configs.push({ template: m, count: 1 });
 
     const rng = mulberry(this.mapSeed ^ 0x51aced);
+    // Faction home anchors (match camp placements).
+    const darkCampAnchor = new THREE.Vector3(-42, 0, -32);
+    const spiderDenAnchor = new THREE.Vector3(22, 0, -48);
+    const undeadAnchor = new THREE.Vector3(-18, 0, 40);
     for (const { template, count } of configs) {
       for (let i = 0; i < count; i++) {
         // Prefer maze corridors / rooms; fall back to open ring if maze missing.
         let pos: THREE.Vector3;
-        if (this.maze && rng() < 0.55 && this.maze.rooms.some((r) => r.kind === "large")) {
+        const id = template.id;
+        const biasDark = id.startsWith("kit_delf_");
+        const biasSpider = /spider|pincher|brood/i.test(id);
+        const biasSkel = id.startsWith("kit_skel_");
+        if (biasDark || biasSpider || biasSkel) {
+          const anchor = biasDark ? darkCampAnchor : biasSpider ? spiderDenAnchor : undeadAnchor;
+          pos = new THREE.Vector3(
+            anchor.x + (rng() - 0.5) * 16,
+            0,
+            anchor.z + (rng() - 0.5) * 16,
+          );
+          if (this.maze) pos = this.maze.nearestWalkable(pos.x, pos.z);
+        } else if (this.maze && rng() < 0.55 && this.maze.rooms.some((r) => r.kind === "large")) {
           pos = this.maze.randomLargeRoomCenter(rng);
           // Jitter inside the room so packs don't stack.
           pos.x += (rng() - 0.5) * 6;
@@ -1247,6 +1303,9 @@ export class GameEngine {
    * template, so a given bestiary entry always looks the same across spawns.
    */
   private resolveAnimatedModelId(template: EnemyTemplate): string {
+    // Catalog aliases (dark elves → kit skeletons, spider brood → pincher, …).
+    const catalogId = resolveCatalogModelId(template.id);
+    if (isKitMonsterId(catalogId) || isMonsterId(catalogId)) return catalogId;
     if (isKitMonsterId(template.id) || isMonsterId(template.id)) return template.id;
     const KIT_BY_TIER = ["kit_skel_minion", "kit_skel_minion", "kit_skel_warrior", "kit_skel_rogue", "kit_skel_mage"];
     const seed = this.hashStr(template.id || template.name);
@@ -1257,7 +1316,7 @@ export class GameEngine {
       case "quadruped": pool = ["mon_dante_beast", "mon_pincher"]; break;
       case "dragon": pool = ["mon_dante_beast"]; break;
       case "golem": pool = ["mon_dante_beast", "mon_medusa"]; break;
-      case "flying": pool = ["kit_skel_mage"]; break;
+      case "flying": pool = ["kit_skel_mage", "mon_sky_wraith"]; break;
       case "humanoid":
       default:
         if (t <= 1) pool = ["kit_skel_minion"];
@@ -1274,6 +1333,26 @@ export class GameEngine {
     return chosen;
   }
 
+  /** Apply catalog tint + scale after GLB inject (dark elves, spider sizes). */
+  private applyCatalogLook(templateId: string, model: EnemyModel) {
+    const tint = catalogTint(templateId);
+    const scale = catalogScale(templateId);
+    if (scale !== 1) {
+      model.group.scale.multiplyScalar(scale);
+      model.height *= scale;
+    }
+    if (tint != null && model.bodyMats.length) {
+      const c = new THREE.Color(tint);
+      for (const mat of model.bodyMats) {
+        mat.color.lerp(c, 0.55);
+        if ("emissive" in mat) {
+          mat.emissive.setHex(tint);
+          mat.emissiveIntensity = Math.max(mat.emissiveIntensity ?? 0, 0.12);
+        }
+      }
+    }
+  }
+
   private createEnemy(template: EnemyTemplate, pos: THREE.Vector3): EnemyInstance {
     const id = `e${this.enemyIdCounter++}`;
     this.snapToWalkable(pos);
@@ -1283,14 +1362,21 @@ export class GameEngine {
       m.group.traverse((c) => { c.userData.enemyId = id; });
     };
     const modelId = this.resolveAnimatedModelId(template);
+    const onReady = (m: EnemyModel) => {
+      retag(m);
+      this.applyCatalogLook(template.id, m);
+    };
     const model = isKitMonsterId(modelId)
-      ? loadKitMonster(modelId, this.loader, retag)
+      ? loadKitMonster(modelId, this.loader, onReady)
       : isMonsterId(modelId)
-        ? loadMonsterModel(modelId, this.loader, retag)
+        ? loadMonsterModel(modelId, this.loader, onReady)
         : createEnemyModel(template.name, template.type, template.tier);
+    // Immediate scale/tint for procedural fallbacks or already-ready groups.
+    this.applyCatalogLook(template.id, model);
     model.group.position.set(pos.x, model.baseY, pos.z);
     model.group.userData.baseY = model.baseY;
     model.group.userData.enemyId = id;
+    model.group.userData.catalogId = template.id;
     this.scene.add(model.group);
 
     const brain = this.enemyBrains.get(template.id) ?? this.enemyBrains.get(modelId);
@@ -1926,7 +2012,11 @@ export class GameEngine {
    * circle under player, line pierce, projectile volley. Watch red zones.
    */
   private fireBossSpecial(en: EnemyInstance, dist: number) {
-    const dmg = Math.floor(en.template.damage * (1.1 + Math.random() * 0.35));
+    const castN = (this.bossSpecialCount.get(en.id) ?? 0) + 1;
+    this.bossSpecialCount.set(en.id, castN);
+    // Deterministic damage variance + special pick (same seed → same fight choreography).
+    const dmgU = (hashString(`${en.id}|dmg|${castN}`) >>> 0) / 4294967296;
+    const dmg = Math.floor(en.template.damage * (1.1 + dmgU * 0.35));
     const origin = en.position.clone();
     const dir = this._tmpV3a.set(
       this.playerPos.x - origin.x,
@@ -1938,44 +2028,51 @@ export class GameEngine {
     en.anim.isAttacking = true;
     en.facing = Math.atan2(dir.x, dir.z);
 
-    const roll = Math.random();
+    // 0 slam · 1 eruption · 2 beam · 3 volley — force slam when player is in face range.
+    let pick = WarningEffectField.pickIndex(en.id, castN, 4);
+    if (dist < 3.5) pick = 0;
     const name = en.template.name;
+    const isDark = /dark elf|shadow|void/i.test(name);
+    const isSpider = /spider|pincher|brood|chitin|arach/i.test(name);
+    const isSkel = /skeleton|bone|undead|minion|reaver|conjurer/i.test(name);
 
-    if (roll < 0.28 || dist < 3.5) {
-      // Melee shockwave circle in front of boss.
+    if (pick === 0) {
       const center = origin.clone().add(dir.clone().multiplyScalar(2.2));
+      const windup = WarningEffectField.windupFor(en.id, "slam", isSpider ? 0.4 : 0.55, 0.2);
       this.pendingStrikes?.schedule({
         kind: "circle",
         origin: center,
         dir,
-        radius: 3.4 + en.template.tier * 0.15,
+        radius: 3.4 + en.template.tier * 0.15 + (isSpider ? 0.6 : 0),
         damage: dmg,
-        windup: 0.55,
+        windup,
         label: `${name} Slam`,
-        color: 0xff3322,
+        color: isDark ? 0xaa33ff : isSpider ? 0x884ccc : 0xff3322,
         element: "physical",
         sourceId: en.id,
         ring: true,
+        warnHeight: en.model.height + 0.6,
       });
       this.log(`${name} winds up a slam!`);
-    } else if (roll < 0.5) {
-      // Ground AoE under the player (step out).
+    } else if (pick === 1) {
+      const windup = WarningEffectField.windupFor(en.id, "eruption", 1.0, 0.3);
       this.pendingStrikes?.schedule({
         kind: "circle",
         origin: this.playerPos.clone(),
         dir,
-        radius: 3.6,
+        radius: 3.6 + (isDark ? 0.5 : 0),
         damage: Math.round(dmg * 1.15),
-        windup: 1.15,
+        windup,
         label: `${name} Eruption`,
-        color: 0xff8800,
-        element: "fire",
+        color: isDark ? 0xcc44ff : isSkel ? 0x88aaff : 0xff8800,
+        element: isDark ? "arcane" : "fire",
         sourceId: en.id,
         ring: true,
+        warnHeight: 2.8,
       });
       this.log(`${name} marks the ground — move!`);
-    } else if (roll < 0.72) {
-      // Line pierce beam.
+    } else if (pick === 2) {
+      const windup = WarningEffectField.windupFor(en.id, "beam", 0.65, 0.25);
       this.pendingStrikes?.schedule({
         kind: "line",
         origin,
@@ -1983,19 +2080,28 @@ export class GameEngine {
         length: 14,
         halfWidth: 1.45,
         damage: Math.round(dmg * 1.05),
-        windup: 0.7,
+        windup,
         label: `${name} Beam`,
-        color: 0xffaa33,
+        color: isDark ? 0x66eeff : 0xffaa33,
         element: "arcane",
         sourceId: en.id,
+        warnHeight: en.model.height + 0.5,
       });
       this.log(`${name} channels a beam!`);
     } else {
-      // Projectile volley.
+      // Projectile volley + brief cast warning over caster.
+      const windup = WarningEffectField.windupFor(en.id, "volley", 0.35, 0.15);
+      this.warningFx?.spawn({
+        position: origin,
+        duration: windup,
+        color: 0xaa44ff,
+        height: en.model.height + 0.4,
+        seed: `${en.id}|volley|${castN}`,
+      });
       this.projectileField?.spawnVolley(origin, this.playerPos, 3 + (en.template.tier >= 5 ? 2 : 0), {
         damage: Math.round(dmg * 0.75),
         speed: 12,
-        color: 0xaa44ff,
+        color: isDark ? 0x9944ff : isSpider ? 0xaa66cc : 0xaa44ff,
         radius: 0.95,
         homing: 0.08,
         y: Math.max(1.4, en.model.height * 0.45),
@@ -2807,6 +2913,7 @@ export class GameEngine {
       const shits = this.pendingStrikes.update(delta, this.playerPos, { invulnerable: invuln });
       for (const h of shits) this.takeDamage(h.damage, h.label);
     }
+    this.warningFx?.update(delta, this.camera ?? undefined);
 
     // Skill cursor follows mouse while ground-AoE is pending.
     if (this.pendingSkillIdx >= 0 && this.skillCursor && this.pointerGround) {
@@ -3369,6 +3476,13 @@ export class GameEngine {
       (this.terrainMesh.material as THREE.Material).dispose();
     }
     this.camp?.dispose();
+    for (const c of this.camps) {
+      if (c !== this.camp) c.dispose();
+    }
+    this.camps = [];
+    this.warningFx?.dispose();
+    this.warningFx = null;
+    this.bossSpecialCount.clear();
     this.harvestField?.dispose();
     this.harvestField = null;
     this.dungeonMap?.dispose();

@@ -38,6 +38,9 @@ export const CDN_MONSTER_DEFS: CdnMonsterDef[] = [
   // Flying elite / boss-adjacent flyers (Mixamo retarget when clipHint null)
   { id: "cdn_sky_horror", name: "Sky Horror", type: "dragon", tier: 5, hp: 720, damage: 36, url: `${CDN}/models/monsters/big/Demon.glb`, archetype: "flying", height: 3.2, clipHint: null },
   { id: "cdn_storm_drake", name: "Storm Drake", type: "dragon", tier: 4, hp: 560, damage: 30, url: `${CDN}/models/monsters/big/Yeti.glb`, archetype: "flying", height: 2.9, clipHint: null },
+  // Extra undead / void bodies when CDN paths resolve (local kit skeletons still preferred for skeleton fights).
+  { id: "cdn_undead_brute", name: "Undead Brute", type: "undead", tier: 3, hp: 340, damage: 22, url: `${CDN}/models/monsters/big/Orc_Skull.glb`, archetype: "humanoid", height: 2.2, clipHint: null },
+  { id: "cdn_void_shade", name: "Void Shade", type: "aberration", tier: 3, hp: 250, damage: 21, url: `${CDN}/models/monsters/flying/Ghost_Skull.gltf`, archetype: "flying", height: 1.95, clipHint: null },
 ];
 
 export const CDN_MONSTER_BY_ID = new Map(CDN_MONSTER_DEFS.map((d) => [d.id, d]));
