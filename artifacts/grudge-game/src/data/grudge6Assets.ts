@@ -215,8 +215,6 @@ export function animPackForRole(role: AllyRole): BakedAnimPack {
   return ROLE_TO_BAKED_PACK[role] ?? "sword_shield";
 }
 
-}
-
 /** Toon soldier class -> rifle/pistol pack (chicken_gun multipack). */
 export type ToonSoldierClass =
   | "scout"
