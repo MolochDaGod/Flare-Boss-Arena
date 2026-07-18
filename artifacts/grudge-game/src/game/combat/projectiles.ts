@@ -48,6 +48,14 @@ export interface ActiveProjectile {
   label: string;
   hit: boolean;
   team: "enemy" | "player";
+  /** Optional quadratic Bezier path (uMMORPG wisp-style). */
+  spline?: {
+    a: THREE.Vector3;
+    b: THREE.Vector3;
+    c: THREE.Vector3;
+    u: number;
+    speed: number;
+  };
 }
 
 export class ProjectileField {
@@ -133,6 +141,66 @@ export class ProjectileField {
     return p;
   }
 
+  /**
+   * Quadratic Bezier projectile (wisp curved bolts).
+   * Travels along a→b→c at approximately `speed` world units / sec.
+   */
+  spawnSpline(opts: {
+    origin: THREE.Vector3;
+    control: THREE.Vector3;
+    target: THREE.Vector3;
+    damage: number;
+    speed?: number;
+    color?: number;
+    radius?: number;
+    life?: number;
+    label?: string;
+    team?: "enemy" | "player";
+  }): ActiveProjectile | null {
+    if (this.disposed) return null;
+    const color = opts.color ?? 0xaa66ff;
+    const a = opts.origin.clone();
+    const b = opts.control.clone();
+    const c = opts.target.clone();
+    // Approximate curve length for u-speed
+    const len =
+      a.distanceTo(b) + b.distanceTo(c);
+    const speed = opts.speed ?? 13.2;
+    const sprite = this.particles?.projectileSprite(color, 1.45) ?? makeFallbackSprite(color);
+    sprite.position.copy(a);
+    this.scene.add(sprite);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const groundRing = new THREE.Mesh(this.ringGeo, ringMat);
+    groundRing.rotation.x = -Math.PI / 2;
+    groundRing.position.set(a.x, 0.05, a.z);
+    this.scene.add(groundRing);
+    const p: ActiveProjectile = {
+      sprite,
+      groundRing,
+      pos: a.clone(),
+      vel: new THREE.Vector3(),
+      life: 0,
+      maxLife: opts.life ?? Math.max(1.2, len / speed + 0.4),
+      damage: opts.damage,
+      radius: opts.radius ?? 0.9,
+      homing: 0,
+      color,
+      trailT: 0,
+      label: opts.label ?? "Spline Bolt",
+      hit: false,
+      team: opts.team ?? "enemy",
+      spline: { a, b, c, u: 0, speed: speed / Math.max(1, len) },
+    };
+    this.active.push(p);
+    return p;
+  }
+
   /** Fan of linear bolts (annihilate / arena volley). */
   spawnVolley(
     origin: THREE.Vector3,
@@ -181,23 +249,44 @@ export class ProjectileField {
       const p = this.active[i]!;
       p.life += delta;
 
-      if (p.team === "enemy" && p.homing > 0) {
-        const to = this._tmp.set(playerPos.x - p.pos.x, 0, playerPos.z - p.pos.z);
-        if (to.lengthSq() > 1e-4) {
-          to.normalize();
-          const speed = p.vel.length();
-          p.vel.x += to.x * p.homing * 18 * delta;
-          p.vel.z += to.z * p.homing * 18 * delta;
-          p.vel.setY(0).normalize().multiplyScalar(speed);
+      if (p.spline) {
+        // Quadratic Bezier: B(u) = (1-u)^2 A + 2(1-u)u B + u^2 C
+        p.spline.u = Math.min(1, p.spline.u + p.spline.speed * delta);
+        const u = p.spline.u;
+        const omu = 1 - u;
+        const { a, b, c } = p.spline;
+        p.pos.set(
+          omu * omu * a.x + 2 * omu * u * b.x + u * u * c.x,
+          omu * omu * a.y + 2 * omu * u * b.y + u * u * c.y,
+          omu * omu * a.z + 2 * omu * u * b.z + u * u * c.z,
+        );
+        p.sprite.position.copy(p.pos);
+        if (p.groundRing) {
+          p.groundRing.position.x = p.pos.x;
+          p.groundRing.position.z = p.pos.z;
         }
-      }
+        if (u >= 1) {
+          // Final impact check handled below; force hit test at end
+        }
+      } else {
+        if (p.team === "enemy" && p.homing > 0) {
+          const to = this._tmp.set(playerPos.x - p.pos.x, 0, playerPos.z - p.pos.z);
+          if (to.lengthSq() > 1e-4) {
+            to.normalize();
+            const speed = p.vel.length();
+            p.vel.x += to.x * p.homing * 18 * delta;
+            p.vel.z += to.z * p.homing * 18 * delta;
+            p.vel.setY(0).normalize().multiplyScalar(speed);
+          }
+        }
 
-      p.pos.x += p.vel.x * delta;
-      p.pos.z += p.vel.z * delta;
-      p.sprite.position.copy(p.pos);
-      if (p.groundRing) {
-        p.groundRing.position.x = p.pos.x;
-        p.groundRing.position.z = p.pos.z;
+        p.pos.x += p.vel.x * delta;
+        p.pos.z += p.vel.z * delta;
+        p.sprite.position.copy(p.pos);
+        if (p.groundRing) {
+          p.groundRing.position.x = p.pos.x;
+          p.groundRing.position.z = p.pos.z;
+        }
       }
 
       p.trailT += delta;

@@ -284,12 +284,12 @@ export function annihilateCombatProfile(fighterId: string): CombatProfile | null
     enemyReady: true,
     enemyVisualProxy:
       parsed.classId === "mage"
-        ? "kit_skel_mage"
+        ? "mon_dark_elf"
         : parsed.classId === "ranger"
-          ? "kit_skel_rogue"
+          ? "mon_skeleton_warrior_ummo"
           : parsed.race === "undead"
-            ? "mon_cultist"
-            : "kit_skel_warrior",
+            ? "mon_skeleton_ummo"
+            : "mon_dark_elf",
     enemyTier: parsed.classId === "mage" || parsed.classId === "worge" ? 3 : 2,
   };
 }

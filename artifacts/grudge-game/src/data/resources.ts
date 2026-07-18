@@ -3,15 +3,16 @@
  * Used by harvest nodes and the Pirate Cove vendor (buy/sell for gold OR resources).
  */
 
-export type ResourceId = "wood" | "stone";
+export type ResourceId = "wood" | "stone" | "herb";
 
 export interface ResourceBag {
   wood: number;
   stone: number;
+  herb: number;
 }
 
 const KEY = "grudge:resources";
-const DEFAULTS: ResourceBag = { wood: 0, stone: 0 };
+const DEFAULTS: ResourceBag = { wood: 0, stone: 0, herb: 0 };
 
 export function getResources(): ResourceBag {
   if (typeof localStorage === "undefined") return { ...DEFAULTS };

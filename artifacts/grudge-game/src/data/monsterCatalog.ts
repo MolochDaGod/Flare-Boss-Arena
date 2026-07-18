@@ -1,22 +1,18 @@
 /**
- * Unified Three.js monster / camp connection catalog.
+ * Unified Three.js monster catalog — uMMORPG / local GLB only (no KayKit).
  *
- * Sources wired into GameEngine spawn + resolveAnimatedModelId:
- *  - KayKit skeletons (uMMORPG undead roster) — local public/models/kaykit/enemies
- *  - Spiders / arachnids — mon_pincher + matriarch scale variants
- *  - Dark elf warband — KayKit themed + material tint
- *  - Local GLB monsters — public/models/monsters
- *  - CDN Quaternius pack — assets.grudge-studio.com
- *  - Camps — orc + dark-elf retheme of orc_camp_set.glb
+ * Sources:
+ *  - mon_skeleton_ummo / mon_skeleton_warrior_ummo / mon_dark_elf
+ *  - mon_pincher spider den variants
+ *  - Other local mon_* + CDN Quaternius
  */
 
 import type { Archetype } from "../game/EnemyFactory";
-import { KIT_TEMPLATES } from "../game/KayKitCharacter";
 import { ANIMATED_MONSTER_TEMPLATES, MONSTER_TEMPLATES } from "../game/MonsterModels";
 import { CDN_MONSTER_TEMPLATES } from "./cdnMonsters";
 
 export type MonsterFaction = "undead" | "dark_elf" | "arachnid" | "beast" | "orc" | "void" | "neutral";
-export type MonsterSource = "kaykit" | "local_glb" | "cdn" | "procedural";
+export type MonsterSource = "ummorpg" | "local_glb" | "cdn" | "procedural";
 
 export interface CatalogEntry {
   id: string;
@@ -28,13 +24,11 @@ export interface CatalogEntry {
   faction: MonsterFaction;
   source: MonsterSource;
   archetype: Archetype;
-  /** Prefer for spawn pools tagged with this biome/camp. */
   camps?: Array<"orc" | "dark_elf" | "undead_crypt" | "spider_den">;
-  /** Material tint applied after load (KayKit / mon packs). */
   tint?: number;
 }
 
-/** Dark-elf warband — real dark_elf.glb + KayKit tinted pack leaders. */
+/** Dark-elf warband — real dark_elf.glb only (Unity / three-port mesh). */
 export const DARK_ELF_TEMPLATES: CatalogEntry[] = [
   {
     id: "mon_dark_elf",
@@ -44,65 +38,39 @@ export const DARK_ELF_TEMPLATES: CatalogEntry[] = [
     hp: 280,
     damage: 22,
     faction: "dark_elf",
-    source: "local_glb",
+    source: "ummorpg",
     archetype: "humanoid",
     camps: ["dark_elf"],
   },
   {
-    id: "kit_delf_scout",
-    name: "Dark Elf Scout",
+    id: "mon_dark_elf_raider",
+    name: "Dark Elf Raider",
     type: "humanoid",
     tier: 2,
-    hp: 160,
-    damage: 17,
+    hp: 190,
+    damage: 18,
     faction: "dark_elf",
-    source: "kaykit",
+    source: "ummorpg",
     archetype: "humanoid",
     camps: ["dark_elf"],
     tint: 0x4a2060,
   },
   {
-    id: "kit_delf_bladedancer",
-    name: "Dark Elf Bladedancer",
-    type: "humanoid",
-    tier: 2,
-    hp: 190,
-    damage: 20,
-    faction: "dark_elf",
-    source: "kaykit",
-    archetype: "humanoid",
-    camps: ["dark_elf"],
-    tint: 0x2a1848,
-  },
-  {
-    id: "kit_delf_shadowmage",
-    name: "Dark Elf Shadowmage",
-    type: "undead",
-    tier: 3,
-    hp: 175,
-    damage: 24,
-    faction: "dark_elf",
-    source: "kaykit",
-    archetype: "humanoid",
-    camps: ["dark_elf"],
-    tint: 0x6a30a0,
-  },
-  {
-    id: "kit_delf_captain",
+    id: "mon_dark_elf_captain",
     name: "Dark Elf Captain",
     type: "humanoid",
     tier: 4,
-    hp: 320,
+    hp: 360,
     damage: 28,
     faction: "dark_elf",
-    source: "local_glb",
+    source: "ummorpg",
     archetype: "humanoid",
     camps: ["dark_elf"],
     tint: 0x1a0a30,
   },
 ];
 
-/** Spider dens — pincher GLB + scaled matriarch. */
+/** Spider dens — pincher GLB variants. */
 export const SPIDER_TEMPLATES: CatalogEntry[] = [
   {
     id: "mon_pincher",
@@ -142,14 +110,33 @@ export const SPIDER_TEMPLATES: CatalogEntry[] = [
   },
 ];
 
-/** Skeleton undead pack (uMMORPG / KayKit). */
-export const SKELETON_TEMPLATES: CatalogEntry[] = KIT_TEMPLATES.map((t) => ({
-  ...t,
-  faction: "undead" as const,
-  source: "kaykit" as const,
-  archetype: "humanoid" as Archetype,
-  camps: ["undead_crypt" as const, "dark_elf" as const],
-}));
+/** uMMORPG skeleton meshes (not KayKit). */
+export const SKELETON_TEMPLATES: CatalogEntry[] = [
+  {
+    id: "mon_skeleton_ummo",
+    name: "uMMORPG Skeleton",
+    type: "undead",
+    tier: 2,
+    hp: 200,
+    damage: 16,
+    faction: "undead",
+    source: "ummorpg",
+    archetype: "humanoid",
+    camps: ["undead_crypt", "dark_elf"],
+  },
+  {
+    id: "mon_skeleton_warrior_ummo",
+    name: "Bone Legionnaire",
+    type: "undead",
+    tier: 2,
+    hp: 210,
+    damage: 18,
+    faction: "undead",
+    source: "ummorpg",
+    archetype: "humanoid",
+    camps: ["undead_crypt"],
+  },
+];
 
 export const CATALOG_BY_ID = new Map<string, CatalogEntry>();
 
@@ -183,7 +170,6 @@ for (const t of CDN_MONSTER_TEMPLATES) {
   }
 }
 
-/** EnemyTemplate-shaped rows for spawn configs. */
 export function catalogAsTemplates(
   entries: CatalogEntry[],
 ): Array<{ id: string; name: string; type: string; tier: number; hp: number; damage: number }> {
@@ -192,8 +178,12 @@ export function catalogAsTemplates(
 
 export const DARK_ELF_SPAWN_TEMPLATES = catalogAsTemplates(DARK_ELF_TEMPLATES);
 export const SPIDER_SPAWN_TEMPLATES = catalogAsTemplates(SPIDER_TEMPLATES);
+export const SKELETON_SPAWN_TEMPLATES = catalogAsTemplates(SKELETON_TEMPLATES);
+/** Prefer animated local mon packs that still have clips. */
+export const UMMORPG_ANIMATED_SPAWN = ANIMATED_MONSTER_TEMPLATES.filter(
+  (t) => !t.id.startsWith("kit_"),
+);
 
-/** Deterministic FNV-1a for windups / special picks. */
 export function hashString(s: string): number {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) {
@@ -203,7 +193,6 @@ export function hashString(s: string): number {
   return h >>> 0;
 }
 
-/** Stable 0..1 from seed + salt. */
 export function seededUnit(seed: number, salt = 0): number {
   let x = (seed ^ Math.imul(salt, 0x9e3779b9)) >>> 0;
   x = Math.imul(x ^ (x >>> 16), 0x7feb352d);
@@ -212,16 +201,13 @@ export function seededUnit(seed: number, salt = 0): number {
   return (x >>> 0) / 4294967296;
 }
 
-/** Map catalog id → actual loader id (spider broodling → pincher mesh, etc.). */
 export function resolveCatalogModelId(id: string): string {
   if (id === "mon_spider_broodling" || id === "mon_spider_matriarch") return "mon_pincher";
-  // Captain uses full dark_elf.glb mesh; scouts use tinted KayKit skeletons.
-  if (id === "kit_delf_scout") return "kit_skel_rogue";
-  if (id === "kit_delf_bladedancer") return "kit_skel_warrior";
-  if (id === "kit_delf_shadowmage") return "kit_skel_mage";
-  if (id === "kit_delf_captain") return "mon_dark_elf";
-  // Prefer real uMMORPG skeleton GLBs when bestiary maps undead generics.
+  // All dark elf variants use dark_elf.glb
+  if (id.startsWith("mon_dark_elf")) return "mon_dark_elf";
   if (id === "mon_skeleton" || id === "skeleton") return "mon_skeleton_ummo";
+  // Never resolve to KayKit
+  if (id.startsWith("kit_")) return "mon_skeleton_ummo";
   return id;
 }
 
@@ -232,7 +218,7 @@ export function catalogTint(id: string): number | undefined {
 export function catalogScale(id: string): number {
   if (id === "mon_spider_broodling") return 0.55;
   if (id === "mon_spider_matriarch") return 1.65;
-  if (id === "kit_delf_captain") return 1.08;
-  if (id === "mon_dark_elf") return 1.0;
+  if (id === "mon_dark_elf_captain") return 1.12;
+  if (id === "mon_dark_elf_raider") return 0.95;
   return 1;
 }

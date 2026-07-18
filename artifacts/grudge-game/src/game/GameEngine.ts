@@ -2,18 +2,36 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { createEnemyModel, updateEnemyAnimation, makeAnimState, archetypeFor, type EnemyModel, type AnimState } from "./EnemyFactory";
 import { isMonsterId, loadMonsterModel, disposeMonsterModel, ANIMATED_MONSTER_TEMPLATES } from "./MonsterModels";
-import { isKitMonsterId, loadKitMonster, disposeKitModel, KIT_TEMPLATES } from "./KayKitCharacter";
+import { disposeKitModel } from "./KayKitCharacter";
 import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
+import { buildDarkElfCampPrefab, type DarkElfCampHandle } from "./DarkElfCamp";
 import {
   DARK_ELF_SPAWN_TEMPLATES,
   SPIDER_SPAWN_TEMPLATES,
+  SKELETON_SPAWN_TEMPLATES,
   resolveCatalogModelId,
   catalogTint,
   catalogScale,
   hashString,
 } from "../data/monsterCatalog";
 import { WarningEffectField } from "./combat/warningEffects";
+import {
+  createClaimFlagField,
+  placeClaimFlag,
+  updateClaimFlags,
+  bindClaimNodes,
+  type ClaimFlagField,
+} from "./ClaimFlag";
+import {
+  createWispEventField,
+  spawnWispEventPack,
+  updateWisps,
+  damageWisp,
+  nearestAliveWisp,
+  type WispEventField,
+} from "./WispEvent";
+import { spawnScriptedHarvestNodes } from "./Harvestables";
 import { PIRATE_DEFS, loadPirate, disposePirate, disposeGltfObject, type PirateHandle, type PirateRole } from "./PirateNPC";
 import { Townsperson } from "./Townsfolk";
 import {
@@ -402,6 +420,10 @@ export class GameEngine {
   private pendingStrikes: PendingStrikeField | null = null;
   private warningFx: WarningEffectField | null = null;
   private camps: CampHandle[] = [];
+  private darkElfCamp: DarkElfCampHandle | null = null;
+  private claimFlags: ClaimFlagField | null = null;
+  private wispEvents: WispEventField | null = null;
+  private claimPlaceCd = 0;
   /** Boss special attack cooldowns by enemy id. */
   private bossSpecialCd = new Map<string, number>();
   /** Per-enemy special cast counter for deterministic ability picks. */
@@ -572,14 +594,18 @@ export class GameEngine {
       name: "orc_camp",
     });
     this.camps.push(this.camp);
-    // Dark-elf camp — same atlas, void-purple retheme, opposite flank.
-    const darkCamp = buildOrcCamp(this.loader, this.scene, campUrl, {
-      theme: "dark_elf",
-      offset: new THREE.Vector3(-42, 0, -32),
-      scale: 0.88,
-      name: "dark_elf_camp",
-    });
-    this.camps.push(darkCamp);
+    // Dark-elf camp prefab (Unity pattern → Three.js; falls back to themed atlas).
+    this.darkElfCamp = buildDarkElfCampPrefab(
+      this.loader,
+      this.scene,
+      new THREE.Vector3(-42, 0, -32),
+      campUrl,
+    );
+    this.claimFlags = createClaimFlagField(this.scene);
+    this.wispEvents = createWispEventField(this.scene);
+    // Seed claim near cove for harvest scripting demo.
+    this.plantStarterClaim();
+    this.spawnWispEvents();
     this.buildPirateCove();
     this.buildHarvestables();
     this.buildWorldCollectables();
@@ -766,6 +792,57 @@ export class GameEngine {
   }
 
   /** Tall generative trees (2–4× character height) + stone piles + island rocks. */
+  /** Plant a starter claim near the cove and script harvest nodes inside it. */
+  private plantStarterClaim() {
+    if (!this.claimFlags || !this.harvestField) return;
+    // Called before harvest field exists on first init — re-run after buildHarvestables.
+  }
+
+  private applyClaimNodes(
+    pos: THREE.Vector3,
+    opts?: { radius?: number; nodeCount?: number; seed?: number },
+  ) {
+    if (!this.claimFlags || !this.harvestField) return;
+    const { claim, nodeSpawns } = placeClaimFlag(this.claimFlags, {
+      position: pos,
+      radius: opts?.radius ?? 12,
+      owner: "player",
+      factionId: "player",
+      color: 0xc9a227,
+      nodeCount: opts?.nodeCount ?? 8,
+      maxTier: 2,
+      seed: opts?.seed ?? (this.mapSeed ^ hashString("claim")),
+      now: performance.now() / 1000,
+    });
+    const created = spawnScriptedHarvestNodes(
+      this.harvestField,
+      nodeSpawns.map(({ def, position }) => ({
+        defId: def.id,
+        name: def.name,
+        kind: def.type === "wood" ? "wood" : def.type === "herb" ? "herb" : "stone",
+        position,
+        hp: def.hp,
+        yieldMin: def.baseYield,
+        yieldMax: def.baseYield + 2,
+        respawnSec: def.respawnTime,
+      })),
+    );
+    bindClaimNodes(claim, created);
+    this.log(`Claim flag planted — ${created.length} harvest nodes scripted in the claim.`);
+  }
+
+  private spawnWispEvents() {
+    if (!this.wispEvents) return;
+    const anchors = [
+      new THREE.Vector3(-28, 0, 18),
+      new THREE.Vector3(18, 0, -36),
+      new THREE.Vector3(-8, 0, -22),
+      new THREE.Vector3(32, 0, 8),
+    ];
+    spawnWispEventPack(this.wispEvents, this.mapSeed, anchors);
+    this.log("Colored wisps stir on the island — watch for sky beams.");
+  }
+
   private buildHarvestables() {
     if (this.harvestField) {
       this.scene.remove(this.harvestField.root);
@@ -783,6 +860,13 @@ export class GameEngine {
     if (this.rockField && meta) {
       attachRockFieldNodes(this.harvestField, this.rockField, meta.positions, meta.scales);
     }
+
+    // Starter claim parcel near pirate cove — scripts harvest nodes in radius.
+    this.applyClaimNodes(new THREE.Vector3(58, 0, -10), {
+      radius: 14,
+      nodeCount: 10,
+      seed: this.mapSeed ^ 0xc1a1,
+    });
   }
 
   /** Scatter extra pirate-kit props as generative dungeon flavor. */
@@ -1158,22 +1242,17 @@ export class GameEngine {
 
     const configs = picked.map((t) => ({ template: t, count: t.tier === 1 ? 2 : 1 }));
 
-    // Always spawn one of each ANIMATED imported GLB monster so they're
-    // guaranteed to appear in the dungeon.
+    // Animated local mon packs (pincher, cultist, dante, medusa…) — no KayKit.
     for (const m of ANIMATED_MONSTER_TEMPLATES) configs.push({ template: m, count: 1 });
 
-    // Spawn the KayKit skeleton minions (real shared-library skeletal animation / uMMORPG undead).
-    for (const m of KIT_TEMPLATES) configs.push({ template: m, count: m.tier === 1 ? 3 : 2 });
+    // uMMORPG skeleton GLBs only.
+    for (const m of SKELETON_SPAWN_TEMPLATES) {
+      configs.push({ template: m, count: 3 });
+    }
 
-    // Real uMMORPG / three-port skeleton GLBs (heavy mesh + lightweight warrior).
-    configs.push(
-      { template: { id: "mon_skeleton_ummo", name: "uMMORPG Skeleton", type: "undead", tier: 2, hp: 200, damage: 16 }, count: 2 },
-      { template: { id: "mon_skeleton_warrior_ummo", name: "Bone Legionnaire", type: "undead", tier: 2, hp: 210, damage: 18 }, count: 2 },
-    );
-
-    // Dark-elf warband near their camp (dark_elf.glb + tinted KayKit pack).
+    // Dark-elf warband (dark_elf.glb variants) at their Unity-style camp.
     for (const m of DARK_ELF_SPAWN_TEMPLATES) {
-      configs.push({ template: m, count: m.id === "mon_dark_elf" ? 2 : m.tier >= 4 ? 1 : 2 });
+      configs.push({ template: m, count: m.tier >= 4 ? 1 : 2 });
     }
 
     // Spider den — pincher brood + matriarch.
@@ -1204,9 +1283,9 @@ export class GameEngine {
         // Prefer maze corridors / rooms; fall back to open ring if maze missing.
         let pos: THREE.Vector3;
         const id = template.id;
-        const biasDark = id.startsWith("kit_delf_");
+        const biasDark = id.startsWith("mon_dark_elf");
         const biasSpider = /spider|pincher|brood/i.test(id);
-        const biasSkel = id.startsWith("kit_skel_");
+        const biasSkel = /skeleton|legionnaire|ummo/i.test(id);
         if (biasDark || biasSpider || biasSkel) {
           const anchor = biasDark ? darkCampAnchor : biasSpider ? spiderDenAnchor : undeadAnchor;
           pos = new THREE.Vector3(
@@ -1309,11 +1388,17 @@ export class GameEngine {
    * template, so a given bestiary entry always looks the same across spawns.
    */
   private resolveAnimatedModelId(template: EnemyTemplate): string {
-    // Catalog aliases (dark elves → kit skeletons, spider brood → pincher, …).
+    // uMMORPG / local mon only — KayKit ids remapped in catalog.
     const catalogId = resolveCatalogModelId(template.id);
-    if (isKitMonsterId(catalogId) || isMonsterId(catalogId)) return catalogId;
-    if (isKitMonsterId(template.id) || isMonsterId(template.id)) return template.id;
-    const KIT_BY_TIER = ["kit_skel_minion", "kit_skel_minion", "kit_skel_warrior", "kit_skel_rogue", "kit_skel_mage"];
+    if (isMonsterId(catalogId)) return catalogId;
+    if (isMonsterId(template.id)) return template.id;
+    const UMMO_BY_TIER = [
+      "mon_skeleton_warrior_ummo",
+      "mon_skeleton_ummo",
+      "mon_skeleton_ummo",
+      "mon_dark_elf",
+      "mon_dark_elf",
+    ];
     const seed = this.hashStr(template.id || template.name);
     const t = Math.max(1, Math.min(template.tier, 5));
     let pool: string[];
@@ -1322,21 +1407,20 @@ export class GameEngine {
       case "quadruped": pool = ["mon_dante_beast", "mon_pincher"]; break;
       case "dragon": pool = ["mon_dante_beast"]; break;
       case "golem": pool = ["mon_dante_beast", "mon_medusa"]; break;
-      case "flying": pool = ["kit_skel_mage", "mon_sky_wraith"]; break;
+      case "flying": pool = ["mon_sky_wraith", "cdn_ghost"]; break;
       case "humanoid":
       default:
-        if (t <= 1) pool = ["kit_skel_minion", "mon_skeleton_warrior_ummo"];
-        else if (t === 2) pool = ["kit_skel_warrior", "kit_skel_rogue", "mon_skeleton_ummo", "mon_cultist"];
-        else if (t === 3) pool = ["kit_skel_mage", "mon_dark_elf", "mon_cultist"];
-        else pool = ["mon_dark_elf", "mon_medusa", "mon_cultist", "kit_skel_mage"];
+        if (t <= 1) pool = ["mon_skeleton_warrior_ummo", "mon_skeleton_ummo"];
+        else if (t === 2) pool = ["mon_skeleton_ummo", "mon_cultist", "mon_dark_elf_raider"];
+        else if (t === 3) pool = ["mon_dark_elf", "mon_cultist", "mon_skeleton_ummo"];
+        else pool = ["mon_dark_elf", "mon_medusa", "mon_dark_elf_captain"];
         break;
     }
-    const chosen = pool[seed % pool.length] ?? KIT_BY_TIER[t - 1] ?? "kit_skel_warrior";
-    if (import.meta.env.DEV && !isKitMonsterId(chosen) && !isMonsterId(chosen)) {
-      // Catch a future roster-id typo before the GLB loaders silently fall back.
+    const chosen = pool[seed % pool.length] ?? UMMO_BY_TIER[t - 1] ?? "mon_skeleton_ummo";
+    if (import.meta.env.DEV && !isMonsterId(resolveCatalogModelId(chosen)) && !isMonsterId(chosen)) {
       console.warn(`[GameEngine] resolveAnimatedModelId produced unknown model id "${chosen}" for "${template.id}"`);
     }
-    return chosen;
+    return resolveCatalogModelId(chosen);
   }
 
   /** Apply catalog tint + scale after GLB inject (dark elves, spider sizes). */
@@ -1372,11 +1456,9 @@ export class GameEngine {
       retag(m);
       this.applyCatalogLook(template.id, m);
     };
-    const model = isKitMonsterId(modelId)
-      ? loadKitMonster(modelId, this.loader, onReady)
-      : isMonsterId(modelId)
-        ? loadMonsterModel(modelId, this.loader, onReady)
-        : createEnemyModel(template.name, template.type, template.tier);
+    const model = isMonsterId(modelId)
+      ? loadMonsterModel(modelId, this.loader, onReady)
+      : createEnemyModel(template.name, template.type, template.tier);
     // Immediate scale/tint for procedural fallbacks or already-ready groups.
     this.applyCatalogLook(template.id, model);
     model.group.position.set(pos.x, model.baseY, pos.z);
@@ -1476,6 +1558,10 @@ export class GameEngine {
       if (e.code === "KeyR") {
         e.preventDefault();
         this.useSpecial();
+      }
+      if (e.code === "KeyC") {
+        e.preventDefault();
+        this.tryPlantClaimFlag();
       }
       if (e.code === "Escape") {
         this.cancelSkillTargeting();
@@ -2147,6 +2233,23 @@ export class GameEngine {
       const d = en.position.distanceTo(this.playerPos);
       if (d < nearestDist) { nearestDist = d; nearest = en; }
     }
+    // Prefer wisps when closer than standard enemies
+    if (this.wispEvents) {
+      const w = nearestAliveWisp(this.wispEvents, this.playerPos, 4.5);
+      if (w) {
+        const wd = Math.hypot(w.position.x - this.playerPos.x, w.position.z - this.playerPos.z);
+        if (!nearest || wd <= nearestDist) {
+          this.playerAttackCooldown = this.playerMaxAttackCooldown;
+          this.playerFacing = Math.atan2(w.position.x - this.playerPos.x, w.position.z - this.playerPos.z);
+          this.playerAnimator?.triggerAttack();
+          const dmg = Math.max(1, Math.floor(this.playerBaseDamage * (0.9 + Math.random() * 0.3)));
+          const killed = damageWisp(w, dmg);
+          this.log(killed ? `${w.palette.name} extinguished!` : `Hit ${w.palette.name} for ${dmg}`);
+          this.notifyState();
+          return;
+        }
+      }
+    }
     if (nearest && nearestDist < 4.5) {
       this.doAttack(nearest);
       return;
@@ -2624,6 +2727,21 @@ export class GameEngine {
     }
   }
 
+  /** Plant claim flag at player feet — generates harvest nodes in claim radius. */
+  private tryPlantClaimFlag() {
+    if (this.claimPlaceCd > 0) {
+      this.log("Claim flag on cooldown.");
+      return;
+    }
+    if (!this.claimFlags || !this.harvestField) return;
+    this.claimPlaceCd = 8;
+    this.applyClaimNodes(this.playerPos.clone(), {
+      radius: 11,
+      nodeCount: 7,
+      seed: this.mapSeed ^ hashString(`claim|${this.playerPos.x.toFixed(0)}|${this.playerPos.z.toFixed(0)}`),
+    });
+  }
+
   /** Chop / quarry: attack nearest harvest node (tree or stone). */
   private tryHarvestAttack() {
     if (this.playerAttackCooldown > 0 || !this.harvestField) return;
@@ -2920,6 +3038,21 @@ export class GameEngine {
       for (const h of shits) this.takeDamage(h.damage, h.label);
     }
     this.warningFx?.update(delta, this.camera ?? undefined);
+    if (this.claimPlaceCd > 0) this.claimPlaceCd = Math.max(0, this.claimPlaceCd - delta);
+    if (this.claimFlags) updateClaimFlags(this.claimFlags, performance.now() / 1000);
+    if (this.wispEvents) {
+      updateWisps(this.wispEvents, {
+        playerPos: this.playerPos,
+        delta,
+        time: performance.now() / 1000,
+        projectiles: this.projectileField,
+        pending: this.pendingStrikes,
+        warnings: this.warningFx,
+        particles: this.particles,
+        onPlayerHit: (dmg, label) => this.takeDamage(dmg, label),
+        log: (m) => this.log(m),
+      });
+    }
 
     // Skill cursor follows mouse while ground-AoE is pending.
     if (this.pendingSkillIdx >= 0 && this.skillCursor && this.pointerGround) {
@@ -3486,6 +3619,12 @@ export class GameEngine {
       if (c !== this.camp) c.dispose();
     }
     this.camps = [];
+    this.darkElfCamp?.dispose();
+    this.darkElfCamp = null;
+    this.claimFlags?.dispose();
+    this.claimFlags = null;
+    this.wispEvents?.dispose();
+    this.wispEvents = null;
     this.warningFx?.dispose();
     this.warningFx = null;
     this.bossSpecialCount.clear();

@@ -10,7 +10,7 @@ import type { ResourceId } from "../data/resources";
  * NODE is a CPU-side record with HP so the player can attack them like enemies.
  */
 
-export type HarvestKind = "wood" | "stone";
+export type HarvestKind = "wood" | "stone" | "herb";
 
 export interface HarvestNode {
   id: string;
@@ -27,14 +27,19 @@ export interface HarvestNode {
   instanceStart?: number;
   instanceCount?: number;
   /** Which mesh bank: "stone" (harvest pile) or "rock" (island rock field). */
-  meshBank?: "stone" | "rock" | "wood";
+  meshBank?: "stone" | "rock" | "wood" | "herb" | "scripted";
   /** Original scale for rock-field respawn. */
   rockScale?: number;
   respawnAt: number;
   yieldMin: number;
   yieldMax: number;
-  /** Visual group for solo meshes (stump / rubble). */
+  /** Visual group for solo meshes (stump / rubble / herb / claim node). */
   marker?: THREE.Object3D;
+  /** uMMORPG scripted def id. */
+  defId?: string;
+  /** Scripted respawn seconds (overrides default). */
+  respawnSec?: number;
+  displayName?: string;
 }
 
 export interface HarvestField {
@@ -342,7 +347,89 @@ export function showHarvestNode(field: HarvestField, n: HarvestNode) {
 }
 
 export function resourceForKind(kind: HarvestKind): ResourceId {
-  return kind === "wood" ? "wood" : "stone";
+  if (kind === "wood") return "wood";
+  if (kind === "herb") return "herb";
+  return "stone";
+}
+
+/**
+ * Spawn uMMORPG-scripted harvest nodes (claim flags, event dens).
+ * Uses dedicated marker meshes so they don't steal instanced slots.
+ */
+export function spawnScriptedHarvestNodes(
+  field: HarvestField,
+  spawns: Array<{
+    defId: string;
+    name: string;
+    kind: HarvestKind;
+    position: THREE.Vector3;
+    hp: number;
+    yieldMin: number;
+    yieldMax: number;
+    respawnSec: number;
+  }>,
+): HarvestNode[] {
+  const created: HarvestNode[] = [];
+  for (const s of spawns) {
+    const marker = new THREE.Group();
+    marker.position.copy(s.position);
+    if (s.kind === "wood") {
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.2, 0.32, 2.4, 7),
+        new THREE.MeshStandardMaterial({ color: 0x3d2a18, roughness: 0.9 }),
+      );
+      trunk.position.y = 1.2;
+      trunk.castShadow = true;
+      const canopy = new THREE.Mesh(
+        new THREE.ConeGeometry(1.1, 1.6, 8),
+        new THREE.MeshStandardMaterial({ color: 0x1f4a28, roughness: 0.85 }),
+      );
+      canopy.position.y = 2.6;
+      canopy.castShadow = true;
+      marker.add(trunk, canopy);
+    } else if (s.kind === "herb") {
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x3a8a4a,
+        emissive: 0x1a4020,
+        emissiveIntensity: 0.35,
+        roughness: 0.7,
+      });
+      for (let i = 0; i < 5; i++) {
+        const blade = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.55, 5), mat);
+        blade.position.set((i % 3) * 0.25 - 0.25, 0.25, Math.floor(i / 3) * 0.22 - 0.1);
+        blade.rotation.z = (i - 2) * 0.15;
+        marker.add(blade);
+      }
+    } else {
+      const rock = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(0.55, 0),
+        new THREE.MeshStandardMaterial({ color: 0x6a6660, roughness: 0.92, metalness: 0.15 }),
+      );
+      rock.position.y = 0.4;
+      rock.castShadow = true;
+      marker.add(rock);
+    }
+    field.root.add(marker);
+    const node: HarvestNode = {
+      id: `scripted_${field.nodes.length}_${s.defId}`,
+      kind: s.kind,
+      position: s.position.clone(),
+      hp: s.hp,
+      maxHp: s.hp,
+      instanceIndex: -1,
+      meshBank: "scripted",
+      respawnAt: 0,
+      yieldMin: s.yieldMin,
+      yieldMax: s.yieldMax,
+      marker,
+      defId: s.defId,
+      respawnSec: s.respawnSec,
+      displayName: s.name,
+    };
+    field.nodes.push(node);
+    created.push(node);
+  }
+  return created;
 }
 
 /** Apply melee damage to a harvest node; returns yield granted on depletion. */
@@ -357,9 +444,11 @@ export function damageHarvestNode(
   if (node.hp > 0) return { depleted: false, yieldAmount: 0 };
 
   hideHarvestNode(field, node);
+  if (node.marker) node.marker.visible = false;
   const span = Math.max(0, node.yieldMax - node.yieldMin);
   const yieldAmount = node.yieldMin + Math.floor(Math.random() * (span + 1));
-  node.respawnAt = now + 45 + Math.random() * 30;
+  const respawn = node.respawnSec ?? 45 + Math.random() * 30;
+  node.respawnAt = now + respawn;
   return { depleted: true, yieldAmount };
 }
 
@@ -369,6 +458,7 @@ export function tickHarvestRespawns(field: HarvestField, now: number) {
       n.hp = n.maxHp;
       n.respawnAt = 0;
       showHarvestNode(field, n);
+      if (n.marker) n.marker.visible = true;
     }
   }
 }
