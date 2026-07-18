@@ -24,7 +24,11 @@ export type AllyBrainId =
   | "healer" // heal low allies/player, light damage
   | "skirmish" // kite / ranged
   | "gatherer" // mine/chop when idle
-  | "assassin"; // focus low HP enemies
+  | "assassin" // focus low HP enemies
+  | "siege" // push structures / static objectives
+  | "flyer" // high mobility flank
+  | "summoner" // hang back, support bursts
+  | "patrol"; // sweep harvest corridor
 
 export interface Grudge6HeroDef {
   id: string;
@@ -55,7 +59,7 @@ const BRAIN_FOR_ROLE: Record<AllyRole, AllyBrainId> = {
   healer: "healer",
   tank: "bodyguard",
   ranger: "skirmish",
-  bruiser: "bodyguard",
+  bruiser: "siege",
   fighter: "bodyguard",
   skirmisher: "assassin",
 };

@@ -35,6 +35,9 @@ export const CDN_MONSTER_DEFS: CdnMonsterDef[] = [
   { id: "cdn_monkroose", name: "Monkroose", type: "beast", tier: 2, hp: 230, damage: 17, url: `${CDN}/models/monsters/big/Monkroose.glb`, archetype: "quadruped", height: 2.0, clipHint: null },
   { id: "cdn_ghost", name: "Wailing Ghost", type: "undead", tier: 2, hp: 180, damage: 15, url: `${CDN}/models/monsters/flying/Ghost.gltf`, archetype: "flying", height: 1.8, clipHint: null },
   { id: "cdn_ghost_skull", name: "Skull Ghost", type: "undead", tier: 3, hp: 210, damage: 19, url: `${CDN}/models/monsters/flying/Ghost_Skull.gltf`, archetype: "flying", height: 1.9, clipHint: null },
+  // Flying elite / boss-adjacent flyers (Mixamo retarget when clipHint null)
+  { id: "cdn_sky_horror", name: "Sky Horror", type: "dragon", tier: 5, hp: 720, damage: 36, url: `${CDN}/models/monsters/big/Demon.glb`, archetype: "flying", height: 3.2, clipHint: null },
+  { id: "cdn_storm_drake", name: "Storm Drake", type: "dragon", tier: 4, hp: 560, damage: 30, url: `${CDN}/models/monsters/big/Yeti.glb`, archetype: "flying", height: 2.9, clipHint: null },
 ];
 
 export const CDN_MONSTER_BY_ID = new Map(CDN_MONSTER_DEFS.map((d) => [d.id, d]));

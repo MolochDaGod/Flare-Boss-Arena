@@ -3,6 +3,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { EnemyModel, Archetype } from "./EnemyFactory";
 import { CDN_MONSTER_BY_ID, isCdnMonsterId } from "../data/cdnMonsters";
 import { normalizeCharacterRoot, GlbClipBank } from "./modelNormalize";
+import { buildMixamoBankForMonster, createMixamoClipBank } from "./mixamoRetarget";
 
 /**
  * GLB monster registry.
@@ -46,7 +47,7 @@ export const MONSTER_DEFS: MonsterDef[] = [
   {
     id: "mon_big_scary_t2", name: "Gloomhulk", type: "beast", tier: 3,
     hp: 360, damage: 22, file: "big_scary_t2.glb", archetype: "quadruped",
-    height: 2.6, clip: null,
+    height: 2.6, clip: null, // Mixamo retarget when no authored clips
   },
   {
     id: "mon_dante_beast", name: "Dante's Beast", type: "beast", tier: 4,
@@ -61,7 +62,12 @@ export const MONSTER_DEFS: MonsterDef[] = [
   {
     id: "mon_big_scary_t3", name: "Dread Colossus", type: "titan", tier: 5,
     hp: 850, damage: 42, file: "big_scary_t3.glb", archetype: "golem",
-    height: 4.2, clip: null,
+    height: 4.2, clip: null, // Mixamo retarget when no authored clips
+  },
+  {
+    id: "mon_sky_wraith", name: "Sky Wraith", type: "undead", tier: 4,
+    hp: 420, damage: 26, file: "pincher.glb", archetype: "flying",
+    height: 2.2, clip: "pincheranim", // flying AI + elevated combat
   },
 ];
 
@@ -220,6 +226,7 @@ export function loadMonsterModel(
       // Multi-clip bank when the GLB ships several tracks; else single idle loop.
       if (gltf.animations.length > 1) {
         model.clipBank = new GlbClipBank(inner, gltf.animations, def.clip);
+        onReady?.(model);
       } else if (gltf.animations.length === 1) {
         const clip =
           (def.clip
@@ -235,9 +242,16 @@ export function loadMonsterModel(
           action.play();
           model.mixer = mixer;
         }
+        onReady?.(model);
+      } else {
+        // No authored clips — try Mixamo rotation-only retarget onto this skeleton.
+        void buildMixamoBankForMonster(inner).then((bank) => {
+          if (group.userData.disposed) return;
+          const clipBank = createMixamoClipBank(inner, bank);
+          if (clipBank) model.clipBank = clipBank;
+          onReady?.(model);
+        });
       }
-
-      onReady?.(model);
     },
     undefined,
     (err) => {

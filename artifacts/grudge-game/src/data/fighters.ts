@@ -15,6 +15,7 @@
  */
 
 import { SKINS, getSkin, type SkinDef } from "./skins";
+import { ANNIHILATE_FIGHTERS } from "./annihilateHeroes";
 
 export type AttrKey =
   | "strength"
@@ -306,6 +307,8 @@ export const FIGHTERS: FighterDef[] = [
     stats: S(10, 10, 6, 5, 10, 5, 6, 5),
     featured: true,
   },
+  // ── Annihilate / Warlords 24 (skill creation + MOBA + dungeon) ──
+  ...ANNIHILATE_FIGHTERS,
 ];
 
 export const DEFAULT_FIGHTER_ID = "nightmare_luffy";

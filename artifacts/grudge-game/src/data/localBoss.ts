@@ -14,13 +14,15 @@ export interface LocalBossRequest {
   playerLevel?: number;
 }
 
-const NAME_POOL: Array<{ name: string; title: string; pack: string }> = [
+const NAME_POOL: Array<{ name: string; title: string; pack: string; flying?: boolean }> = [
   // Imported boss GLBs (dragons + ML in-game bosses)
-  { name: "Noble Dragon", title: "Wyrm of the Western Reach", pack: "boss_noble_dragon" },
-  { name: "Tarisland Drake", title: "Sky Terror of the Ruins", pack: "boss_tarisland_dragon" },
+  { name: "Noble Dragon", title: "Wyrm of the Western Reach", pack: "boss_noble_dragon", flying: true },
+  { name: "Tarisland Drake", title: "Sky Terror of the Ruins", pack: "boss_tarisland_dragon", flying: true },
+  { name: "Sky Horror", title: "Winged Pit Lord", pack: "cdn_sky_horror", flying: true },
+  { name: "Storm Drake", title: "Cloud Scourge", pack: "cdn_storm_drake", flying: true },
   { name: "Cinder Wyrmling", title: "Fireworm of the Depths", pack: "boss_fireworm" },
   { name: "Framis", title: "Dark Necromancer", pack: "boss_framis_necro" },
-  { name: "Sora", title: "Shifting Cloud", pack: "boss_sora_cloud" },
+  { name: "Sora", title: "Shifting Cloud", pack: "boss_sora_cloud", flying: true },
   { name: "Sun Monkey King", title: "Heaven's Challenger", pack: "boss_sun_monkey_king" },
   // Legacy procedural boss names (fallback bodies)
   { name: "Ashen Pincher", title: "Chitin of the Dunes", pack: "Boss_Character_Pincher_Chitin" },
@@ -83,14 +85,35 @@ export function generateLocalBoss(req: LocalBossRequest): ArenaBossInput {
   // Scale HP so a fight lasts longer at higher tiers without requiring the API.
   const maxHp = Math.round(1100 + tier * 1200 + level * 90 + salt * 3);
 
+  const abilities = buildAbilities(tier, level);
+  // Flying bosses get a dive + aerial bolt pattern
+  if (identity.flying) {
+    abilities.unshift({
+      id: "sky_dive",
+      name: "Sky Dive",
+      type: "aoe",
+      description: "Boss dives from the air — leave the red circle.",
+      damage: Math.round(22 + tier * 14 + level * 2),
+      cooldown: 7,
+    });
+    abilities.push({
+      id: "wing_barrage",
+      name: "Wing Barrage",
+      type: "ranged",
+      description: "Aerial projectiles — dodge with Space.",
+      damage: Math.round(14 + tier * 8),
+      cooldown: 4,
+    });
+  }
+
   return {
     id: -(salt + 1), // negative ids mark local/offline encounters
     name: identity.name,
     title: identity.title,
-    maxHp,
+    maxHp: identity.flying ? Math.round(maxHp * 1.08) : maxHp,
     phases,
     tier,
     assetPack: identity.pack,
-    abilities: buildAbilities(tier, level),
+    abilities,
   };
 }

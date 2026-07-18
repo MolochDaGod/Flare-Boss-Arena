@@ -198,7 +198,7 @@ export default function Home() {
           </Card>
 
           {/* Battle actions */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <Button
               variant="outline"
               className="h-auto flex-col gap-1 border-primary/40 py-4 font-serif tracking-widest text-primary hover:bg-primary/10"
@@ -230,6 +230,14 @@ export default function Home() {
             >
               <Skull className="h-5 w-5" />
               <span className="text-xs">Boss Arena</span>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-auto flex-col gap-1 border-primary/40 py-4 font-serif tracking-widest text-primary hover:bg-primary/10"
+              onClick={() => setLocation("/moba")}
+            >
+              <Map className="h-5 w-5" />
+              <span className="text-xs">MOBA Mode</span>
             </Button>
           </div>
 

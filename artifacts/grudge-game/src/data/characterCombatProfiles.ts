@@ -8,6 +8,7 @@
 
 import type { SkillElement } from "../game/combat/particles";
 import { FIGHTERS, getActiveFighterId, type FighterDef } from "./fighters";
+import { allAnnihilateCombatProfiles } from "./annihilateHeroes";
 
 /** How an enemy AI using this profile should fight. */
 export type BrainArchetype =
@@ -17,7 +18,11 @@ export type BrainArchetype =
   | "tank" // slow, high HP bias, short steps, heavy hits
   | "caster" // keeps distance, longer windups, ground zones
   | "support" // self-regen bias, cautious approach
-  | "gunner"; // long range preferred, freezes to shoot
+  | "gunner" // long range preferred, freezes to shoot
+  | "siege" // prioritizes structures / slow heavy hits
+  | "flyer" // aerial strafe, ignores some terrain, dive attacks
+  | "summoner" // keeps distance, spawns adds bias
+  | "patrol"; // lane / path patrol then aggro
 
 export interface AbilityDesign {
   id: string;
@@ -87,7 +92,7 @@ function ab(
 }
 
 /** Full combat design table for every roster fighter. */
-export const COMBAT_PROFILES: CombatProfile[] = [
+const BASE_COMBAT_PROFILES: CombatProfile[] = [
   P("nightmare_luffy", "brawler", "physical", "kit_skel_warrior", 3, [
     ab("pistol", "Gum-Gum Pistol", ["combo_a", "attack"], "physical", "cone", 1.4, 2.2, "Stretch punch — open with this"),
     ab("gatling", "Gum-Gum Gatling", ["combo_b", "combo_c"], "physical", "cone", 3.8, 2.5, "Multi-hit cone flurry"),
@@ -229,6 +234,12 @@ export const COMBAT_PROFILES: CombatProfile[] = [
   ),
 ];
 
+/** One Piece kits + full Annihilate 24 skill-creation profiles. */
+export const COMBAT_PROFILES: CombatProfile[] = [
+  ...BASE_COMBAT_PROFILES,
+  ...allAnnihilateCombatProfiles(),
+];
+
 export const PROFILE_BY_ID = new Map(COMBAT_PROFILES.map((p) => [p.fighterId, p]));
 
 export function getCombatProfile(fighterId: string | null | undefined): CombatProfile | undefined {
@@ -275,6 +286,14 @@ export function brainTuning(brain: BrainArchetype): BrainTuning {
       return { aggroMult: 0.85, attackRangeMult: 1.2, speedMult: 1.0, kiteBelow: 0.5, specialBias: 0.5 };
     case "gunner":
       return { aggroMult: 1.0, attackRangeMult: 1.8, speedMult: 0.9, kiteBelow: 0.75, specialBias: 0.5 };
+    case "siege":
+      return { aggroMult: 0.8, attackRangeMult: 1.4, speedMult: 0.65, kiteBelow: 0.2, specialBias: 0.6 };
+    case "flyer":
+      return { aggroMult: 1.2, attackRangeMult: 1.5, speedMult: 1.4, kiteBelow: 0.6, specialBias: 0.5 };
+    case "summoner":
+      return { aggroMult: 0.95, attackRangeMult: 1.7, speedMult: 0.85, kiteBelow: 0.75, specialBias: 0.65 };
+    case "patrol":
+      return { aggroMult: 1.0, attackRangeMult: 1.1, speedMult: 1.05, kiteBelow: 0.3, specialBias: 0.35 };
     case "brawler":
     default:
       return { aggroMult: 1.15, attackRangeMult: 0.9, speedMult: 1.1, kiteBelow: 0.2, specialBias: 0.25 };

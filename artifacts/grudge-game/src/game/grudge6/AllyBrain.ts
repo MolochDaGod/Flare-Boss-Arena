@@ -192,13 +192,71 @@ export function thinkAlly(
     focusId = best.id;
   }
 
+  // Flyer brain: wider leash to flank
+  if (brain === "flyer" && world.enemies.length) {
+    let best = world.enemies[0]!;
+    let bestD = best.pos.distanceTo(agent.pos);
+    for (const e of world.enemies) {
+      const d = e.pos.distanceTo(agent.pos);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    focus = best.pos;
+    focusId = best.id;
+  }
+
+  // Summoner: hang near player, only engage mid-range
+  if (brain === "summoner" && focus && focusId) {
+    const distP = world.playerPos.distanceTo(agent.pos);
+    if (distP > 6) {
+      agent.state = "follow";
+      return { type: "move", targetPos: world.playerPos.clone() };
+    }
+  }
+
+  // Siege: ignore distant skirmishes — push toward furthest enemy from base (player)
+  if (brain === "siege" && world.enemies.length && !world.focusEnemyId) {
+    let best = world.enemies[0]!;
+    let bestD = 0;
+    for (const e of world.enemies) {
+      const d = e.pos.distanceTo(world.playerPos);
+      if (d > bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    if (bestD > 4) {
+      focus = best.pos;
+      focusId = best.id;
+    }
+  }
+
+  // Patrol: sweep harvest nodes when no combat
+  if (brain === "patrol" && !world.focusEnemyId && world.harvest.length) {
+    const h = world.harvest[Math.floor(world.now * 0.15) % world.harvest.length]!;
+    if (h.pos.distanceTo(agent.pos) > 2.5) {
+      agent.state = "gather";
+      return { type: "move", targetPos: h.pos.clone() };
+    }
+  }
+
   if (focus && focusId && (brain !== "gatherer" || world.focusEnemyId)) {
     const dist = focus.distanceTo(agent.pos);
-    const range = brain === "skirmish" ? kit.attackRange : kit.attackRange;
+    const range =
+      brain === "skirmish" || brain === "summoner"
+        ? kit.attackRange * 1.15
+        : brain === "flyer"
+          ? kit.attackRange * 1.25
+          : kit.attackRange;
     if (dist > range * 0.92) {
       agent.state = "attack";
-      // Skirmishers keep distance
-      if (brain === "skirmish" && dist < range * 0.55) {
+      // Skirmishers / flyers / summoners keep distance
+      if (
+        (brain === "skirmish" || brain === "flyer" || brain === "summoner") &&
+        dist < range * 0.55
+      ) {
         const away = agent.pos.clone().sub(focus).normalize();
         return { type: "move", targetPos: agent.pos.clone().add(away.multiplyScalar(2.5)) };
       }

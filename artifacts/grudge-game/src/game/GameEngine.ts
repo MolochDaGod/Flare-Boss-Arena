@@ -960,6 +960,16 @@ export class GameEngine {
       this.loadRacalvinModel();
       return;
     }
+    // Annihilate / Warlords g6_{race}_{class} — Toon-RTS multi-mesh race path
+    const g6 = this.initStats.skinId?.match(
+      /^g6_(human|barbarian|elf|dwarf|orc|undead)_(warrior|mage|ranger|worge)$/,
+    );
+    if (g6) {
+      this.initStats.charRace = g6[1];
+      this.initStats.charClass = g6[2];
+      this.loadRaceModel();
+      return;
+    }
     const skin = getSkin(this.initStats.skinId);
     if (skin) this.loadSkinModel(skin);
     else this.loadRaceModel();
@@ -2920,6 +2930,15 @@ export class GameEngine {
     en.anim.isWalking = false;
     const brain = this.enemyBrains.get(en.template.id);
     const tune = brain ? brainTuning(brain) : null;
+
+    // Flying archetype / flyer brain — hover altitude + strafe bias
+    const isFlying =
+      en.model.archetype === "flying" || brain === "flyer";
+    if (isFlying && en.model.group) {
+      const hover = 1.6 + Math.sin(elapsed * 2.2 + en.position.x) * 0.35;
+      en.model.group.position.y = hover;
+      en.position.y = 0; // logical combat still on ground plane
+    }
 
     if (en.state !== "hurt" && en.state !== "death") {
       if (distToPlayer < en.aggroRange) {

@@ -8,6 +8,7 @@
 import type { SkillElement } from "../game/combat/particles";
 import type { DamageShapeKind } from "../game/combat/damageShapes";
 import { getActiveFighter, RACALVIN_ID } from "./fighters";
+import { annihilateFighterKit } from "./annihilateHeroes";
 
 export type SkillTargeting = "instant" | "ground_aoe" | "slash_wave" | "self";
 
@@ -634,6 +635,11 @@ const FALLBACK: FighterKit = {
 
 export function getFighterKit(fighterId?: string | null): FighterKit {
   if (fighterId && BY_ID.has(fighterId)) return BY_ID.get(fighterId)!;
+  // Annihilate / Warlords 24 — generated class skill kits for creation
+  if (fighterId) {
+    const g6 = annihilateFighterKit(fighterId);
+    if (g6) return g6;
+  }
   return FALLBACK;
 }
 

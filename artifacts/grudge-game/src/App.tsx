@@ -27,6 +27,7 @@ const Content = lazy(() => import("@/pages/content"));
 const Game = lazy(() => import("@/pages/game"));
 const Camp = lazy(() => import("@/pages/camp"));
 const Party = lazy(() => import("@/pages/party"));
+const Moba = lazy(() => import("@/pages/moba"));
 
 const queryClient = new QueryClient();
 
@@ -46,6 +47,7 @@ function Router() {
       <Route path="/game" component={Game} />
       <Route path="/camp" component={Camp} />
       <Route path="/boss" component={Boss} />
+      <Route path="/moba" component={Moba} />
       <Route>
         <Shell>
           <Switch>
