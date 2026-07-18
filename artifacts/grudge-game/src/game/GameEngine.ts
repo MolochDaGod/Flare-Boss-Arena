@@ -263,6 +263,10 @@ export interface PlayerInitStats {
   /** Equipped Mainhand item category (drives race wardrobe weapon mesh). */
   equipMainCategory?: string;
   equipHasOffhand?: boolean;
+  /** Offhand category for dual-wield (e.g. daggers) vs shield. */
+  equipOffCategory?: string;
+  /** When true with hasOffhand, show shield; when false show offCategory weapon. */
+  equipOffhandIsShield?: boolean;
   equipHasShoulder?: boolean;
 }
 
@@ -1017,6 +1021,8 @@ export class GameEngine {
         const visible = resolveVisibleMeshes(names, race, {
           mainCategory: this.initStats.equipMainCategory,
           hasOffhand: this.initStats.equipHasOffhand,
+          offCategory: this.initStats.equipOffCategory,
+          offhandIsShield: this.initStats.equipOffhandIsShield,
           hasShoulder: this.initStats.equipHasShoulder,
         }, this.initStats.charName || race);
         model.traverse((c) => {

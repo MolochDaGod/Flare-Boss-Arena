@@ -174,12 +174,19 @@ function categoryToRoles(category: string): Role[] {
 export interface PortraitEquip {
   /** Item category for the Mainhand slot (e.g. "swords", "bows"). */
   mainCategory?: string;
-  /** Item category for the Offhand slot — used for bow detection. */
+  /** Item category for the Offhand slot — used for bow detection / dual-wield. */
   offCategory?: string;
   /** True if anything is equipped in the Offhand slot. */
   hasOffhand?: boolean;
+  /**
+   * When true (default if hasOffhand), show a shield mesh.
+   * When false with hasOffhand + offCategory, show a second weapon (e.g. dagger).
+   */
+  offhandIsShield?: boolean;
   /** True if the Shoulder armor slot is equipped. */
   hasShoulder?: boolean;
+  /** Optional armor variant seed offset for body/arms/legs picks. */
+  armorSeed?: number;
 }
 
 /** Cheap, deterministic hash for picking variants by character name. */
@@ -240,9 +247,33 @@ export function resolveVisibleMeshes(
     add(chosen);
   }
 
-  // Offhand: any equipped offhand → show a shield (we don't model dual-wield
-  // visuals beyond the shield bucket the race ships with).
-  if (equip.hasOffhand) add(pick(b.shield, seed, 6));
+  // Offhand: shield OR dual-wield second weapon (sword + dagger practice).
+  if (equip.hasOffhand) {
+    const wantShield = equip.offhandIsShield !== false && !equip.offCategory;
+    if (wantShield || equip.offhandIsShield === true) {
+      add(pick(b.shield, seed, 6));
+    } else if (equip.offCategory) {
+      const roles = categoryToRoles(equip.offCategory);
+      let off: string | undefined;
+      for (const r of roles) {
+        off = pick(b[r], seed, 7);
+        if (off) break;
+      }
+      // Prefer a different mesh than mainhand if both are swords/daggers.
+      if (off && equip.mainCategory) {
+        const mainRoles = categoryToRoles(equip.mainCategory);
+        for (const r of mainRoles) {
+          const main = pick(b[r], seed, 5);
+          if (main && off === main && b[r].length > 1) {
+            off = pick(b[r], seed, 8) ?? off;
+          }
+        }
+      }
+      add(off);
+    } else {
+      add(pick(b.shield, seed, 6));
+    }
+  }
 
   // Quiver: visible whenever a bow/crossbow is in either hand.
   const isRanged = (cat?: string) => {

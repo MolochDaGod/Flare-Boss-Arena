@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type PanelKey } from "@/components/MainPanel";
 import { getSelectedSkin } from "@/data/skins";
 import { getActiveFighter } from "@/data/fighters";
+import { getWarlordsLoadoutByHeroId } from "@/data/warlordsEquipment";
 import { getPlayableCharacter } from "@/data/playableIdentity";
 import { SkillIcon } from "@/components/SkillIcon";
 import { WarningBanner } from "@/components/CraftpixUI";
@@ -277,8 +278,10 @@ function Game() {
 
     const c = char as unknown as Record<string, unknown>;
     const charId = c.id as string | number;
+    const activeFighter = getActiveFighter();
     const skinId =
-      getActiveFighter()?.skinId ?? (charId != null ? getSelectedSkin(charId) : null);
+      activeFighter?.skinId ?? (charId != null ? getSelectedSkin(charId) : null);
+    const warlordsGear = getWarlordsLoadoutByHeroId(activeFighter?.id ?? skinId ?? "");
 
     const engine = new GameEngine();
     engine.onStateUpdate = handleStateUpdate;
@@ -294,7 +297,15 @@ function Game() {
       {
         ...combatStats,
         skinId,
-        equipMainCategory: loadout.weapon.style,
+        // Warlords 24: T0/T1 practice gear drives multi-mesh wardrobe
+        equipMainCategory: warlordsGear?.portrait.mainCategory ?? loadout.weapon.style,
+        equipHasOffhand: warlordsGear?.portrait.hasOffhand ?? false,
+        equipOffCategory: warlordsGear?.portrait.offCategory,
+        equipOffhandIsShield: warlordsGear?.portrait.offhandIsShield,
+        equipHasShoulder: warlordsGear?.portrait.hasShoulder ?? false,
+        charName: warlordsGear
+          ? `${warlordsGear.race}_${warlordsGear.classId}`
+          : combatStats.charName,
       },
       enemyTemplates,
     );

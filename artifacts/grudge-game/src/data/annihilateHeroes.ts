@@ -12,6 +12,7 @@ import type { FighterDef, AttrKey } from "./fighters";
 import type { FighterKit, FighterSkillDef, FighterSpecialDef } from "./fighterSkills";
 import type { CombatProfile, BrainArchetype, AbilityDesign } from "./characterCombatProfiles";
 import type { SkillElement } from "../game/combat/particles";
+import { getWarlordsLoadout } from "./warlordsEquipment";
 
 export type AnnihilateRace = "human" | "barbarian" | "elf" | "dwarf" | "orc" | "undead";
 export type AnnihilateClass = "warrior" | "mage" | "ranger" | "worge";
@@ -93,12 +94,14 @@ function buildStats(race: AnnihilateRace, classId: AnnihilateClass): Record<Attr
 export const ANNIHILATE_FIGHTERS: FighterDef[] = ANNIHILATE_RACES.flatMap((race) =>
   ANNIHILATE_CLASSES.map((classId) => {
     const id = annihilateHeroId(race, classId);
+    const gear = getWarlordsLoadout(race, classId);
+    const gearLine = `${gear.mainhandName}${gear.offhandName ? ` + ${gear.offhandName}` : ""} · ${gear.armor}`;
     return {
       id,
       name: `${RACE_LABEL[race]} ${CLASS_LABEL[classId]}`,
       title: `Warlords ${CLASS_LABEL[classId]}`,
       role: CLASS_ROLE[classId],
-      blurb: `Annihilate-era ${RACE_LABEL[race]} ${CLASS_LABEL[classId]} — skill kit for creation, dungeon, and MOBA.`,
+      blurb: `T${gear.mainhandTier} loadout: ${gearLine}. ${gear.blurb}.`,
       skinId: id, // special g6_ skin — GameEngine / preview resolve to race GLB
       stats: buildStats(race, classId),
       featured: classId === "warrior" && (race === "human" || race === "orc"),
