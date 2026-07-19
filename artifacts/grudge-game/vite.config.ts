@@ -56,6 +56,7 @@ export default defineConfig({
       "react-day-picker",
       "react-resizable-panels",
       "zod",
+      "socket.io-client",
       "@radix-ui/react-accordion",
       "@radix-ui/react-alert-dialog",
       "@radix-ui/react-aspect-ratio",

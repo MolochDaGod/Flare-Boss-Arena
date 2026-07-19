@@ -1,0 +1,131 @@
+{
+  "version": "1.0.0",
+  "generatedAt": "2026-07-19T06:11:49.143Z",
+  "unityProject": "D:\\repos\\FRESH-GRUDGE",
+  "outDir": "C:\\Users\\david\\Desktop\\flare-boss-arena-src\\artifacts\\grudge-game\\public\\models\\unity",
+  "note": "GLBs are game-ready Three.js instances. Mirror is Unity-only; web MP uses Socket.IO (artifacts/mp-server).",
+  "entries": [
+    {
+      "id": "dark_elf_camp",
+      "unityRel": "Assets/uMMORPG/Prefabs/Entities/Monsters/Dark Elf Camp",
+      "kind": "camp",
+      "slot": "DARK_ELF_CAMP_PREFAB",
+      "priority": 1,
+      "unityFullPath": "D:\\repos\\FRESH-GRUDGE\\Assets\\uMMORPG\\Prefabs\\Entities\\Monsters\\Dark Elf Camp",
+      "unityExists": true,
+      "glbPath": "C:\\Users\\david\\Desktop\\flare-boss-arena-src\\artifacts\\grudge-game\\public\\models\\unity\\dark_elf_camp.glb",
+      "glbReady": false,
+      "publicUrl": "/models/unity/dark_elf_camp.glb"
+    },
+    {
+      "id": "dark_elf_encampment",
+      "unityRel": "Assets/uMMORPG/Prefabs/Entities/Monsters/Dark Elf Encampment",
+      "kind": "camp",
+      "priority": 2,
+      "unityFullPath": "D:\\repos\\FRESH-GRUDGE\\Assets\\uMMORPG\\Prefabs\\Entities\\Monsters\\Dark Elf Encampment",
+      "unityExists": true,
+      "glbPath": "C:\\Users\\david\\Desktop\\flare-boss-arena-src\\artifacts\\grudge-game\\public\\models\\unity\\dark_elf_encampment.glb",
+      "glbReady": false,
+      "publicUrl": "/models/unity/dark_elf_encampment.glb"
+    },
+    {
+      "id": "dark_elf_stronghold",
+      "unityRel": "Assets/uMMORPG/Prefabs/Entities/Monsters/Dark Elf Stronghold",
+      "kind": "dungeon",
+      "priority": 3,
+      "unityFullPath": "D:\\repos\\FRESH-GRUDGE\\Assets\\uMMORPG\\Prefabs\\Entities\\Monsters\\Dark Elf Stronghold",
+      "unityExists": true,
+      "glbPath": "C:\\Users\\david\\Desktop\\flare-boss-arena-src\\artifacts\\grudge-game\\public\\models\\unity\\dark_elf_stronghold.glb",
+      "glbReady": false,
+      "publicUrl": "/models/unity/dark_elf_stronghold.glb"
+    },
+    {
+      "id": "dark_elf_castle",
+      "unityRel": "Assets/uMMORPG/Prefabs/Dungeons/Dark elf Castle.prefab",
+      "kind": "dungeon",
+      "priority": 4,
+      "unityFullPath": "D:\\repos\\FRESH-GRUDGE\\Assets\\uMMORPG\\Prefabs\\Dungeons\\Dark elf Castle.prefab",
+      "unityExists": true,
+      "glbPath": "C:\\Users\\david\\Desktop\\flare-boss-arena-src\\artifacts\\grudge-game\\public\\models\\unity\\dark_elf_castle.glb",
+      "glbReady": false,
+      "publicUrl": "/models/unity/dark_elf_castle.glb"
+    },
+    {
+      "id": "dark_elf_castle_lv1",
+      "unityRel": "Assets/uMMORPG/Prefabs/Dungeons/Dark Elf Castle lv1.prefab",
+      "kind": "dungeon",
+      "priority": 5,
+      "unityFullPath": "D:\\repos\\FRESH-GRUDGE\\Assets\\uMMORPG\\Prefabs\\Dungeons\\Dark Elf Castle lv1.prefab",
+      "unityExists": true,
+      "glbPath": "C:\\Users\\david\\Desktop\\flare-boss-arena-src\\artifacts\\grudge-game\\public\\models\\unity\\dark_elf_castle_lv1.glb",
+      "glbReady": false,
+      "publicUrl": "/models/unity/dark_elf_castle_lv1.glb"
+    },
+    {
+      "id": "dungeon_catacombs",
+      "unityRel": "Assets/uMMORPG/Prefabs/Dungeons/Catacombs underground.prefab",
+      "kind": "dungeon",
+      "priority": 6,
+      "unityFullPath": "D:\\repos\\FRESH-GRUDGE\\Assets\\uMMORPG\\Prefabs\\Dungeons\\Catacombs underground.prefab",
+      "unityExists": true,
+      "glbPath": "C:\\Users\\david\\Desktop\\flare-boss-arena-src\\artifacts\\grudge-game\\public\\models\\unity\\dungeon_catacombs.glb",
+      "glbReady": false,
+      "publicUrl": "/models/unity/dungeon_catacombs.glb"
+    },
+    {
+      "id": "dungeon_main",
+      "unityRel": "Assets/uMMORPG/Prefabs/Dungeons/Dungeon.prefab",
+      "kind": "dungeon",
+      "priority": 7,
+      "unityFullPath": "D:\\repos\\FRESH-GRUDGE\\Assets\\uMMORPG\\Prefabs\\Dungeons\\Dungeon.prefab",
+      "unityExists": true,
+      "glbPath": "C:\\Users\\david\\Desktop\\flare-boss-arena-src\\artifacts\\grudge-game\\public\\models\\unity\\dungeon_main.glb",
+      "glbReady": false,
+      "publicUrl": "/models/unity/dungeon_main.glb"
+    },
+    {
+      "id": "dungeon_sewer",
+      "unityRel": "Assets/uMMORPG/Prefabs/Dungeons/Sewer.prefab",
+      "kind": "dungeon",
+      "priority": 8,
+      "unityFullPath": "D:\\repos\\FRESH-GRUDGE\\Assets\\uMMORPG\\Prefabs\\Dungeons\\Sewer.prefab",
+      "unityExists": true,
+      "glbPath": "C:\\Users\\david\\Desktop\\flare-boss-arena-src\\artifacts\\grudge-game\\public\\models\\unity\\dungeon_sewer.glb",
+      "glbReady": false,
+      "publicUrl": "/models/unity/dungeon_sewer.glb"
+    },
+    {
+      "id": "dungeon_stronghold",
+      "unityRel": "Assets/uMMORPG/Prefabs/Dungeons/Stronghold.prefab",
+      "kind": "dungeon",
+      "priority": 9,
+      "unityFullPath": "D:\\repos\\FRESH-GRUDGE\\Assets\\uMMORPG\\Prefabs\\Dungeons\\Stronghold.prefab",
+      "unityExists": true,
+      "glbPath": "C:\\Users\\david\\Desktop\\flare-boss-arena-src\\artifacts\\grudge-game\\public\\models\\unity\\dungeon_stronghold.glb",
+      "glbReady": false,
+      "publicUrl": "/models/unity/dungeon_stronghold.glb"
+    },
+    {
+      "id": "dungeon_underground_ruins",
+      "unityRel": "Assets/uMMORPG/Prefabs/Dungeons/underground ruins.prefab",
+      "kind": "dungeon",
+      "priority": 10,
+      "unityFullPath": "D:\\repos\\FRESH-GRUDGE\\Assets\\uMMORPG\\Prefabs\\Dungeons\\underground ruins.prefab",
+      "unityExists": true,
+      "glbPath": "C:\\Users\\david\\Desktop\\flare-boss-arena-src\\artifacts\\grudge-game\\public\\models\\unity\\dungeon_underground_ruins.glb",
+      "glbReady": false,
+      "publicUrl": "/models/unity/dungeon_underground_ruins.glb"
+    },
+    {
+      "id": "dungeon_entrance",
+      "unityRel": "Assets/uMMORPG/Prefabs/Dungeons/Enterence.prefab",
+      "kind": "dungeon",
+      "priority": 11,
+      "unityFullPath": "D:\\repos\\FRESH-GRUDGE\\Assets\\uMMORPG\\Prefabs\\Dungeons\\Enterence.prefab",
+      "unityExists": true,
+      "glbPath": "C:\\Users\\david\\Desktop\\flare-boss-arena-src\\artifacts\\grudge-game\\public\\models\\unity\\dungeon_entrance.glb",
+      "glbReady": false,
+      "publicUrl": "/models/unity/dungeon_entrance.glb"
+    }
+  ]
+}

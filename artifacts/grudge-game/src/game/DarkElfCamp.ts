@@ -9,10 +9,13 @@
 import * as THREE from "three";
 import type { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
+import { darkElfCampPrefabUrl } from "../data/unityInstances";
 
-/** Drop Unity-exported camp GLB here when available (R2 / public). */
-export const DARK_ELF_CAMP_PREFAB_URL =
-  `${import.meta.env.BASE_URL}models/buildings/dark_elf_camp_prefab.glb`;
+/**
+ * Unity-exported Dark Elf Camp GLB (scripts/unity-export → public/models/unity/dark_elf_camp.glb).
+ * Also accepts legacy buildings/dark_elf_camp_prefab.glb path via unityInstances fallback chain.
+ */
+export const DARK_ELF_CAMP_PREFAB_URL = darkElfCampPrefabUrl();
 
 export const DARK_ELF_SENTRY_URL =
   `${import.meta.env.BASE_URL}models/monsters/dark_elf.glb`;

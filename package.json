@@ -6,7 +6,10 @@
     "preinstall": "node -e \"const fs=require('fs');for(const f of['package-lock.json','yarn.lock']){try{fs.unlinkSync(f)}catch{}}if(!(process.env.npm_config_user_agent||'').startsWith('pnpm')){console.error('Use pnpm instead');process.exit(1)}\"",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter @workspace/grudge-game --filter @workspace/api-server --filter @workspace/mockup-sandbox --filter @workspace/scripts --if-present run typecheck"
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter @workspace/grudge-game --filter @workspace/api-server --filter @workspace/mockup-sandbox --filter @workspace/scripts --if-present run typecheck",
+    "mp:dev": "pnpm --filter @workspace/mp-server dev",
+    "unity:export": "node scripts/unity-export/export-unity-glb.mjs",
+    "unity:export:batch": "node scripts/unity-export/export-unity-glb.mjs --unity"
   },
   "private": true,
   "devDependencies": {
