@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { Flame, Check, ArrowRight, Sparkles, Pause, Play } from "lucide-react";
+import { Flame, Check, ArrowRight, Sparkles, Pause, Play, Lock, Unlock } from "lucide-react";
 import {
   FIGHTERS,
   ATTR_ORDER,
@@ -26,6 +26,15 @@ import {
 } from "@/data/fighterAssetTuning";
 import { RACALVIN_ANIMS } from "@/game/racalvinHero";
 import { useToast } from "@/hooks/use-toast";
+import {
+  GBUX_PER_TOKEN,
+  getFlareTokens,
+  getFighterLevel,
+  isOwned,
+  isPlayable,
+  isWeeklyFree,
+  unlockWithToken,
+} from "@/data/flareEconomy";
 
 const ATTR_LABEL: Record<AttrKey, string> = {
   strength: "Strength",
@@ -87,13 +96,18 @@ function FighterCard({
   onSelect: () => void;
 }) {
   const evo = getEvolutionMeta(f.id);
+  const owned = isOwned(f.id);
+  const weekly = isWeeklyFree(f.id);
+  const locked = !isPlayable(f.id);
   return (
     <button
       onClick={onSelect}
       className={`group flex flex-col items-start gap-1 rounded-md border p-3 text-left transition ${
         active
           ? "border-[#c5a059] bg-[#c5a059]/10 shadow-[0_0_18px_rgba(197,160,89,0.25)]"
-          : "border-border/50 bg-black/30 hover:border-[#c5a059]/50 hover:bg-[#c5a059]/5"
+          : locked
+            ? "border-border/30 bg-black/50 opacity-80 hover:border-red-900/40"
+            : "border-border/50 bg-black/30 hover:border-[#c5a059]/50 hover:bg-[#c5a059]/5"
       }`}
     >
       <div className="flex w-full items-center justify-between gap-1">
@@ -104,7 +118,14 @@ function FighterCard({
         >
           {f.name}
         </span>
-        <TierBadge fighterId={f.id} />
+        <div className="flex items-center gap-1">
+          {locked && <Lock className="h-3 w-3 text-muted-foreground" />}
+          {owned && <Unlock className="h-3 w-3 text-[#c5a059]" />}
+          {weekly && !owned && (
+            <span className="text-[8px] font-mono uppercase text-emerald-400/90">Free</span>
+          )}
+          <TierBadge fighterId={f.id} />
+        </div>
       </div>
       <span className="font-serif text-[10px] uppercase tracking-widest text-muted-foreground">
         {evo ? evo.tierLabel : f.role}
@@ -126,9 +147,14 @@ export default function Select() {
   const [selectedId, setSelectedId] = useState(
     FIGHTERS.some((f) => f.id === initial) ? initial : FIGHTERS[0].id,
   );
+  const [tokens, setTokens] = useState(() => getFlareTokens());
   const selected: FighterDef = FIGHTERS.find((f) => f.id === selectedId) ?? FIGHTERS[0];
   const selectedKit = getFighterKit(selected.id);
   const selectedEvo = getEvolutionMeta(selected.id);
+  const selectedOwned = isOwned(selected.id);
+  const selectedWeekly = isWeeklyFree(selected.id);
+  const selectedPlayable = isPlayable(selected.id);
+  const selectedLevel = getFighterLevel(selected.id);
   const previewRef = useRef<FighterPreviewHandle>(null);
   const [assetTuning, setAssetTuning] = useState<FighterAssetTuning>(() =>
     getFighterAssetTuning(selectedId),
@@ -167,12 +193,42 @@ export default function Select() {
   };
 
   const confirm = () => {
+    if (!isPlayable(selected.id)) {
+      toast({
+        title: "Fighter locked",
+        description: "Spend 1 Flare Grudge Token to unlock, or wait for weekly free rotation.",
+        variant: "destructive",
+      });
+      return;
+    }
     setActiveFighterId(selected.id);
     toast({
       title: `${selected.name} chosen`,
-      description: `${selected.title} — ${selected.role}. Ready to fight.`,
+      description: selectedOwned
+        ? `${selected.title} — owned. Level ${selectedLevel} saves to account.`
+        : `${selected.title} — weekly free test. Levels will NOT save until owned.`,
     });
     navigate("/");
+  };
+
+  const unlock = () => {
+    const r = unlockWithToken(selected.id);
+    if (!r.ok) {
+      toast({
+        title: r.reason === "insufficient_tokens" ? "Need a Flare Grudge Token" : "Cannot unlock",
+        description:
+          r.reason === "insufficient_tokens"
+            ? `Buy tokens for ${GBUX_PER_TOKEN} GBUX on Account, or earn via 5 boss kills.`
+            : r.reason,
+        variant: "destructive",
+      });
+      return;
+    }
+    setTokens(r.tokensLeft);
+    toast({
+      title: `${selected.name} unlocked`,
+      description: `1 token spent · ${r.tokensLeft} remaining. Level progress now saves.`,
+    });
   };
 
   return (
@@ -180,16 +236,21 @@ export default function Select() {
       <header className="flex items-end justify-between border-b border-[#c5a059]/20 pb-4">
         <div>
           <p className="font-serif text-xs uppercase tracking-[0.3em] text-muted-foreground">
-            The Roster
+            The Roster · Production locks
           </p>
           <h1 className="font-serif text-4xl font-bold uppercase tracking-widest text-[#c5a059]">
             Choose Fighter
           </h1>
           <p className="mt-1 text-[11px] font-mono text-muted-foreground">
-            Same-name fighters evolve low → high. Final forms carry the ultimate R.
+            All locked by default · 1 Flare Grudge Token unlock · 3 free weekly for test · levels
+            save only if owned
           </p>
         </div>
-        <Flame className="h-8 w-8 text-[#c5a059]/60" />
+        <div className="text-right">
+          <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Tokens</p>
+          <p className="font-mono text-2xl text-[#c5a059]">{tokens}</p>
+          <Flame className="ml-auto h-6 w-6 text-[#c5a059]/60" />
+        </div>
       </header>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr_1fr]">
@@ -275,13 +336,50 @@ export default function Select() {
                 <StatBar key={attr} label={ATTR_LABEL[attr]} value={selected.stats[attr]} />
               ))}
             </div>
+            <div className="flex flex-wrap gap-2 text-[10px] font-mono uppercase tracking-widest">
+              {selectedOwned && (
+                <span className="rounded border border-[#c5a059]/40 bg-[#c5a059]/10 px-2 py-1 text-[#c5a059]">
+                  Owned · Lv {selectedLevel}
+                </span>
+              )}
+              {selectedWeekly && !selectedOwned && (
+                <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-emerald-300">
+                  Weekly free · levels not saved
+                </span>
+              )}
+              {!selectedPlayable && (
+                <span className="rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-red-300">
+                  Locked · 1 token
+                </span>
+              )}
+            </div>
+            {!selectedOwned && (
+              <button
+                type="button"
+                onClick={unlock}
+                className="flex w-full items-center justify-center gap-2 rounded-md border border-primary/50 bg-primary/10 py-2.5 font-serif text-xs uppercase tracking-widest text-primary transition hover:bg-primary/20"
+              >
+                <Unlock className="h-4 w-4" />
+                Unlock with 1 Flare Grudge Token ({tokens} left)
+              </button>
+            )}
             <button
               onClick={confirm}
-              className="group flex w-full items-center justify-center gap-2 rounded-md border border-[#c5a059]/40 bg-gradient-to-b from-[#3a2a12] to-[#1a1208] py-3 font-serif text-sm uppercase tracking-widest text-[#c5a059] transition hover:from-[#4a3618] hover:to-[#241a0c] hover:text-[#e8c87a]"
+              disabled={!selectedPlayable}
+              className="group flex w-full items-center justify-center gap-2 rounded-md border border-[#c5a059]/40 bg-gradient-to-b from-[#3a2a12] to-[#1a1208] py-3 font-serif text-sm uppercase tracking-widest text-[#c5a059] transition hover:from-[#4a3618] hover:to-[#241a0c] hover:text-[#e8c87a] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <Check className="h-4 w-4" />
-              Fight as {selected.name}
-              <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+              {selectedPlayable ? (
+                <>
+                  <Check className="h-4 w-4" />
+                  Fight as {selected.name}
+                  <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                </>
+              ) : (
+                <>
+                  <Lock className="h-4 w-4" />
+                  Locked
+                </>
+              )}
             </button>
           </div>
         </div>

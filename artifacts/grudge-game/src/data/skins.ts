@@ -51,6 +51,8 @@ export const SKINS: SkinDef[] = [
   { id: "shiryu_clear",   name: "Shiryu — Clear",    file: "shiryu_clear",   scheme: "bountyrush" },
   { id: "lucci_awakened", name: "Lucci — Awakened",  file: "lucci_awakened", scheme: "bountyrush" },
   { id: "koby_hero",      name: "Koby — Hero",       file: "koby_hero",      scheme: "koby" },
+  /** Ikkaku Madarame visual shell — shared weapon/class combat systems, not character-specific anims. */
+  { id: "ikkaku_madarame", name: "Ikkaku Madarame",  file: "ikkaku_madarame", scheme: "cryptic", height: 1.85 },
 ];
 
 /**

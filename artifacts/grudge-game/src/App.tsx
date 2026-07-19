@@ -5,6 +5,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Shell from "@/components/layout/Shell";
+import { AuthGate } from "@/components/AuthGate";
+import { ensureEconomyBootstrapped } from "@/data/flareEconomy";
 
 // Route pages are lazy-loaded so the initial bundle/dev-transform of the entry
 // graph does not have to pull in the heavy Three.js engines (game/camp/boss).
@@ -28,6 +30,7 @@ const Game = lazy(() => import("@/pages/game"));
 const Camp = lazy(() => import("@/pages/camp"));
 const Party = lazy(() => import("@/pages/party"));
 const Moba = lazy(() => import("@/pages/moba"));
+const AuthCallback = lazy(() => import("@/pages/auth-callback"));
 
 const queryClient = new QueryClient();
 
@@ -44,6 +47,7 @@ function PageFallback() {
 function Router() {
   return (
     <Switch>
+      <Route path="/auth/callback" component={AuthCallback} />
       <Route path="/game" component={Game} />
       <Route path="/camp" component={Camp} />
       <Route path="/boss" component={Boss} />
@@ -74,15 +78,18 @@ function Router() {
 function App() {
   useEffect(() => {
     document.documentElement.classList.add("dark");
+    ensureEconomyBootstrapped();
   }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Suspense fallback={<PageFallback />}>
-            <Router />
-          </Suspense>
+          <AuthGate>
+            <Suspense fallback={<PageFallback />}>
+              <Router />
+            </Suspense>
+          </AuthGate>
         </WouterRouter>
         <Toaster />
       </TooltipProvider>

@@ -307,6 +307,17 @@ export const FIGHTERS: FighterDef[] = [
     stats: S(10, 10, 6, 5, 10, 5, 6, 5),
     featured: true,
   },
+  {
+    id: "ikkaku_madarame",
+    name: "Madarame",
+    title: "Ikkaku",
+    role: "Spear Fighter",
+    blurb:
+      "Grudge Studio visual shell — Madarame mesh with shared weapon/class skills. Combat uses fleet systems, not character-exclusive animations.",
+    skinId: "ikkaku_madarame",
+    stats: S(8, 8, 7, 7, 8, 5, 7, 6),
+    featured: true,
+  },
   // ── Annihilate / Warlords 24 (skill creation + MOBA + dungeon) ──
   ...ANNIHILATE_FIGHTERS,
 ];

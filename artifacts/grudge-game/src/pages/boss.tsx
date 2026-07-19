@@ -24,6 +24,8 @@ import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { getPlayableCharacter } from "@/data/playableIdentity";
 import { useResolvedSkills } from "@/data/skillsResolver";
 import { skillIconSrc } from "@/data/skillIcons";
+import { getActiveFighterId } from "@/data/fighters";
+import { recordBossKill, grantFighterXp, BOSSES_PER_TOKEN } from "@/data/flareEconomy";
 import {
   Loader2,
   Skull,
@@ -231,7 +233,21 @@ function BossArena() {
       onVictory: () => {
         const bossId = boss.id;
         if (bossId != null) {
-          setReward("Victory — spoils added to your session wallet.");
+          // Production economy: boss kills → Flare Grudge Tokens; XP only if owned.
+          const kill = recordBossKill();
+          const fighterId = getActiveFighterId();
+          let xpNote = "";
+          if (fighterId) {
+            const xp = grantFighterXp(fighterId, 50);
+            xpNote = xp.saved
+              ? ` · Level ${xp.level} saved (owned)`
+              : " · Level not saved (unlock with token to keep progress)";
+          }
+          const tokenNote =
+            kill.tokensEarned > 0
+              ? ` · +${kill.tokensEarned} Flare Grudge Token!`
+              : ` · Boss progress ${kill.progress}/${BOSSES_PER_TOKEN} toward next token`;
+          setReward(`Victory — spoils added.${tokenNote}${xpNote}`);
         }
       },
     });

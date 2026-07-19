@@ -21,6 +21,7 @@ import { SystemHub } from "@/components/SystemHub";
 import { getWallet } from "@/data/wallet";
 import { getActiveFighter } from "@/data/fighters";
 import { getPartyAllyIds } from "@/data/grudge6Roster";
+import { getFlareTokens } from "@/data/flareEconomy";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +31,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const wallet = getWallet();
   const fighter = getActiveFighter();
   const partyCount = getPartyAllyIds().length;
+  const flareTokens = getFlareTokens();
 
   // Global M opens systems hub (when not typing in an input)
   useEffect(() => {
@@ -126,8 +128,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 <span className="text-muted-foreground/70">Party</span>{" "}
                 <span className="text-primary">{partyCount}/2</span>
                 {" · "}
-                <span className="text-muted-foreground/70">🪙</span>{" "}
-                <span className="text-primary">{wallet.gold}</span>
+                <span className="text-muted-foreground/70">🜂</span>{" "}
+                <span className="text-primary">{flareTokens}</span>
+                {" · "}
+                <span className="text-muted-foreground/70">💎</span>{" "}
+                <span className="text-primary">{wallet.gbux}</span>
               </p>
             </div>
           </SidebarFooter>

@@ -1,10 +1,11 @@
 /**
  * Playable identity for Flare Boss Arena — fighter roster only.
- * Independent of Warlords character creation / Soul Forge.
+ * Level is account-persisted only when the fighter is owned via Flare Grudge Token.
  */
 import type { FighterDef } from "./fighters";
 import { getActiveFighter } from "./fighters";
 import { getGameLoadout } from "./gameCombat";
+import { getFighterLevel, isOwned } from "./flareEconomy";
 
 /** Virtual character shape consumed by dungeon/camp/boss stat helpers. */
 export interface PlayableCharacter {
@@ -14,6 +15,8 @@ export interface PlayableCharacter {
   race: string;
   level: number;
   faction?: string;
+  /** True when permanent unlock (token); false for weekly free test. */
+  owned: boolean;
   attributes: Record<string, number>;
   equipment: Record<string, string | undefined>;
 }
@@ -35,13 +38,16 @@ function fighterAttributes(fighter: FighterDef): Record<string, number> {
 /** Build the active fighter as a virtual character for 3D scenes + HUD. */
 export function playableCharacterFromFighter(fighter: FighterDef): PlayableCharacter {
   const loadout = getGameLoadout(fighter.id);
+  const owned = isOwned(fighter.id);
   return {
     id: fighter.id,
     name: fighter.name,
     // Class field kept for UI labels — maps to fighter role, not Warlords class trees.
     class: fighter.role.toLowerCase().replace(/\s+/g, "_"),
     race: "human",
-    level: 1,
+    // Level only from account if owned; weekly free always reads as 1.
+    level: owned ? getFighterLevel(fighter.id) : 1,
+    owned,
     faction: "flare-boss-arena",
     attributes: fighterAttributes(fighter),
     equipment: { mainHand: loadout.weapon.id },

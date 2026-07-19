@@ -19,6 +19,7 @@ import {
   Wallet,
   Map,
   Sparkles,
+  X,
 } from "lucide-react";
 import { PLAY_LOOP } from "@/data/gameFlow";
 import { DeployFunnelCard } from "@/components/DeployFunnelCard";
@@ -32,6 +33,16 @@ import {
 import { FighterPreview } from "@/components/FighterPreview";
 import { ParchmentPanel } from "@/components/CraftpixUI";
 import { SkillIcon } from "@/components/SkillIcon";
+import {
+  BOSSES_PER_TOKEN,
+  GBUX_PER_TOKEN,
+  STARTER_TOKENS,
+  dismissProductionWelcome,
+  economySummary,
+  getFlareTokens,
+  shouldShowProductionWelcome,
+} from "@/data/flareEconomy";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const GOLD = "#c5a059";
 
@@ -155,16 +166,64 @@ export default function Home() {
 
   const [fighter] = React.useState<FighterDef>(() => getActiveFighter());
   const deploy = React.useMemo(() => getDeployReadiness(), []);
+  const [showWelcome, setShowWelcome] = React.useState(() => shouldShowProductionWelcome());
+  const eco = React.useMemo(() => economySummary(), []);
+  const tokens = getFlareTokens();
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
+      {showWelcome && (
+        <Alert className="border-[#c5a059]/50 bg-[#c5a059]/10 relative">
+          <Flame className="h-4 w-4 text-[#c5a059]" />
+          <AlertTitle className="font-serif uppercase tracking-widest text-[#c5a059] pr-8">
+            Welcome production
+          </AlertTitle>
+          <AlertDescription className="text-sm text-muted-foreground space-y-1">
+            <p>
+              Flare Boss Arena is live on production. All fighters are locked. Unlock with{" "}
+              <strong className="text-foreground">1 Flare Grudge Token</strong> ({GBUX_PER_TOKEN}{" "}
+              GBUX each) or earn tokens by killing bosses ({BOSSES_PER_TOKEN} kills = 1 token).
+              You start with <strong className="text-foreground">{STARTER_TOKENS} tokens</strong>.
+              Three random fighters unlock free each week for testing — levels only save if you own
+              the character.
+            </p>
+            <p className="font-mono text-[10px] uppercase tracking-widest text-[#c5a059]/90">
+              Tokens {tokens} · Week {eco.weekKey} free: {eco.weeklyFree.join(", ") || "—"}
+            </p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button asChild size="sm" className="font-serif tracking-widest">
+                <Link href="/account">Account & wallet</Link>
+              </Button>
+              <Button asChild size="sm" variant="outline" className="font-serif tracking-widest">
+                <Link href="/select">Choose fighter</Link>
+              </Button>
+            </div>
+          </AlertDescription>
+          <button
+            type="button"
+            aria-label="Dismiss welcome"
+            className="absolute right-3 top-3 rounded p-1 text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              dismissProductionWelcome();
+              setShowWelcome(false);
+            }}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </Alert>
+      )}
+
       {/* Header */}
       <div className="flex flex-col gap-4 border-b border-[#c5a059]/20 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="font-serif text-xs uppercase tracking-[0.3em] text-muted-foreground">
-            Prepare for the cull
+            Prepare for the cull · Production
           </p>
           <h1 className="font-serif text-4xl uppercase tracking-widest text-primary">War Panel</h1>
+          <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            🜂 {tokens} Flare Grudge Tokens · Lv {activeChar.level}
+            {activeChar.owned ? " · Owned" : " · Progress not saved"}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Button
