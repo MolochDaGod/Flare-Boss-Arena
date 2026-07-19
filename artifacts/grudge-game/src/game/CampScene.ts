@@ -217,7 +217,9 @@ export class CampScene {
   private readonly STATION_RADIUS = 12.4; // engage marker (doorway) distance from centre
   private readonly BUILDING_RADIUS = 18.4; // building distance from centre
   private readonly BOUNDS = CAMP_YARD_BOUNDS;
-  private readonly CAMERA_HALF = 15;
+  private cameraHalf = 15;
+  private readonly CAMERA_HALF_MIN = 7;
+  private readonly CAMERA_HALF_MAX = 28;
   private readonly CAM_OFFSET = 22;
 
   private options: CampSceneOptions;
@@ -240,7 +242,7 @@ export class CampScene {
     const w = container.clientWidth;
     const h = container.clientHeight;
     const aspect = w / h;
-    const d = this.CAMERA_HALF;
+    const d = this.cameraHalf;
 
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.FogExp2(0x8eb8e8, 0.006);
@@ -279,8 +281,33 @@ export class CampScene {
     window.addEventListener("keydown", this._keyDown);
     window.addEventListener("keyup", this._keyUp);
     container.addEventListener("click", this._click);
+    this.renderer.domElement.addEventListener("wheel", this._onWheel, { passive: false });
 
     this.animFrameId = requestAnimationFrame(this.animate);
+  }
+
+  private _onWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    const step = e.shiftKey ? 1.5 : 0.75;
+    const dir = Math.sign(e.deltaY);
+    this.cameraHalf = Math.min(
+      this.CAMERA_HALF_MAX,
+      Math.max(this.CAMERA_HALF_MIN, this.cameraHalf + dir * step),
+    );
+    this.applyCameraFrustum();
+  };
+
+  private applyCameraFrustum() {
+    if (!this.container || !this.camera) return;
+    const w = this.container.clientWidth;
+    const h = Math.max(1, this.container.clientHeight);
+    const aspect = w / h;
+    const d = this.cameraHalf;
+    this.camera.left = -d * aspect;
+    this.camera.right = d * aspect;
+    this.camera.top = d;
+    this.camera.bottom = -d;
+    this.camera.updateProjectionMatrix();
   }
 
   private buildEnvironment() {
@@ -1395,16 +1422,10 @@ export class CampScene {
     if (!this.container) return;
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
-    const aspect = w / h;
-    const d = this.CAMERA_HALF;
-    this.camera.left = -d * aspect;
-    this.camera.right = d * aspect;
-    this.camera.top = d;
-    this.camera.bottom = -d;
-    this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.bloom?.composer.setSize(w, h);
     this.bloom?.bloomPass.resolution.set(w, h);
+    this.applyCameraFrustum();
   };
 
   dispose() {
@@ -1413,6 +1434,7 @@ export class CampScene {
     window.removeEventListener("resize", this.onResize);
     window.removeEventListener("keydown", this._keyDown);
     window.removeEventListener("keyup", this._keyUp);
+    this.renderer?.domElement?.removeEventListener("wheel", this._onWheel);
     if (this.container) {
       this.container.removeEventListener("click", this._click);
       if (this.renderer.domElement.parentNode === this.container) {

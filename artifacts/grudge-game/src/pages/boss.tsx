@@ -20,6 +20,7 @@ import {
   type ArenaStateUpdate,
   type ArenaBossInput,
 } from "@/game/ArenaScene";
+import { generateLocalBoss } from "@/data/localBoss";
 import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { getPlayableCharacter } from "@/data/playableIdentity";
 import { useResolvedSkills } from "@/data/skillsResolver";
@@ -268,8 +269,20 @@ function BossArena() {
     sceneRef.current?.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
   }, [hudClassSkills]);
 
+  /** Instant local boss with curated GLBs (works on static Vercel with no API). */
+  const summonLocal = useCallback(() => {
+    const local = generateLocalBoss({
+      tier,
+      playerClass: String((char as unknown as Record<string, unknown>).class ?? "warrior"),
+      playerLevel: Number((char as unknown as Record<string, unknown>).level ?? 1),
+    });
+    setBoss(local);
+  }, [tier, char]);
+
   const handleSummon = () => {
     setReward(null);
+    // Production Vercel is static — always have a playable curated boss ready.
+    // Try AI generate when the API is up; fall back to local boss GLBs instantly.
     generateBoss.mutate(
       {
         data: {
@@ -282,14 +295,19 @@ function BossArena() {
         onSuccess: (b: BossEncounter) => {
           const raw = b as unknown as Record<string, unknown>;
           const abilitiesRaw = (raw.abilities as Record<string, unknown>[]) ?? [];
+          // Prefer local pack if AI assetPack is generic — keeps dragon/boss GLBs in play.
+          let assetPack = raw.assetPack ? String(raw.assetPack) : undefined;
+          if (!assetPack || /boss_character_default|boss_character_/i.test(assetPack)) {
+            assetPack = generateLocalBoss({ tier }).assetPack;
+          }
           setBoss({
             id: Number(raw.id),
             name: String(raw.name ?? "Adversary"),
             title: String(raw.title ?? ""),
             maxHp: Number(raw.maxHp ?? 1000),
-            phases: Number(raw.phases ?? 1),
+            phases: Math.max(2, Number(raw.phases ?? 3)),
             tier: Number(raw.tier ?? tier),
-            assetPack: raw.assetPack ? String(raw.assetPack) : undefined,
+            assetPack,
             abilities: abilitiesRaw.map((a) => ({
               id: String(a.id),
               name: String(a.name),
@@ -300,7 +318,13 @@ function BossArena() {
             })),
           });
         },
-        onError: () => toast.error("The ritual failed — no boss could be conjured."),
+        onError: () => {
+          // Static deploy / no AI API — curated local boss with real GLB assets.
+          summonLocal();
+          toast.message("Local boss conjured", {
+            description: "Arena uses offline ritual with full boss models & stages.",
+          });
+        },
       },
     );
   };
@@ -312,17 +336,14 @@ function BossArena() {
     autoSummonRef.current = false;
   };
 
-  // Auto-conjure a boss the moment the arena is entered (and after a rematch).
-  // No mandatory summon gate — the encounter generates on entry; the manual
-  // panel only resurfaces if generation fails.
+  // Auto-conjure on entry with curated boss GLBs (static Vercel has no AI API).
   useEffect(() => {
     if (!stats) return;
-    if (boss || generateBoss.isPending || generateBoss.isError) return;
+    if (boss) return;
     if (autoSummonRef.current) return;
     autoSummonRef.current = true;
-    handleSummon();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [char, stats, boss, generateBoss.isPending, generateBoss.isError]);
+    summonLocal();
+  }, [stats, boss, summonLocal]);
 
   const charName = char.name;
 

@@ -172,9 +172,20 @@ export class GlbClipBank {
   private dead = false;
   private onFinished: (e: { action: THREE.AnimationAction }) => void;
 
-  constructor(root: THREE.Object3D, clips: THREE.AnimationClip[], preferredAttack?: string | null) {
+  constructor(
+    root: THREE.Object3D,
+    clips: THREE.AnimationClip[],
+    preferredAttack?: string | null,
+    preferredIdle?: string | null,
+  ) {
     this.mixer = new THREE.AnimationMixer(root);
     const classified = classifyClips(clips);
+    if (preferredIdle) {
+      const hit = clips.find(
+        (c) => c.name === preferredIdle || c.name.toLowerCase().includes(preferredIdle.toLowerCase()),
+      );
+      if (hit) classified.idle = hit;
+    }
     if (preferredAttack) {
       const hit = clips.find(
         (c) => c.name === preferredAttack || c.name.toLowerCase().includes(preferredAttack.toLowerCase()),

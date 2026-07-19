@@ -15,7 +15,8 @@ import { CombatVfx } from "./combat/combatVfx";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import { canDodge } from "./combatInput";
 import type { ClassSkill } from "../data/classSkills";
-import { loadMonsterModel, disposeMonsterModel, isMonsterId } from "./MonsterModels";
+import { loadMonsterModel, disposeMonsterModel, isMonsterId, isBossMonsterId } from "./MonsterModels";
+import { BOSS_MONSTER_DEFS, BOSS_MONSTER_BY_ID } from "../data/bossMonsters";
 import type { EnemyModel } from "./EnemyFactory";
 import { makeGroundMaterial } from "./proceduralTextures";
 
@@ -122,14 +123,14 @@ interface Telegraph {
   label: string;
 }
 
-/** Pick an in-repo (rigged) monster GLB to embody the boss, by tier. */
+/** Pick a curated boss GLB by tier (dragons + ML bosses under models/bosses/). */
 function bossMonsterId(tier: number): string {
   switch (Math.max(1, Math.min(5, Math.round(tier)))) {
-    case 1: return "mon_cultist";
-    case 2: return "mon_medusa";
-    case 3: return "mon_dante_beast";
-    case 4: return "mon_medusa";
-    default: return "mon_dante_beast";
+    case 1: return "boss_fireworm";
+    case 2: return "boss_framis_necro";
+    case 3: return "boss_sora_cloud";
+    case 4: return "boss_sun_monkey_king";
+    default: return "boss_noble_dragon";
   }
 }
 
@@ -144,34 +145,46 @@ function hashString(s: string): number {
 }
 
 /**
- * Resolve the AI-generated `assetPack` to an actual in-repo boss model.
- *
- * No dedicated Boss GLBs / R2 boss assets exist in this project, so the
- * generated `assetPack` string drives the choice among the shipped monster
- * models: first by thematic keyword, then by a deterministic hash so distinct
- * bosses get distinct (but stable) bodies. Empty `assetPack` falls back to a
- * tier-based pick. The caller still guards the result with `isMonsterId`.
+ * Resolve `assetPack` / localBoss pack ids to a shipped boss or monster GLB.
+ * Prefers curated `models/bosses/*` (dragons, framis, sora, monkey king), then
+ * themed mon_* fallbacks. Empty pack → tier-based boss pick.
  */
 function resolveBossModelId(assetPack: string | undefined, tier: number): string {
-  const pack = (assetPack ?? "").toLowerCase();
-  if (!pack.trim() || pack === "boss_character_default") return bossMonsterId(tier);
+  const pack = (assetPack ?? "").toLowerCase().trim();
+  if (!pack || pack === "boss_character_default") return bossMonsterId(tier);
 
-  // Only animated (rigged, non-null clip) monsters are eligible — the boss must
-  // visibly idle/move/attack, so the static `mon_big_scary_*` GLBs are excluded.
+  // Exact curated boss id (localBoss packs use boss_noble_dragon etc.)
+  if (isBossMonsterId(pack)) return pack;
+  if (isBossMonsterId(`boss_${pack}`)) return `boss_${pack}`;
+  // assetPack may be the bare file stem: noble_dragon → boss_noble_dragon
+  for (const d of BOSS_MONSTER_DEFS) {
+    if (pack === d.id || pack === d.file.replace(/\.glb$/i, "") || pack.includes(d.id.replace(/^boss_/, ""))) {
+      return d.id;
+    }
+  }
+
+  // Thematic keywords → curated boss GLBs first, then mon_* bodies.
   const keywordMap: Array<[RegExp, string]> = [
+    [/noble|wyrm of|western/, "boss_noble_dragon"],
+    [/tarisland|sky.?terror|drake/, "boss_tarisland_dragon"],
+    [/fireworm|cinder|wyrmling/, "boss_fireworm"],
+    [/framis|necro/, "boss_framis_necro"],
+    [/sora|shifting.?cloud|cloud/, "boss_sora_cloud"],
+    [/monkey|sun.?king|wukong|heaven/, "boss_sun_monkey_king"],
+    [/dragon|wyrm|drake/, "boss_noble_dragon"],
     [/colossus|titan|giant|golem|wrath|dread|hulk|behemoth|leviathan/, "mon_dante_beast"],
     [/gloom|brute|ogre|troll|abomination/, "mon_medusa"],
     [/thorn|queen|briar|medusa|serpent|gorgon|witch|matriarch|naga/, "mon_medusa"],
     [/hunter|predator|beast|wolf|hound|stalker|fang|claw/, "mon_dante_beast"],
-    [/cult|undead|wraith|lich|priest|acolyte|necro|bone|grave/, "mon_cultist"],
+    [/cult|undead|wraith|lich|priest|acolyte|bone|grave/, "mon_cultist"],
     [/spider|arachnid|chitin|scuttle|pincher|crawler/, "mon_pincher"],
   ];
   for (const [re, id] of keywordMap) {
     if (re.test(pack)) return id;
   }
 
-  // No thematic match — hash the pack for a stable, varied body (animated only).
-  const pool = ["mon_dante_beast", "mon_medusa", "mon_cultist", "mon_pincher"];
+  // Stable hash into curated boss pool so every conjure gets a real boss body.
+  const pool = BOSS_MONSTER_DEFS.map((d) => d.id);
   return pool[hashString(pack) % pool.length]!;
 }
 
@@ -257,9 +270,20 @@ export class ArenaScene {
   private bossActionT = 2.5;
   private abilityCdUntil = new Map<string, number>();
   private activeTelegraphLabel: string | null = null;
+  private bossMoving = false;
+  /** Charge / leap lunge target (phase 2+ special movement). */
+  private bossChargeTarget: THREE.Vector3 | null = null;
+  private bossChargeT = 0;
+  private phaseAura: THREE.PointLight | null = null;
 
   private projectiles: Projectile[] = [];
   private telegraphs: Telegraph[] = [];
+
+  // Orthographic frustum half-height (wheel zoom). Smaller = closer.
+  private cameraD = 13;
+  private readonly CAMERA_D_MIN = 6;
+  private readonly CAMERA_D_MAX = 26;
+  private readonly CAMERA_D_DEFAULT = 13;
 
   // HUD streaming
   private damageNumbers: ArenaDamageNumber[] = [];
@@ -296,7 +320,7 @@ export class ArenaScene {
     const w = container.clientWidth;
     const h = container.clientHeight;
     const aspect = w / h;
-    const d = 13;
+    const d = this.cameraD;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x070608);
@@ -331,8 +355,35 @@ export class ArenaScene {
     window.addEventListener("keydown", this._keyDown);
     window.addEventListener("keyup", this._keyUp);
     container.addEventListener("click", this._click);
+    // Wheel zoom on canvas (passive:false so we can prevent page scroll).
+    this.renderer.domElement.addEventListener("wheel", this._onWheel, { passive: false });
 
     this.animFrameId = requestAnimationFrame(this.animate);
+  }
+
+  /** Orthographic wheel zoom — scroll up = closer, down = wider. Shift = larger steps. */
+  private _onWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    const step = e.shiftKey ? 1.4 : 0.7;
+    const dir = Math.sign(e.deltaY); // +1 scroll down → zoom out (larger frustum)
+    this.cameraD = Math.min(
+      this.CAMERA_D_MAX,
+      Math.max(this.CAMERA_D_MIN, this.cameraD + dir * step),
+    );
+    this.applyCameraFrustum();
+  };
+
+  private applyCameraFrustum() {
+    if (!this.container || !this.camera) return;
+    const w = this.container.clientWidth;
+    const h = Math.max(1, this.container.clientHeight);
+    const aspect = w / h;
+    const d = this.cameraD;
+    this.camera.left = -d * aspect;
+    this.camera.right = d * aspect;
+    this.camera.top = d;
+    this.camera.bottom = -d;
+    this.camera.updateProjectionMatrix();
   }
 
   // ── Environment ───────────────────────────────────────────────────────────
@@ -539,26 +590,34 @@ export class ArenaScene {
   // ── Boss ──────────────────────────────────────────────────────────────────
   private loadBoss() {
     const loader = new GLTFLoader();
-    // Drive the body from the AI-generated assetPack; fall back to tier if the
-    // resolved id is somehow not a shipped monster.
+    // Prefer curated boss GLBs (models/bosses); fall back to mon_* if needed.
     let monsterId = resolveBossModelId(this.boss.assetPack, this.boss.tier);
     if (!isMonsterId(monsterId)) monsterId = bossMonsterId(this.boss.tier);
     if (!isMonsterId(monsterId)) return;
 
-    const tierScale = 1.5 + Math.max(0, Math.min(5, this.boss.tier)) * 0.16;
+    const isCuratedBoss = isBossMonsterId(monsterId);
+    // Curated bosses already bake height + bossScale; mon_* get a tier menace scale.
+    const tierScale = isCuratedBoss
+      ? 1.05 + Math.max(0, Math.min(5, this.boss.tier)) * 0.06
+      : 1.5 + Math.max(0, Math.min(5, this.boss.tier)) * 0.16;
+    const def = BOSS_MONSTER_BY_ID.get(monsterId);
     const model = loadMonsterModel(monsterId, loader, (m) => {
       if (this.disposed) return;
-      // Scale the whole boss up for menace; feet stay grounded (origin scale).
       m.group.scale.setScalar(tierScale);
-      this.bossWorldHeight = m.height * tierScale;
+      this.bossWorldHeight = m.height * tierScale * (def?.bossScale ?? 1);
+      // Entrance flourish
+      this.spawnVfx(this.bossPos.clone(), 0xff6622, 6, 0.7);
+      this.skillVfx?.spawn("cloud", this.bossPos.clone(), 5, 1.2);
+      this.pushLog(
+        `${this.boss.name}${this.boss.title ? ", " + this.boss.title : ""} enters the arena` +
+          (def ? ` — ${def.name} form.` : "."),
+      );
     });
     model.group.position.copy(this.bossPos);
     this.scene.add(model.group);
     this.bossModel = model;
     this.bossGroup = model.group;
     this.bossWorldHeight = model.height * tierScale;
-
-    this.pushLog(`${this.boss.name}${this.boss.title ? ", " + this.boss.title : ""} enters the arena.`);
   }
 
   // ── Input ─────────────────────────────────────────────────────────────────
@@ -801,25 +860,121 @@ export class ArenaScene {
 
   private performAbility(ability: ArenaBossAbility) {
     const now = performance.now();
-    const cdSec = Math.max(2.4, Math.min(12, ability.cooldown || 4));
+    const phaseCdMul = this.bossPhase >= 3 ? 0.7 : this.bossPhase >= 2 ? 0.85 : 1;
+    const cdSec = Math.max(1.6, Math.min(12, (ability.cooldown || 4) * phaseCdMul));
     this.abilityCdUntil.set(ability.id, now + cdSec * 1000);
     const type = normalizeAbilityType(ability.type);
-    const dmg = Math.max(8, Math.round((ability.damage || 30) * (0.85 + Math.random() * 0.3)));
+    const phaseDmgMul = 1 + (this.bossPhase - 1) * 0.18;
+    const dmg = Math.max(8, Math.round((ability.damage || 30) * phaseDmgMul * (0.85 + Math.random() * 0.3)));
+
+    // Trigger attack animation when the GLB has a multi-clip bank.
+    this.bossModel?.clipBank?.playAttack();
 
     if (type === "ranged" || type === "magic") {
       this.spawnProjectile(ability, dmg, type === "magic");
+      // Phase 2+: volley extras. Phase 3: denser fan.
+      const extras = this.bossPhase >= 3 ? 3 : this.bossPhase >= 2 ? 1 : 0;
+      for (let i = 0; i < extras; i++) {
+        const spread = (i + 1) * 0.35 * (i % 2 === 0 ? 1 : -1);
+        this.spawnProjectileOffset(ability, Math.round(dmg * 0.55), type === "magic", spread);
+      }
     } else if (type === "aoe") {
-      this.spawnTelegraph("aoe", this.playerPos.clone(), 4.2, 1.25, dmg, ability.name);
+      // Multi-meteor pattern scales with phase (warnings + delayed strikes).
+      const count = this.bossPhase >= 3 ? 4 : this.bossPhase >= 2 ? 2 : 1;
+      const baseR = 3.6 + this.bossPhase * 0.4;
+      const windup = Math.max(0.75, 1.35 - this.bossPhase * 0.12);
+      for (let i = 0; i < count; i++) {
+        const ang = (Math.PI * 2 * i) / count + Math.random() * 0.4;
+        const dist = i === 0 ? 0 : 2.2 + Math.random() * 3.5;
+        const c = this.playerPos.clone().add(
+          new THREE.Vector3(Math.cos(ang) * dist, 0, Math.sin(ang) * dist),
+        );
+        this.clampToArena(c, 2);
+        this.spawnTelegraph("aoe", c, baseR - i * 0.15, windup + i * 0.12, Math.round(dmg * (1 - i * 0.08)), ability.name);
+      }
+      if (this.bossPhase >= 2) {
+        this.skillVfx?.spawn("tornado", this.playerPos.clone(), 3.5, 1.2);
+      }
     } else if (type === "debuff") {
-      this.spawnTelegraph("debuff", this.playerPos.clone(), 3.2, 1.1, dmg, ability.name);
+      this.spawnTelegraph("debuff", this.playerPos.clone(), 3.2 + this.bossPhase * 0.3, 1.0, dmg, ability.name);
+      // Phase 3: second curse ring on the boss (don't stand in the center).
+      if (this.bossPhase >= 3) {
+        this.spawnTelegraph("debuff", this.bossPos.clone(), 5.5, 1.35, Math.round(dmg * 0.7), `${ability.name} Field`);
+      }
     } else {
-      // Melee — short wind-up swing anchored in front of the boss toward player.
+      // Melee — short wind-up swing; phase 2+ may charge at the player.
       const toP = new THREE.Vector3().subVectors(this.playerPos, this.bossPos).setY(0);
       if (toP.lengthSq() > 0.001) toP.normalize();
-      const center = this.bossPos.clone().add(toP.multiplyScalar(this.bossMeleeRange * 0.6));
-      this.spawnTelegraph("melee", center, this.bossMeleeRange, 0.5, dmg, ability.name);
+      if (this.bossPhase >= 2 && Math.random() < 0.45) {
+        // Charge telegraph then lunge.
+        this.bossChargeTarget = this.playerPos.clone();
+        this.bossChargeT = 0.55;
+        this.spawnTelegraph(
+          "melee",
+          this.playerPos.clone(),
+          3.2,
+          0.55,
+          Math.round(dmg * 1.15),
+          `${ability.name} — CHARGE`,
+        );
+        this.pushLog(`${this.boss.name} charges!`);
+      } else {
+        const center = this.bossPos.clone().add(toP.multiplyScalar(this.bossMeleeRange * 0.6));
+        this.spawnTelegraph("melee", center, this.bossMeleeRange, 0.45, dmg, ability.name);
+        // Phase 3: cleave ring around boss
+        if (this.bossPhase >= 3) {
+          this.spawnTelegraph("melee", this.bossPos.clone(), this.bossMeleeRange + 1.5, 0.7, Math.round(dmg * 0.65), "Cleave");
+        }
+      }
     }
     this.pushLog(`${this.boss.name} uses ${ability.name}.`);
+  }
+
+  /** Extra projectile with yaw offset (for phase volleys). */
+  private spawnProjectileOffset(ability: ArenaBossAbility, dmg: number, homing: boolean, yawOffset: number) {
+    const color = homing ? 0xaa44ff : 0xff5522;
+    const start = this.bossPos.clone().add(new THREE.Vector3(0, this.bossWorldHeight * 0.55, 0));
+    const target = this.playerPos.clone().add(new THREE.Vector3(0, 1, 0));
+    const dir = new THREE.Vector3().subVectors(target, start).normalize();
+    // Rotate around Y
+    const cos = Math.cos(yawOffset);
+    const sin = Math.sin(yawOffset);
+    const dx = dir.x * cos - dir.z * sin;
+    const dz = dir.x * sin + dir.z * cos;
+    const aim = start.clone().add(new THREE.Vector3(dx, 0, dz).multiplyScalar(14));
+    aim.y = target.y;
+    if (!homing) {
+      this.combatVfx.fireProjectile(start, aim, {
+        element: "fire",
+        skillTags: ability.name,
+        preset: { primary: color, secondary: 0xffeeaa, speed: 16, gravity: 1.2, size: 0.32, spin: 10 },
+        onHit: () => {
+          if (this.outcome === "fighting") {
+            this.damagePlayer(dmg, `${this.boss.name}'s volley`);
+            this.spawnVfx(this.playerPos.clone(), color, 1.5, 0.3);
+          }
+        },
+      });
+      return;
+    }
+    const sprite = this.particles.projectileSprite(color, 1.2);
+    sprite.position.copy(start);
+    this.scene.add(sprite);
+    const light = new THREE.PointLight(color, 1.8, 7, 2);
+    sprite.add(light);
+    this.projectiles.push({
+      sprite,
+      light,
+      pos: start.clone(),
+      vel: new THREE.Vector3(dx, 0.05, dz).normalize().multiplyScalar(11),
+      life: 0,
+      max: 2.8,
+      damage: dmg,
+      radius: 1.1,
+      homing: true,
+      color,
+      trailT: 0,
+    });
   }
 
   private spawnProjectile(ability: ArenaBossAbility, dmg: number, homing: boolean) {
@@ -882,27 +1037,70 @@ export class ArenaScene {
     if (!this.bossAlive) return;
     this.bossHp = Math.max(0, this.bossHp - amount);
     this.bossFlash = 0.2;
+    this.bossModel?.clipBank?.playHit();
     this.spawnDamageNumber(
       this.bossPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8, this.bossWorldHeight + 0.4, 0)),
       amount, isCrit, true,
     );
 
-    // Phase transitions at 50% / 20%.
+    // Phase transitions at 66% / 33% when 3 phases, else 50% / 20%.
     const pct = this.bossHp / this.bossMaxHp;
-    if (this.bossPhase < 2 && pct <= 0.5) this.enterPhase(2);
-    else if (this.bossPhase < 3 && this.boss.phases >= 3 && pct <= 0.2) this.enterPhase(3);
+    const p2 = this.boss.phases >= 3 ? 0.66 : 0.5;
+    const p3 = this.boss.phases >= 3 ? 0.33 : 0.2;
+    if (this.bossPhase < 2 && pct <= p2) this.enterPhase(2);
+    else if (this.bossPhase < 3 && this.boss.phases >= 3 && pct <= p3) this.enterPhase(3);
 
     if (this.bossHp <= 0) this.bossDies();
   }
 
   private enterPhase(phase: number) {
     this.bossPhase = phase;
-    this.bossActionT = Math.min(this.bossActionT, 0.6);
-    this.bossSpeed += 0.7;
-    this.pushLog(`${this.boss.name} enters Phase ${phase} — the assault intensifies!`);
-    // Shockwave VFX + brief flash.
-    this.spawnVfx(this.bossPos.clone(), 0xff2200, 7, 0.6);
-    this.bossFlash = 0.4;
+    this.bossActionT = Math.min(this.bossActionT, 0.45);
+    this.bossSpeed += 0.85;
+    const phaseNames = ["", "Awakening", "Enrage", "Last Stand"];
+    const label = phaseNames[phase] ?? `Phase ${phase}`;
+    this.pushLog(`⚠ STAGE ${phase}: ${this.boss.name} — ${label}!`);
+    this.activeTelegraphLabel = `STAGE ${phase} — ${label}`;
+
+    // Arena-wide phase shockwave: ring of warning circles + nova VFX.
+    this.spawnVfx(this.bossPos.clone(), phase >= 3 ? 0xff0044 : 0xff4400, 9, 0.8);
+    this.skillVfx?.spawn(phase >= 3 ? "tornado" : "cloud", this.bossPos.clone(), 6 + phase, 1.4);
+    this.bossFlash = 0.55;
+    this.bossModel?.clipBank?.playAttack();
+
+    // Phase transition slam: expanding ring telegraphs the player must leave.
+    const rings = phase >= 3 ? 3 : 2;
+    for (let i = 0; i < rings; i++) {
+      const r = 3.5 + i * 2.8;
+      this.spawnTelegraph(
+        "aoe",
+        this.bossPos.clone(),
+        r,
+        0.9 + i * 0.2,
+        Math.round(28 + this.boss.tier * 8 + phase * 12),
+        `Stage ${phase} Shockwave`,
+      );
+    }
+    // Phase 3: seed delayed meteors on the player path.
+    if (phase >= 3) {
+      for (let i = 0; i < 5; i++) {
+        const ang = (Math.PI * 2 * i) / 5;
+        const c = this.playerPos.clone().add(new THREE.Vector3(Math.cos(ang) * 4, 0, Math.sin(ang) * 4));
+        this.clampToArena(c, 2);
+        this.spawnTelegraph("aoe", c, 3.0, 1.1 + i * 0.08, Math.round(35 + this.boss.tier * 6), "Last Stand Meteor");
+      }
+    }
+
+    // Persistent phase aura light (hotter each stage).
+    if (this.phaseAura) {
+      this.scene.remove(this.phaseAura);
+      this.phaseAura.dispose();
+    }
+    const auraColor = phase >= 3 ? 0xff0066 : phase >= 2 ? 0xff4400 : 0xffaa22;
+    this.phaseAura = new THREE.PointLight(auraColor, 2.2 + phase * 0.8, 18, 2);
+    this.phaseAura.position.set(this.bossPos.x, this.bossWorldHeight * 0.6, this.bossPos.z);
+    this.scene.add(this.phaseAura);
+
     this.emitState();
   }
 
@@ -912,6 +1110,13 @@ export class ArenaScene {
     this.outcome = "victory";
     this.pushLog(`VICTORY — ${this.boss.name} has fallen!`);
     this.spawnVfx(this.bossPos.clone(), 0xffd060, 8, 0.9);
+    this.skillVfx?.spawn("cloud", this.bossPos.clone(), 7, 1.5);
+    this.bossModel?.clipBank?.playDeath();
+    if (this.phaseAura) {
+      this.scene.remove(this.phaseAura);
+      this.phaseAura.dispose();
+      this.phaseAura = null;
+    }
     this.emitState();
     if (!this.victoryFired) {
       this.victoryFired = true;
@@ -1072,20 +1277,57 @@ export class ArenaScene {
     this.particles?.update(delta);
 
     // ── Boss AI + movement + animation ──
-    if (this.bossModel?.mixer) this.bossModel.mixer.update(delta);
+    if (this.bossModel?.clipBank) this.bossModel.clipBank.update(delta);
+    else if (this.bossModel?.mixer) this.bossModel.mixer.update(delta);
     if (this.bossGroup) {
+      this.bossMoving = false;
       if (this.bossAlive && this.outcome === "fighting") {
         const to = new THREE.Vector3().subVectors(this.playerPos, this.bossPos).setY(0);
         const dist = to.length();
         const faceYaw = Math.atan2(to.x, to.z);
         this.bossGroup.rotation.y += (faceYaw - this.bossGroup.rotation.y) * 0.08;
-        if (dist > this.bossMeleeRange) {
+
+        // Charge lunge (telegraphed melee special).
+        if (this.bossChargeTarget && this.bossChargeT > 0) {
+          this.bossChargeT -= delta;
+          if (this.bossChargeT <= 0) {
+            const chargeDir = new THREE.Vector3()
+              .subVectors(this.bossChargeTarget, this.bossPos)
+              .setY(0);
+            if (chargeDir.lengthSq() > 0.01) {
+              chargeDir.normalize();
+              this.bossPos.x += chargeDir.x * Math.min(dist, 8);
+              this.bossPos.z += chargeDir.z * Math.min(dist, 8);
+              this.clampToArena(this.bossPos, 2);
+            }
+            this.spawnVfx(this.bossPos.clone(), 0xff2200, 5, 0.5);
+            this.bossChargeTarget = null;
+            this.bossMoving = true;
+          }
+        } else if (dist > this.bossMeleeRange) {
           to.normalize();
-          this.bossPos.x += to.x * this.bossSpeed * delta;
-          this.bossPos.z += to.z * this.bossSpeed * delta;
+          // Phase 3: occasional sidestep strafe for more dynamic movement.
+          if (this.bossPhase >= 3 && Math.random() < 0.02) {
+            const side = new THREE.Vector3(-to.z, 0, to.x).multiplyScalar(this.bossSpeed * 1.4 * delta);
+            this.bossPos.x += side.x;
+            this.bossPos.z += side.z;
+          } else {
+            this.bossPos.x += to.x * this.bossSpeed * delta;
+            this.bossPos.z += to.z * this.bossSpeed * delta;
+          }
           this.clampToArena(this.bossPos, 2);
+          this.bossMoving = true;
+        } else if (this.bossPhase >= 2 && dist < this.bossMeleeRange * 0.45) {
+          // Backstep when player is too close (phase 2+).
+          to.normalize();
+          this.bossPos.x -= to.x * this.bossSpeed * 0.7 * delta;
+          this.bossPos.z -= to.z * this.bossSpeed * 0.7 * delta;
+          this.clampToArena(this.bossPos, 2);
+          this.bossMoving = true;
         }
+
         this.bossGroup.position.lerp(new THREE.Vector3(this.bossPos.x, 0, this.bossPos.z), 0.15);
+        this.bossModel?.clipBank?.setMoving(this.bossMoving);
 
         // Action timer.
         this.bossActionT -= delta;
@@ -1094,19 +1336,30 @@ export class ArenaScene {
           const ability = this.chooseAbility(dist);
           if (ability) this.performAbility(ability);
         }
+
+        // Phase aura follows boss.
+        if (this.phaseAura) {
+          this.phaseAura.position.set(this.bossPos.x, this.bossWorldHeight * 0.55, this.bossPos.z);
+          this.phaseAura.intensity = 2 + this.bossPhase * 0.7 + Math.sin(elapsed * 6) * 0.4;
+        }
       } else if (!this.bossAlive) {
-        // Death tip-over.
+        // Death tip-over (if no death clip) / settle.
         this.bossDeadT += delta;
-        this.bossGroup.rotation.z = Math.min(Math.PI / 2.2, this.bossGroup.rotation.z + delta * 1.6);
-        this.bossGroup.position.y = Math.max(-0.4, this.bossGroup.position.y - delta * 0.5);
+        if (!this.bossModel?.clipBank) {
+          this.bossGroup.rotation.z = Math.min(Math.PI / 2.2, this.bossGroup.rotation.z + delta * 1.6);
+          this.bossGroup.position.y = Math.max(-0.4, this.bossGroup.position.y - delta * 0.5);
+        }
       }
 
-      // Hurt flash tint.
+      // Hurt flash tint (phase-tinted).
       if (this.bossModel) {
         if (this.bossFlash > 0) {
           this.bossFlash = Math.max(0, this.bossFlash - delta);
-          const k = this.bossFlash / 0.2;
-          for (const mm of this.bossModel.bodyMats) mm.emissive.setRGB(k, k * 0.15, 0);
+          const k = this.bossFlash / 0.25;
+          const r = this.bossPhase >= 3 ? 1 : 1;
+          const g = this.bossPhase >= 3 ? 0.05 : 0.15;
+          const b = this.bossPhase >= 3 ? 0.25 : 0;
+          for (const mm of this.bossModel.bodyMats) mm.emissive.setRGB(k * r, k * g, k * b);
         } else {
           for (const mm of this.bossModel.bodyMats) mm.emissive.setRGB(0, 0, 0);
         }
@@ -1251,16 +1504,10 @@ export class ArenaScene {
     if (!this.container) return;
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
-    const aspect = w / h;
-    const d = 13;
-    this.camera.left = -d * aspect;
-    this.camera.right = d * aspect;
-    this.camera.top = d;
-    this.camera.bottom = -d;
-    this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     this.bloom?.composer.setSize(w, h);
     this.bloom?.bloomPass.resolution.set(w, h);
+    this.applyCameraFrustum();
   };
 
   dispose() {
@@ -1271,9 +1518,15 @@ export class ArenaScene {
     window.removeEventListener("keyup", this._keyUp);
     if (this.container) {
       this.container.removeEventListener("click", this._click);
+      this.renderer?.domElement?.removeEventListener("wheel", this._onWheel);
       if (this.renderer.domElement.parentNode === this.container) {
         this.container.removeChild(this.renderer.domElement);
       }
+    }
+    if (this.phaseAura) {
+      this.scene?.remove(this.phaseAura);
+      this.phaseAura.dispose();
+      this.phaseAura = null;
     }
     if (this.heroAnim) { this.heroAnim.dispose(); this.heroAnim = null; }
     this.skillVfx?.dispose();

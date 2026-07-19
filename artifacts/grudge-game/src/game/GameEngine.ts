@@ -308,6 +308,10 @@ export class GameEngine {
   private telegraphs!: TelegraphField;
   private deployables!: DeployableManager;
   private bloom: BloomComposer | null = null;
+  /** Orthographic frustum half-height — wheel zoom (smaller = closer). */
+  private cameraD = 18;
+  private readonly CAMERA_D_MIN = 8;
+  private readonly CAMERA_D_MAX = 36;
   /** Resolved HUD skills for archetype mapping; idx fallback works if unset. */
   private hudSkills: (ClassSkill | undefined)[] = [];
   private pointerDown = false;
@@ -519,7 +523,7 @@ export class GameEngine {
     this.scene.fog = new THREE.Fog(0x060608, 28, 110);
 
     const aspect = w / h;
-    const d = 18;
+    const d = this.cameraD;
     this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 300);
     this.camera.position.set(18, 18, 18);
     this.camera.lookAt(0, 0, 0);
@@ -619,7 +623,30 @@ export class GameEngine {
     this.fx = new FX2D(container);
 
     window.addEventListener("resize", this.onResize);
+    this.renderer.domElement.addEventListener("wheel", this._onWheel, { passive: false });
     this.animate();
+  }
+
+  /** Orthographic wheel zoom — scroll up = closer, Shift = larger steps. */
+  private _onWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    const step = e.shiftKey ? 1.6 : 0.85;
+    const dir = Math.sign(e.deltaY);
+    this.cameraD = Math.min(this.CAMERA_D_MAX, Math.max(this.CAMERA_D_MIN, this.cameraD + dir * step));
+    this.applyCameraFrustum();
+  };
+
+  private applyCameraFrustum() {
+    if (!this.container || !this.camera) return;
+    const w = this.container.clientWidth;
+    const h = Math.max(1, this.container.clientHeight);
+    const aspect = w / h;
+    const d = this.cameraD;
+    this.camera.left = -d * aspect;
+    this.camera.right = d * aspect;
+    this.camera.top = d;
+    this.camera.bottom = -d;
+    this.camera.updateProjectionMatrix();
   }
 
   private buildDungeon() {
@@ -3541,13 +3568,6 @@ export class GameEngine {
     if (!this.container) return;
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
-    const aspect = w / h;
-    const d = 18;
-    this.camera.left = -d * aspect;
-    this.camera.right = d * aspect;
-    this.camera.top = d;
-    this.camera.bottom = -d;
-    this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
     // Composer full-res; bloom blur RTs stay half-res (see combat/bloom.ts).
     this.bloom?.composer.setSize(w, h);
@@ -3555,12 +3575,14 @@ export class GameEngine {
     const bh = Math.max(1, Math.floor(h * 0.5));
     this.bloom?.bloomPass.resolution.set(bw, bh);
     this.renderer.shadowMap.needsUpdate = true;
+    this.applyCameraFrustum();
   };
 
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.animFrameId);
     window.removeEventListener("resize", this.onResize);
+    this.renderer?.domElement?.removeEventListener("wheel", this._onWheel);
     window.removeEventListener("keydown", this._keyDownHandler);
     window.removeEventListener("keyup", this._keyUpHandler);
     if (this._upHandler) window.removeEventListener("mouseup", this._upHandler);

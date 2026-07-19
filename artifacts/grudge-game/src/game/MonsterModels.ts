@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { EnemyModel, Archetype } from "./EnemyFactory";
 import { CDN_MONSTER_BY_ID, isCdnMonsterId } from "../data/cdnMonsters";
+import { BOSS_MONSTER_BY_ID, isBossMonsterId } from "../data/bossMonsters";
 import { normalizeCharacterRoot, GlbClipBank } from "./modelNormalize";
 import { buildMixamoBankForMonster, createMixamoClipBank } from "./mixamoRetarget";
 
@@ -104,17 +105,34 @@ export const ANIMATED_MONSTER_TEMPLATES = MONSTER_DEFS.filter((d) => d.clip).map
 }));
 
 export function isMonsterId(id: string): boolean {
-  return MONSTER_BY_ID.has(id) || isCdnMonsterId(id);
+  return MONSTER_BY_ID.has(id) || isCdnMonsterId(id) || isBossMonsterId(id);
 }
 
+export { isBossMonsterId };
+
 const MODELS_BASE = `${import.meta.env.BASE_URL}models/monsters`;
+const BOSSES_BASE = `${import.meta.env.BASE_URL}models/bosses`;
 
 function resolveMonsterLoad(id: string): {
   url: string;
   height: number;
   archetype: Archetype;
   clip: string | null;
+  spawnRotY?: number;
+  bossScale?: number;
 } | null {
+  // Curated arena / dungeon bosses under public/models/bosses/
+  const boss = BOSS_MONSTER_BY_ID.get(id);
+  if (boss) {
+    return {
+      url: `${BOSSES_BASE}/${boss.file}`,
+      height: boss.height,
+      archetype: boss.archetype,
+      clip: boss.clip,
+      spawnRotY: boss.spawnRotY,
+      bossScale: boss.bossScale,
+    };
+  }
   const local = MONSTER_BY_ID.get(id);
   if (local) {
     return {
@@ -237,11 +255,18 @@ export function loadMonsterModel(
       group.userData.baseY = 0;
       group.userData.rootBone = norm.rootBone;
 
+      // Boss defs may bake an extra yaw (horizontal dragons) + scale.
+      if (def.spawnRotY) inner.rotation.y += def.spawnRotY;
+      if (def.bossScale && def.bossScale !== 1) {
+        inner.scale.multiplyScalar(def.bossScale);
+      }
+
       group.add(inner);
 
       // Multi-clip bank when the GLB ships several tracks; else single idle loop.
+      // def.clip is the preferred *idle* for boss packs (e.g. F_idle, fight_idle).
       if (gltf.animations.length > 1) {
-        model.clipBank = new GlbClipBank(inner, gltf.animations, def.clip);
+        model.clipBank = new GlbClipBank(inner, gltf.animations, null, def.clip);
         onReady?.(model);
       } else if (gltf.animations.length === 1) {
         const clip =
