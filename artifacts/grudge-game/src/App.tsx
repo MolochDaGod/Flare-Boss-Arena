@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Shell from "@/components/layout/Shell";
 import { AuthGate } from "@/components/AuthGate";
+import { InfoPanelHost } from "@/components/InfoPanel";
 import { ensureEconomyBootstrapped } from "@/data/flareEconomy";
 import { bootArmadaEngine } from "@/data/armadaEngine";
 
@@ -97,6 +98,7 @@ function App() {
             <Suspense fallback={<PageFallback />}>
               <Router />
             </Suspense>
+            <InfoPanelHost />
           </AuthGate>
         </WouterRouter>
         <Toaster />

@@ -24,6 +24,7 @@ import {
 import { PLAY_LOOP } from "@/data/gameFlow";
 import { DeployFunnelCard } from "@/components/DeployFunnelCard";
 import { getDeployReadiness } from "@/data/deployFunnel";
+import { openInfoPanel } from "@/data/gameInfo";
 import {
   getActiveFighter,
   ATTR_ORDER,
@@ -200,6 +201,14 @@ export default function Home() {
               <Button asChild size="sm" variant="outline" className="font-serif tracking-widest">
                 <Link href="/select">Choose fighter</Link>
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="font-serif tracking-widest"
+                onClick={() => openInfoPanel("upgrades")}
+              >
+                Token & unlocks
+              </Button>
             </div>
           </AlertDescription>
           <button
@@ -248,6 +257,32 @@ export default function Home() {
             </Link>
           </Button>
         </div>
+      </div>
+
+      {/* Quick Field Manual chips — pop-out info without leaving War Panel */}
+      <div className="flex flex-wrap gap-2">
+        {(
+          [
+            { tab: "game" as const, label: "About the game", icon: Flame },
+            { tab: "deploy" as const, label: "Deploy guide", icon: Map },
+            { tab: "upgrades" as const, label: "Upgrades & tokens", icon: Sparkles },
+            { tab: "controls" as const, label: "Controls", icon: ScrollText },
+            { tab: "fleet" as const, label: "Live fleet", icon: Wallet },
+          ] as const
+        ).map((chip) => (
+          <button
+            key={chip.tab}
+            type="button"
+            onClick={() => openInfoPanel(chip.tab)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-card/40 px-3 py-1.5 text-[10px] font-mono uppercase tracking-wide text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary"
+          >
+            <chip.icon className="h-3 w-3 text-primary/80" />
+            {chip.label}
+          </button>
+        ))}
+        <span className="self-center text-[9px] font-mono text-muted-foreground/60 uppercase tracking-widest hidden sm:inline">
+          or press ?
+        </span>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

@@ -17,8 +17,9 @@ import { getWallet } from "@/data/wallet";
 import { getActiveFighter } from "@/data/fighters";
 import { getPartyAllyIds, getGrudge6Hero } from "@/data/grudge6Roster";
 import { getEquippedStones } from "@/data/stones";
-import { Search, Flame, ChevronRight } from "lucide-react";
+import { Search, Flame, ChevronRight, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { openInfoPanel } from "@/data/gameInfo";
 
 const GOLD = "#c5a059";
 
@@ -167,6 +168,36 @@ export function SystemHub({
                   ))}
                 </div>
               </div>
+
+              <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
+                <p className="font-serif text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-2">
+                  Field Manual
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      ["game", "Game"],
+                      ["deploy", "Deploy"],
+                      ["upgrades", "Upgrades"],
+                      ["controls", "Controls"],
+                      ["fleet", "Fleet"],
+                    ] as const
+                  ).map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        onOpenChange(false);
+                        openInfoPanel(id);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-full border border-border/50 bg-background/50 px-2.5 py-1 text-[10px] font-mono uppercase tracking-wide text-muted-foreground hover:border-primary/50 hover:text-primary"
+                    >
+                      <HelpCircle className="h-3 w-3 text-primary/80" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </>
           )}
         </div>
@@ -281,6 +312,16 @@ export function GameEscapeMenu({
             );
           })}
         </div>
+        <button
+          type="button"
+          className="w-full h-10 rounded border border-primary/40 font-serif text-xs tracking-widest uppercase text-primary hover:bg-primary/10"
+          onClick={() => {
+            onOpenChange(false);
+            openInfoPanel("controls");
+          }}
+        >
+          Controls & tips
+        </button>
         <button
           type="button"
           className="w-full h-11 rounded font-serif tracking-widest uppercase text-sm"

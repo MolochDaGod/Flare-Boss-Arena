@@ -2,7 +2,8 @@ import { Link, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { getDeployReadiness } from "@/data/deployFunnel";
-import { Swords, ChevronRight, Check, Circle, Anchor } from "lucide-react";
+import { openInfoPanel } from "@/data/gameInfo";
+import { Swords, ChevronRight, Check, Circle, Anchor, HelpCircle } from "lucide-react";
 
 const GOLD = "#c5a059";
 
@@ -12,11 +13,19 @@ export function DeployFunnelCard() {
 
   return (
     <Card className="border-primary/35 bg-gradient-to-br from-card/90 to-black/40 shadow-[0_0_28px_-8px_rgba(197,160,89,0.35)]">
-      <CardHeader className="border-b border-primary/20 pb-3">
+      <CardHeader className="border-b border-primary/20 pb-3 flex flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle className="flex items-center gap-2 font-serif text-sm uppercase tracking-widest" style={{ color: GOLD }}>
           <Anchor className="h-4 w-4" />
           Deploy Funnel
         </CardTitle>
+        <button
+          type="button"
+          onClick={() => openInfoPanel("deploy")}
+          className="inline-flex items-center gap-1 rounded border border-primary/30 px-2 py-1 text-[9px] font-mono uppercase tracking-wide text-muted-foreground hover:border-primary/50 hover:text-primary"
+        >
+          <HelpCircle className="h-3 w-3" />
+          How
+        </button>
       </CardHeader>
       <CardContent className="space-y-4 pt-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

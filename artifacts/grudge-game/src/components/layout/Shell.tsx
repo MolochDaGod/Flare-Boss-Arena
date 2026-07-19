@@ -18,6 +18,8 @@ import {
 import { Flame, LayoutGrid, Menu } from "lucide-react";
 import { NAV_SECTIONS, SYSTEMS_HOTKEY } from "@/data/gameFlow";
 import { SystemHub } from "@/components/SystemHub";
+import { InfoTrigger } from "@/components/InfoPanel";
+import { openInfoPanel, type InfoTabId } from "@/data/gameInfo";
 import { getWallet } from "@/data/wallet";
 import { getActiveFighter } from "@/data/fighters";
 import { getPartyAllyIds } from "@/data/grudge6Roster";
@@ -33,7 +35,9 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   const partyCount = getPartyAllyIds().length;
   const flareTokens = getFlareTokens();
 
-  // Global M opens systems hub (when not typing in an input)
+  const openInfo = (tab: InfoTabId = "game") => openInfoPanel(tab);
+
+  // Global M = systems hub (? handled by InfoPanelHost at App root)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -65,20 +69,23 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 </h2>
               </div>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full justify-between font-serif tracking-widest text-xs border-primary/40 hover:bg-primary/10"
-              onClick={() => setHubOpen(true)}
-            >
-              <span className="flex items-center gap-2">
-                <LayoutGrid className="h-3.5 w-3.5" />
-                All Systems
-              </span>
-              <kbd className="pointer-events-none rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                M
-              </kbd>
-            </Button>
+            <div className="grid grid-cols-1 gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-between font-serif tracking-widest text-xs border-primary/40 hover:bg-primary/10"
+                onClick={() => setHubOpen(true)}
+              >
+                <span className="flex items-center gap-2">
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                  All Systems
+                </span>
+                <kbd className="pointer-events-none rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                  M
+                </kbd>
+              </Button>
+              <InfoTrigger onClick={() => openInfo("game")} className="w-full justify-between" />
+            </div>
           </SidebarHeader>
 
           <SidebarContent>
@@ -135,6 +142,29 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 <span className="text-primary">{wallet.gbux}</span>
               </p>
             </div>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => openInfo("deploy")}
+                className="flex-1 rounded border border-border/40 px-1.5 py-1 text-[9px] font-mono uppercase text-muted-foreground hover:border-primary/40 hover:text-primary"
+              >
+                Deploy
+              </button>
+              <button
+                type="button"
+                onClick={() => openInfo("upgrades")}
+                className="flex-1 rounded border border-border/40 px-1.5 py-1 text-[9px] font-mono uppercase text-muted-foreground hover:border-primary/40 hover:text-primary"
+              >
+                Upgrades
+              </button>
+              <button
+                type="button"
+                onClick={() => openInfo("fleet")}
+                className="flex-1 rounded border border-border/40 px-1.5 py-1 text-[9px] font-mono uppercase text-muted-foreground hover:border-primary/40 hover:text-primary"
+              >
+                Fleet
+              </button>
+            </div>
           </SidebarFooter>
         </Sidebar>
 
@@ -147,6 +177,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <p className="font-serif text-xs uppercase tracking-widest text-primary flex-1 truncate">
               Flare Boss
             </p>
+            <InfoTrigger onClick={() => openInfo("game")} label="?" className="h-8 w-8 p-0" />
             <Button
               size="sm"
               variant="outline"
