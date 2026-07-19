@@ -220,8 +220,19 @@ function BossArena() {
   const handleState = useCallback((s: ArenaStateUpdate) => setHud(s), []);
 
   // Spin up the arena once a boss is generated + stats are ready.
+  // Depend on primitive stats fields (not the stats object) so async class/weapon
+  // catalog loads don't tear down WebGL and spawn a new context every render.
   useEffect(() => {
     if (!mountRef.current || !boss || !stats) return;
+    // Drop any prior scene immediately (Strict Mode / remount safety).
+    sceneRef.current?.dispose();
+    sceneRef.current = null;
+    // Clear leftover canvases if a prior dispose missed them.
+    while (mountRef.current.firstChild) {
+      mountRef.current.removeChild(mountRef.current.firstChild);
+    }
+
+    const bossSnapshot = boss;
     const scene = new ArenaScene({
       className: stats.className,
       raceKey: stats.raceKey,
@@ -230,10 +241,10 @@ function BossArena() {
       maxMana: stats.maxMana,
       baseDamage: stats.baseDamage,
       critChance: stats.critChance,
-      boss,
+      boss: bossSnapshot,
       onStateUpdate: handleState,
       onVictory: () => {
-        const bossId = boss.id;
+        const bossId = bossSnapshot.id;
         if (bossId != null) {
           // Production economy: boss kills → Flare Grudge Tokens; XP only if owned.
           const kill = recordBossKill();
@@ -259,10 +270,25 @@ function BossArena() {
     sceneRef.current = scene;
     return () => {
       scene.dispose();
-      sceneRef.current = null;
+      if (sceneRef.current === scene) sceneRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boss, stats]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- boss.id + primitive stats only
+  }, [
+    boss?.id,
+    boss?.name,
+    boss?.maxHp,
+    boss?.assetPack,
+    boss?.phases,
+    boss?.tier,
+    stats.level,
+    stats.maxHp,
+    stats.maxMana,
+    stats.baseDamage,
+    stats.critChance,
+    stats.className,
+    stats.raceKey,
+    handleState,
+  ]);
 
   // Keep the scene's archetype mapping in sync with resolved class skills.
   useEffect(() => {

@@ -1,6 +1,10 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import {
+  createFrameTimer,
+  createGltfLoader,
+  disposeRenderer,
+} from "@/game/threeSetup";
 
 const MODELS_BASE = `${import.meta.env.BASE_URL}models/monsters`;
 
@@ -84,7 +88,8 @@ export function MonsterCanvas({ file, clip, accent = "#c9a04e" }: Props) {
     let root: THREE.Object3D | null = null;
     let mixer: THREE.AnimationMixer | null = null;
     let ro: ResizeObserver | null = null;
-    const clock = new THREE.Clock();
+    const timer = createFrameTimer();
+    timer.connect(document);
     let raf = 0;
     let cleaned = false;
 
@@ -93,6 +98,7 @@ export function MonsterCanvas({ file, clip, accent = "#c9a04e" }: Props) {
       cleaned = true;
       disposed = true;
       cancelAnimationFrame(raf);
+      timer.disconnect();
       ro?.disconnect();
       if (mixer) {
         mixer.stopAllAction();
@@ -104,20 +110,20 @@ export function MonsterCanvas({ file, clip, accent = "#c9a04e" }: Props) {
         disposeObject(root);
         root = null;
       }
-      renderer.dispose();
-      if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement);
+      disposeRenderer(renderer);
     };
 
     const tick = () => {
       if (disposed) return;
       raf = requestAnimationFrame(tick);
-      const dt = clock.getDelta();
+      timer.update();
+      const dt = timer.getDelta();
       if (root) root.rotation.y += 0.006;
       if (mixer) mixer.update(dt);
       renderer.render(scene, camera);
     };
 
-    new GLTFLoader().load(
+    createGltfLoader().load(
       `${MODELS_BASE}/${file}`,
       (gltf) => {
         if (disposed) {

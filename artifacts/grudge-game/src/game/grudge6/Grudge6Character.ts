@@ -4,8 +4,8 @@
  */
 
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { clone as cloneSkinnedHierarchy } from "three/addons/utils/SkeletonUtils.js";
+import { createGltfLoader } from "@/game/threeSetup";
 import type { RaceId } from "../../data/characterMeshes";
 import type { Grudge6HeroDef } from "../../data/grudge6Roster";
 import { animPackForRole, raceAtlasUrl, raceGlbUrl, targetHeightForRace } from "../../data/grudge6Assets";
@@ -158,13 +158,13 @@ function listVisibleMeshes(root: THREE.Object3D): string[] {
 const atlasCache = new Map<RaceId, THREE.Texture>();
 const raceSceneCache = new Map<RaceId, { scene: THREE.Group; loading?: Promise<THREE.Group> }>();
 
-function loadGltf(url: string, loader: GLTFLoader): Promise<THREE.Group> {
+function loadGltf(url: string, loader: ReturnType<typeof createGltfLoader>): Promise<THREE.Group> {
   return new Promise((resolve, reject) => {
     loader.load(url, (g) => resolve(g.scene), undefined, (e) => reject(e));
   });
 }
 
-async function loadRaceScene(race: RaceId, loader: GLTFLoader): Promise<THREE.Group> {
+async function loadRaceScene(race: RaceId, loader: ReturnType<typeof createGltfLoader>): Promise<THREE.Group> {
   const hit = raceSceneCache.get(race);
   if (hit?.scene && !hit.loading) return hit.scene;
   if (hit?.loading) return hit.loading;
@@ -268,7 +268,7 @@ async function buildAnimator(
  */
 export async function createGrudge6Character(
   def: Grudge6HeroDef,
-  loader: GLTFLoader,
+  loader: ReturnType<typeof createGltfLoader>,
   opts: { height?: number } = {},
 ): Promise<Grudge6Instance> {
   const t0 = performance.now();
@@ -339,7 +339,7 @@ export async function createGrudge6Character(
 
 /** Shared loader for party batching. */
 export class Grudge6Factory {
-  private loader = new GLTFLoader();
+  private loader = createGltfLoader();
 
   async create(def: Grudge6HeroDef, height?: number) {
     return createGrudge6Character(def, this.loader, {

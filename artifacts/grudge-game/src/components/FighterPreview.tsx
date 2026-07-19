@@ -1,6 +1,10 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import {
+  createFrameTimer,
+  createGltfLoader,
+  disposeRenderer,
+} from "@/game/threeSetup";
 import { getSkin, skinUrl, SKIN_CLIP_SUFFIX } from "@/data/skins";
 import { disposeObject3D } from "@/game/kaykitHero";
 import { RACALVIN_ID } from "@/data/fighters";
@@ -251,8 +255,9 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     let activeAction: THREE.AnimationAction | null = null;
     let clips: THREE.AnimationClip[] = [];
     let disposed = false;
-    const clock = new THREE.Clock();
-    const loader = new GLTFLoader();
+    const timer = createFrameTimer();
+    timer.connect(document);
+    const loader = createGltfLoader();
 
     sceneRef.current = { model: null, mixer: null, clips: [], activeAction: null };
 
@@ -342,7 +347,8 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     let raf = 0;
     const render = () => {
       raf = requestAnimationFrame(render);
-      const d = clock.getDelta();
+      timer.update();
+      const d = timer.getDelta();
       if (!freezePoseRef.current) mixer?.update(d);
       if (model && !pauseRotationRef.current) model.rotation.y += d * 0.5;
       renderer.render(scene, camera);
@@ -375,8 +381,8 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
         disposeObject3D(model);
       }
       sceneRef.current = { model: null, mixer: null, clips: [], activeAction: null };
-      renderer.dispose();
-      if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
+      timer.disconnect();
+      disposeRenderer(renderer);
     };
   }, [skinId, fighterId]);
 

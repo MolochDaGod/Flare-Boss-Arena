@@ -8,7 +8,7 @@
  */
 
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { createGltfLoader } from "@/game/threeSetup";
 import {
   discoverToonBoneRoles,
   parseBakedClipJson,
@@ -84,7 +84,7 @@ export interface ToonSoldierLoadOpts {
   preloadModes?: ToonWeaponMode[];
 }
 
-const LOADER = new GLTFLoader();
+const LOADER = createGltfLoader();
 const clipFetchCache = new Map<string, Promise<THREE.AnimationClip | null>>();
 
 function scoreClip(name: string, role: string): number {

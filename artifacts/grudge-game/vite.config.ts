@@ -19,18 +19,26 @@ export default defineConfig({
   // optimization is a single bounded pass. Keep this list in sync with the bare
   // (non-relative, non-`@/`, non-`@workspace/`) imports used across src.
   //
-  // three.js (+ its example loaders) is excluded from pre-bundling: it is the
-  // single largest dependency and ships native ESM, so Vite can serve it
-  // unbundled and skip a slow esbuild pre-bundle pass over a huge library.
+  // Pre-bundle three (+ addons) as ONE graph so we never get dual Three.js
+  // instances (triggers "Multiple instances of Three.js being imported").
+  // rapier WASM stays excluded.
   optimizeDeps: {
     noDiscovery: true,
-    exclude: [
+    exclude: ["@dimforge/rapier3d-compat"],
+    include: [
       "three",
       "three/examples/jsm/loaders/GLTFLoader.js",
       "three/examples/jsm/loaders/FBXLoader.js",
-      "@dimforge/rapier3d-compat",
-    ],
-    include: [
+      "three/examples/jsm/objects/Sky.js",
+      "three/examples/jsm/postprocessing/EffectComposer.js",
+      "three/examples/jsm/postprocessing/RenderPass.js",
+      "three/examples/jsm/postprocessing/UnrealBloomPass.js",
+      "three/examples/jsm/postprocessing/ShaderPass.js",
+      "three/examples/jsm/postprocessing/OutputPass.js",
+      "three/examples/jsm/utils/BufferGeometryUtils.js",
+      "three/addons/utils/SkeletonUtils.js",
+      "three-mesh-bvh",
+      "three.quarks",
       "react",
       "react-dom",
       "react-dom/client",
@@ -124,21 +132,34 @@ export default defineConfig({
         "index.ts",
       ),
     },
-    dedupe: ["react", "react-dom"],
+    // Force a single three package instance across app + three-mesh-bvh + three.quarks.
+    dedupe: ["react", "react-dom", "three"],
   },
   root: path.resolve(import.meta.dirname),
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
     chunkSizeWarningLimit: 2500,
+    commonjsOptions: {
+      include: [/three/, /node_modules/],
+    },
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (!id.includes("node_modules")) return undefined;
-          if (id.includes("@dimforge/")) {
+          // Normalize Windows backslashes for chunk routing.
+          const p = id.replace(/\\/g, "/");
+          if (!p.includes("node_modules")) return undefined;
+          if (p.includes("@dimforge/")) {
             return "rapier-vendor";
           }
-          if (id.includes("/three/") || id.includes("three-mesh-bvh")) {
+          // All three ecosystem packages → one vendor chunk (avoids dual Three).
+          if (
+            p.includes("/three/") ||
+            p.includes("/three@") ||
+            p.endsWith("/three") ||
+            p.includes("three-mesh-bvh") ||
+            p.includes("three.quarks")
+          ) {
             return "three-vendor";
           }
           return undefined;

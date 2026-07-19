@@ -1,5 +1,10 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import {
+  createFrameTimer,
+  createGltfLoader,
+  disposeRenderer,
+  FLARE_SHADOW_TYPE,
+} from "@/game/threeSetup";
 import {
   disposeObject3D,
   loadActiveFighterModel,
@@ -162,7 +167,7 @@ export class CampScene {
   private scene!: THREE.Scene;
   private camera!: THREE.OrthographicCamera;
   private bloom: BloomComposer | null = null;
-  private clock = new THREE.Clock();
+  private timer = createFrameTimer();
   private animFrameId = 0;
   private skillVfx!: SkillVfx;
   private telegraphs!: TelegraphField;
@@ -192,7 +197,7 @@ export class CampScene {
 
   // ── Perk machines, collectable symbols, environment props ──
   private worldProps: LoadedWorldProp[] = [];
-  private propLoader = new GLTFLoader();
+  private propLoader = createGltfLoader();
 
   // ── Combat / testing-ground ──
   private dummies: CampDummy[] = [];
@@ -259,7 +264,8 @@ export class CampScene {
 
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0x8eb8e8, 40, 160);
-    this.skillVfx = new SkillVfx(this.scene, new GLTFLoader());
+    this.skillVfx = new SkillVfx(this.scene, createGltfLoader());
+    this.timer.connect(document);
     this.telegraphs = new TelegraphField(this.scene);
     this.particles = new ParticleVfx(this.scene);
     this.combatVfx = new CombatVfx(this.scene);
@@ -273,7 +279,7 @@ export class CampScene {
     this.renderer.setSize(w, h);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = FLARE_SHADOW_TYPE;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     container.appendChild(this.renderer.domElement);
@@ -335,7 +341,7 @@ export class CampScene {
 
   /** Modular grass/stone floor, trees, rocks, walls, and town-upgrade buildings. */
   private buildTileableWorld() {
-    const loader = new GLTFLoader();
+    const loader = createGltfLoader();
     this.tileableHandle = buildTileableCamp(loader, this.scene, {
       floor: { ...CAMP_TILEABLE_FLOOR, bounds: this.BOUNDS },
       scatter: CAMP_TILEABLE_SCATTER,
@@ -395,7 +401,7 @@ export class CampScene {
   /** Populate the training-ground town with neutral KayKit NPCs that idle and
    *  wander. They carry no `enemyId`, so they can never be targeted or hit. */
   private buildTownsfolk() {
-    const loader = new GLTFLoader();
+    const loader = createGltfLoader();
     for (const a of CAMP_YARD_KAYKIT_NPCS) {
       const t = new Townsperson(loader, {
         home: new THREE.Vector3(a.x, 0, a.z),
@@ -675,7 +681,7 @@ export class CampScene {
    * labels still mark every interaction.
    */
   private loadTown() {
-    const loader = new GLTFLoader();
+    const loader = createGltfLoader();
     const url = `${import.meta.env.BASE_URL}models/buildings/fishing_town.glb`;
     loader.load(
       url,
@@ -785,7 +791,7 @@ export class CampScene {
   }
 
   private loadPlayer() {
-    const loader = new GLTFLoader();
+    const loader = createGltfLoader();
     // Prefer the globally-selected fighter skin; fall back to the KayKit hero.
     loadActiveFighterModel(
       loader,
@@ -1115,14 +1121,15 @@ export class CampScene {
 
   private animate = () => {
     this.animFrameId = requestAnimationFrame(this.animate);
-    const delta = Math.min(this.clock.getDelta(), 0.08);
+    this.timer.update();
+    const delta = Math.min(this.timer.getDelta(), 0.08);
     this.update(delta);
     if (this.bloom) this.bloom.composer.render();
     else this.renderer.render(this.scene, this.camera);
   };
 
   private update(delta: number) {
-    const elapsed = this.clock.getElapsedTime();
+    const elapsed = this.timer.getElapsed();
 
     // Movement (WASD/arrows in isometric basis)
     const raw = new THREE.Vector2();
@@ -1448,17 +1455,16 @@ export class CampScene {
   };
 
   dispose() {
+    if (this.disposed) return;
     this.disposed = true;
     cancelAnimationFrame(this.animFrameId);
+    this.timer.disconnect();
     window.removeEventListener("resize", this.onResize);
     window.removeEventListener("keydown", this._keyDown);
     window.removeEventListener("keyup", this._keyUp);
     this.renderer?.domElement?.removeEventListener("wheel", this._onWheel);
     if (this.container) {
       this.container.removeEventListener("click", this._click);
-      if (this.renderer.domElement.parentNode === this.container) {
-        this.container.removeChild(this.renderer.domElement);
-      }
     }
     if (this.heroAnim) {
       this.heroAnim.dispose();
@@ -1471,17 +1477,17 @@ export class CampScene {
     this.campSky?.dispose();
     this.campSky = null;
     for (const t of this.townsfolk) {
-      this.scene.remove(t.group);
+      this.scene?.remove(t.group);
       t.dispose();
     }
     this.townsfolk = [];
     for (const f of this.fighterNpcs) {
-      this.scene.remove(f.group);
+      this.scene?.remove(f.group);
       f.dispose();
     }
     this.fighterNpcs = [];
     for (const wp of this.worldProps) {
-      this.scene.remove(wp.holder);
+      this.scene?.remove(wp.holder);
       disposeWorldProp(wp);
     }
     this.worldProps = [];
@@ -1493,10 +1499,13 @@ export class CampScene {
     this.playerGroup = null;
     // Release every GPU resource owned by the scene (player, stations,
     // environment, labels/CanvasTextures, campfire, embers, vfx, dummies).
-    disposeObject3D(this.scene);
-    this.scene.clear();
+    if (this.scene) {
+      disposeObject3D(this.scene);
+      this.scene.clear();
+    }
     this.bloom?.dispose();
     this.bloom = null;
-    this.renderer.dispose();
+    disposeRenderer(this.renderer);
+    this.container = null;
   }
 }

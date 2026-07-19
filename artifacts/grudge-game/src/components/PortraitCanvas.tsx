@@ -1,17 +1,18 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { createGltfLoader, disposeRenderer } from "@/game/threeSetup";
 
 /**
  * GLB cache so re-mounts and race switches don't re-download.
  * Keyed by absolute URL → Promise<THREE.Group>. We always .clone() before use.
  */
 const glbCache = new Map<string, Promise<THREE.Group>>();
+const sharedPortraitLoader = createGltfLoader();
 function loadGlb(url: string): Promise<THREE.Group> {
   let p = glbCache.get(url);
   if (!p) {
     p = new Promise<THREE.Group>((resolve, reject) => {
-      new GLTFLoader().load(
+      sharedPortraitLoader.load(
         url,
         (gltf) => resolve(gltf.scene),
         undefined,
@@ -183,7 +184,7 @@ export function PortraitCanvas({ src, fallbackSrc, visibilityFor, hiddenMeshes, 
         rootRef.current = null;
       }
       meshIndexRef.current.clear();
-      renderer.dispose();
+      disposeRenderer(renderer);
       if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement);
     };
     // `accent` and visibility are NOT in deps — they're applied through other effects.

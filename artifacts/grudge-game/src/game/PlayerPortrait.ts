@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { loadFBX, findHandBone, attachWeaponToBone, normaliseHeight, TOON_CHAR_PATHS, TOON_WEAPON_PATHS } from "./assets";
+import { createFrameTimer, disposeRenderer } from "@/game/threeSetup";
 
 function disposeObject3D(root: THREE.Object3D) {
   root.traverse((o) => {
@@ -38,7 +39,7 @@ export class PlayerPortrait {
   private rig: THREE.Group | null = null;
   private weaponMount: THREE.Object3D | null = null;
   private mixer: THREE.AnimationMixer | null = null;
-  private clock = new THREE.Clock();
+  private timer = createFrameTimer();
   private rafId = 0;
   private disposed = false;
   private opts: PortraitOptions;
@@ -71,6 +72,7 @@ export class PlayerPortrait {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = false;
     container.appendChild(this.renderer.domElement);
+    this.timer.connect(document);
 
     // Dramatic lighting
     const accent = new THREE.Color(this.opts.factionColor ?? "#ffaa44");
@@ -217,7 +219,8 @@ export class PlayerPortrait {
   private animate = () => {
     if (this.disposed) return;
     this.rafId = requestAnimationFrame(this.animate);
-    const dt = Math.min(this.clock.getDelta(), 0.05);
+    this.timer.update();
+    const dt = Math.min(this.timer.getDelta(), 0.05);
     if (this.rig) this.rig.rotation.y += dt * 0.35;
     if (this.mixer) this.mixer.update(dt);
     this.renderer.render(this.scene, this.camera);
@@ -235,13 +238,9 @@ export class PlayerPortrait {
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.rafId);
+    this.timer.disconnect();
     window.removeEventListener("resize", this.onResize);
-    if (this.renderer) {
-      this.renderer.dispose();
-      if (this.renderer.domElement.parentNode === this.container) {
-        this.container.removeChild(this.renderer.domElement);
-      }
-    }
+    disposeRenderer(this.renderer);
     this.scene?.traverse((o) => {
       const m = o as THREE.Mesh;
       if (m.geometry) m.geometry.dispose();

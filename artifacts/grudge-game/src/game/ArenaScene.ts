@@ -1,5 +1,10 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import {
+  createFrameTimer,
+  createGltfLoader,
+  disposeRenderer,
+  FLARE_SHADOW_TYPE,
+} from "@/game/threeSetup";
 import {
   disposeObject3D,
   loadActiveFighterModel,
@@ -223,7 +228,7 @@ export class ArenaScene {
   private camera!: THREE.OrthographicCamera;
   private renderer!: THREE.WebGLRenderer;
   private bloom: BloomComposer | null = null;
-  private clock = new THREE.Clock();
+  private timer = createFrameTimer();
   private skillVfx!: SkillVfx;
   private skillTelegraphs!: TelegraphField;
   private particles!: ParticleVfx;
@@ -338,21 +343,26 @@ export class ArenaScene {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x070608);
     this.scene.fog = new THREE.Fog(0x0a0608, 22, 72);
-    this.skillVfx = new SkillVfx(this.scene, new GLTFLoader());
+    this.skillVfx = new SkillVfx(this.scene, createGltfLoader());
     this.skillTelegraphs = new TelegraphField(this.scene);
     this.particles = new ParticleVfx(this.scene);
     this.combatVfx = new CombatVfx(this.scene);
+    this.timer.connect(document);
 
     this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 400);
     this.camera.position.set(22, 24, 22);
     this.camera.lookAt(0, 0, 0);
     this.isoCam.look.set(0, 0, 0);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      powerPreference: "high-performance",
+    });
     this.renderer.setSize(w, h);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = FLARE_SHADOW_TYPE;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.02;
     container.appendChild(this.renderer.domElement);
@@ -554,7 +564,7 @@ export class ArenaScene {
 
   // ── Player ────────────────────────────────────────────────────────────────
   private loadPlayer() {
-    const loader = new GLTFLoader();
+    const loader = createGltfLoader();
     // Prefer the globally-selected fighter skin; fall back to the KayKit hero.
     loadActiveFighterModel(
       loader,
@@ -596,7 +606,7 @@ export class ArenaScene {
 
   // ── Boss ──────────────────────────────────────────────────────────────────
   private loadBoss() {
-    const loader = new GLTFLoader();
+    const loader = createGltfLoader();
     // Prefer curated boss GLBs (models/bosses); fall back to mon_* if needed.
     let monsterId = resolveBossModelId(this.boss.assetPack, this.boss.tier);
     if (!isMonsterId(monsterId)) monsterId = bossMonsterId(this.boss.tier);
@@ -1190,14 +1200,15 @@ export class ArenaScene {
   // ── Loop ──────────────────────────────────────────────────────────────────
   private animate = () => {
     this.animFrameId = requestAnimationFrame(this.animate);
-    const delta = Math.min(this.clock.getDelta(), 0.05);
+    this.timer.update();
+    const delta = Math.min(this.timer.getDelta(), 0.05);
     this.update(delta);
     if (this.bloom) this.bloom.composer.render();
     else this.renderer.render(this.scene, this.camera);
   };
 
   private update(delta: number) {
-    const elapsed = this.clock.getElapsedTime();
+    const elapsed = this.timer.getElapsed();
     const now = performance.now();
     const speed = now < this.slowUntil ? this.playerSpeed * 0.45 : this.playerSpeed;
     const accel = 34;
@@ -1558,17 +1569,16 @@ export class ArenaScene {
   };
 
   dispose() {
+    if (this.disposed) return;
     this.disposed = true;
     cancelAnimationFrame(this.animFrameId);
+    this.timer.disconnect();
     window.removeEventListener("resize", this.onResize);
     window.removeEventListener("keydown", this._keyDown);
     window.removeEventListener("keyup", this._keyUp);
     if (this.container) {
       this.container.removeEventListener("click", this._click);
       this.renderer?.domElement?.removeEventListener("wheel", this._onWheel);
-      if (this.renderer.domElement.parentNode === this.container) {
-        this.container.removeChild(this.renderer.domElement);
-      }
     }
     if (this.phaseAura) {
       this.scene?.remove(this.phaseAura);
@@ -1583,7 +1593,7 @@ export class ArenaScene {
     if (this.bossGroup) this.bossGroup.userData.disposed = true;
     if (this.bossModel) { disposeMonsterModel(this.bossModel); this.bossModel = null; }
     for (const p of this.projectiles) {
-      this.scene.remove(p.sprite);
+      this.scene?.remove(p.sprite);
       (p.sprite.material as THREE.Material).dispose();
     }
     this.projectiles = [];
@@ -1591,10 +1601,13 @@ export class ArenaScene {
     this.braziers = [];
     this.playerGroup = null;
     this.bossGroup = null;
-    disposeObject3D(this.scene);
-    this.scene.clear();
+    if (this.scene) {
+      disposeObject3D(this.scene);
+      this.scene.clear();
+    }
     this.bloom?.dispose();
     this.bloom = null;
-    this.renderer.dispose();
+    disposeRenderer(this.renderer);
+    this.container = null;
   }
 }

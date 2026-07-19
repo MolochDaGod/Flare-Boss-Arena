@@ -1,5 +1,9 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import {
+  createFrameTimer,
+  createGltfLoader,
+  disposeRenderer,
+} from "@/game/threeSetup";
 import { createEnemyModel, updateEnemyAnimation, makeAnimState, archetypeFor, type EnemyModel, type AnimState } from "./EnemyFactory";
 import { isMonsterId, loadMonsterModel, disposeMonsterModel, ANIMATED_MONSTER_TEMPLATES } from "./MonsterModels";
 import { disposeKitModel } from "./KayKitCharacter";
@@ -310,8 +314,8 @@ export class GameEngine {
   private scene!: THREE.Scene;
   private camera!: THREE.OrthographicCamera;
   private renderer!: THREE.WebGLRenderer;
-  private clock!: THREE.Clock;
-  private loader!: GLTFLoader;
+  private timer = createFrameTimer();
+  private loader!: ReturnType<typeof createGltfLoader>;
   private skillVfx!: SkillVfx;
   private particles!: ParticleVfx;
   private telegraphs!: TelegraphField;
@@ -565,8 +569,8 @@ export class GameEngine {
     this.renderer.shadowMap.needsUpdate = true;
     container.appendChild(this.renderer.domElement);
 
-    this.clock = new THREE.Clock();
-    this.loader = new GLTFLoader();
+    this.timer.connect(document);
+    this.loader = createGltfLoader();
     this.skillVfx = new SkillVfx(this.scene, this.loader);
     this.particles = new ParticleVfx(this.scene);
     this.telegraphs = new TelegraphField(this.scene);
@@ -2887,7 +2891,8 @@ export class GameEngine {
 
   private animate = () => {
     this.animFrameId = requestAnimationFrame(this.animate);
-    const frameDt = Math.min(this.clock.getDelta(), 0.08);
+    this.timer.update();
+    const frameDt = Math.min(this.timer.getDelta(), 0.08);
     this._frame++;
 
     // Fixed 30 Hz combat/AI sim — stable hit timing; render stays vsync.
@@ -2920,7 +2925,7 @@ export class GameEngine {
   };
 
   private update(delta: number) {
-    const elapsed = this.clock.getElapsedTime();
+    const elapsed = this.timer.getElapsed();
 
     // Freeze the whole simulation until the player has actually entered the
     // scene (player model loaded AND the dungeon GLB/BVH built). This keeps
@@ -3743,7 +3748,8 @@ export class GameEngine {
     }
     this.bloom?.dispose();
     this.bloom = null;
-    this.renderer.dispose();
+    this.timer.disconnect();
+    disposeRenderer(this.renderer);
     for (const en of this.enemies) {
       en.model.group.userData.disposed = true;
       if (en.model.kit) {

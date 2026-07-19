@@ -10,9 +10,9 @@
  */
 
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { createGltfLoader } from "@/game/threeSetup";
 
-const loader = new GLTFLoader();
+const loader = createGltfLoader();
 const clipCache = new Map<string, Promise<THREE.AnimationClip[]>>();
 
 /** Common Mixamo free animation CDN mirrors (fallback chain). */
