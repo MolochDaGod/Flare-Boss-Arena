@@ -155,8 +155,27 @@ export class MultiplayerClient {
     this.send({ op: "join", room, kind: "pve", instanceId });
   }
 
-  joinArena(matchId = "quick") {
-    this.send({ op: "join", room: `arena:${matchId}`, kind: "arena", instanceId: "arena_flat" });
+  /**
+   * Join PvP arena.
+   * @param matchId room suffix (e.g. "quick", "ranked")
+   * @param mode 1v1 (max 2) or 2v2 (max 4) deployment rooms
+   */
+  joinArena(matchId = "quick", mode: "1v1" | "2v2" | "ffa" = "1v1") {
+    const room = `arena:${mode}:${matchId}`;
+    this.send({
+      op: "join",
+      room,
+      kind: "arena",
+      instanceId: mode === "2v2" ? "arena_2v2" : mode === "1v1" ? "arena_1v1" : "arena_flat",
+    });
+  }
+
+  join1v1(matchId = "quick") {
+    this.joinArena(matchId, "1v1");
+  }
+
+  join2v2(matchId = "quick") {
+    this.joinArena(matchId, "2v2");
   }
 
   leave() {

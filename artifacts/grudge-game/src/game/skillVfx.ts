@@ -1,27 +1,45 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { heroVfxTtl } from "./combat/combatVfx";
+import type { CombatVfxKind } from "../data/vfxHotkeys";
 
 /**
- * SkillVfx — spawns short-lived GLB visual effects (fire tornado, cloud ring)
- * at a world position when a skill fires. Both source GLBs are skinless with a
- * single transform clip, so plain `.clone(true)` + a per-instance
- * `AnimationMixer` reproduce the motion (clip tracks bind by node name).
+ * SkillVfx — spawns short-lived GLB VFX at world positions.
+ * Catalog aligned with https://vfxgrudge.puter.site/ hotkeys +
+ * D:\Games\Models\runs\dist\public\models\vfx (staged under public/models/vfx).
  *
- * Geometry/materials are SHARED between the template and its clones, so clones
- * are torn down by simply removing them from the scene — only the templates
- * dispose their GPU resources (in `dispose()`).
+ * Geometry is shared from templates; clones are removed after TTL.
  */
 
 const BASE = import.meta.env.BASE_URL;
-const URLS = {
+
+/** All combat VFX GLB URLs (hotkey sandbox + runs pack). */
+const URLS: Record<CombatVfxKind, string> = {
   tornado: `${BASE}models/vfx/fire_tornado.glb`,
   cloud: `${BASE}models/vfx/cloud_ring.glb`,
-} as const;
+  fireball: `${BASE}models/vfx/fireball.glb`,
+  lightning: `${BASE}models/vfx/lightning.glb`,
+  explosion: `${BASE}models/vfx/explosion.glb`,
+  slash: `${BASE}models/vfx/attack-slashes.glb`,
+  light_slash: `${BASE}models/vfx/light-of-slash.glb`,
+  energy_beam: `${BASE}models/vfx/energy-beam.glb`,
+  laser_beam: `${BASE}models/vfx/laser-beam.glb`,
+  light_beam: `${BASE}models/vfx/light-beam.glb`,
+  spell_glyph: `${BASE}models/vfx/spell-glyph.glb`,
+  chaos_glyph: `${BASE}models/vfx/chaos-glyph.glb`,
+  explosive_orb: `${BASE}models/vfx/explosive-orb.glb`,
+  muzzle: `${BASE}models/vfx/muzzle.glb`,
+  ring_red: `${BASE}models/vfx/ring-red.glb`,
+  ring_green: `${BASE}models/vfx/ring-green.glb`,
+  aoe_warning: `${BASE}models/vfx/aoe-warning.glb`,
+  crystals: `${BASE}models/vfx/crystals.glb`,
+  strawberry_strike: `${BASE}models/vfx/strawberry-strike.glb`,
+  yellow_light: `${BASE}models/vfx/yellow-light.glb`,
+  location: `${BASE}models/vfx/location.glb`,
+};
 
-export type VfxKind = keyof typeof URLS;
+export type VfxKind = CombatVfxKind;
 
-/** Dispose every GPU resource (geometry, materials, and their textures) under a root. */
 function disposeVfxRoot(root: THREE.Object3D) {
   root.traverse((c) => {
     const m = c as THREE.Mesh;
@@ -80,7 +98,9 @@ export class SkillVfx {
           this.flushPending(kind);
         },
         undefined,
-        () => {}, // missing VFX must never break gameplay
+        () => {
+          // missing VFX must never break gameplay — soft fail
+        },
       );
     });
   }
@@ -102,68 +122,92 @@ export class SkillVfx {
     if (this.disposed) return;
     const inst = tpl.clone(true);
 
-    // Fit: tornado scales to a column height ~ 1.6x radius; cloud ring to a flat
-    // disc of the given radius.
     inst.updateWorldMatrix(true, true);
     const box = new THREE.Box3().setFromObject(inst);
     const size = new THREE.Vector3();
     box.getSize(size);
     let baseScale: number;
-    if (kind === "tornado") {
+    if (kind === "tornado" || kind === "light_beam" || kind === "laser_beam" || kind === "energy_beam") {
       const h = Math.max(size.y, 0.001);
       baseScale = (radius * 1.6) / h;
+    } else if (kind === "slash" || kind === "light_slash" || kind === "strawberry_strike") {
+      const span = Math.max(size.x, size.y, size.z, 0.001);
+      baseScale = (radius * 1.4) / span;
     } else {
       const span = Math.max(size.x, size.z, 0.001);
       baseScale = (radius * 2) / span;
     }
-    inst.scale.setScalar(baseScale * 0.6); // start small for the pop-in
+    inst.scale.setScalar(baseScale * 0.55);
     inst.position.copy(pos);
-    inst.position.y = 0.05;
-    inst.rotation.y = Math.random() * Math.PI * 2;
-    this.scene.add(inst);
+    // Lift beams / columns slightly
+    if (kind === "light_beam" || kind === "laser_beam" || kind === "tornado") {
+      inst.position.y += radius * 0.2;
+    }
 
+    this.scene.add(inst);
     let mixer: THREE.AnimationMixer | null = null;
     const clips = this.clips[kind];
     if (clips && clips.length) {
       mixer = new THREE.AnimationMixer(inst);
-      const action = mixer.clipAction(clips[0]);
-      action.play();
+      const action = mixer.clipAction(clips[0]!);
+      action.reset().play();
     }
-    this.active.push({ group: inst, mixer, age: 0, ttl: life, baseScale });
+
+    this.active.push({
+      group: inst,
+      mixer,
+      age: 0,
+      ttl: life,
+      baseScale,
+    });
   }
 
-  update(delta: number) {
+  update(dt: number) {
     for (let i = this.active.length - 1; i >= 0; i--) {
-      const v = this.active[i];
-      v.mixer?.update(delta);
-      v.age += delta;
-      // Scale pop-in over the first 120ms (0.6x → 1x).
-      const pop = v.age < 0.12 ? 0.6 + 0.4 * (v.age / 0.12) : 1;
-      v.group.scale.setScalar(v.baseScale * pop);
-      if (v.age >= v.ttl) {
-        this.removeInstance(v);
+      const a = this.active[i]!;
+      a.age += dt;
+      a.mixer?.update(dt);
+      // Pop-in scale
+      const t = Math.min(1, a.age / 0.12);
+      a.group.scale.setScalar(a.baseScale * (0.55 + 0.45 * t));
+      // Fade out near end
+      if (a.age > a.ttl - 0.2) {
+        const fade = Math.max(0, (a.ttl - a.age) / 0.2);
+        a.group.traverse((c) => {
+          const m = c as THREE.Mesh;
+          if (m.isMesh && m.material) {
+            const mats = Array.isArray(m.material) ? m.material : [m.material];
+            for (const mat of mats) {
+              const sm = mat as THREE.MeshStandardMaterial;
+              if (sm.transparent !== undefined) {
+                sm.transparent = true;
+                sm.opacity = fade;
+              }
+            }
+          }
+        });
+      }
+      if (a.age >= a.ttl) {
+        this.scene.remove(a.group);
+        a.mixer?.stopAllAction();
         this.active.splice(i, 1);
       }
     }
   }
 
-  private removeInstance(v: ActiveVfx) {
-    if (v.mixer) {
-      v.mixer.stopAllAction();
-      v.mixer.uncacheRoot(v.group as THREE.Object3D);
-    }
-    this.scene.remove(v.group);
-  }
-
   dispose() {
     this.disposed = true;
-    for (const v of this.active) this.removeInstance(v);
+    for (const a of this.active) {
+      this.scene.remove(a.group);
+      a.mixer?.stopAllAction();
+    }
     this.active = [];
-    for (const tpl of Object.values(this.templates)) {
-      if (tpl) disposeVfxRoot(tpl);
+    this.pending = [];
+    for (const kind of Object.keys(this.templates) as VfxKind[]) {
+      const t = this.templates[kind];
+      if (t) disposeVfxRoot(t);
     }
     this.templates = {};
     this.clips = {};
-    this.pending = [];
   }
 }

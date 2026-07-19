@@ -71,7 +71,8 @@ import type { ClassSkill } from "../data/classSkills";
 import { archetypeForSkill, type SkillShapeKind } from "./combat/skillArchetypes";
 import { targetsInShape, type ShapeQuery } from "./combat/damageShapes";
 import type { CombatTarget } from "./combat/types";
-import { ParticleVfx, elementColor } from "./combat/particles";
+import { ParticleVfx, elementColor, type SkillElement } from "./combat/particles";
+import { vfxForArchetype, vfxForSkillSlot } from "../data/vfxHotkeys";
 import { TelegraphField } from "./combat/telegraphs";
 import { DeployableManager } from "./combat/deployables";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
@@ -2473,7 +2474,8 @@ export class GameEngine {
     // area (origin for circle/nova; cone/line project forward inside castSkillVfx).
     const reach = arch.radius ?? arch.length ?? 4;
     const center = origin.clone();
-    this.spawnSkillVfx(center, arch.shape);
+    // vfxgrudge.puter.site hotkey catalog → GLB spawn by skill slot / archetype
+    this.spawnSkillVfx(center, arch.shape, arch.element, idx);
     this.particles?.castSkillVfx({
       element: arch.element,
       shape: arch.shape,
@@ -2493,12 +2495,20 @@ export class GameEngine {
     this.notifyState();
   }
 
-  /** GLB flavor only for area shapes (a cloud ring on nova/circle). cone/line
-   *  rely on the element particle silhouette so the GLBs don't read as repetitive. */
-  private spawnSkillVfx(pos: THREE.Vector3, shape: SkillShapeKind) {
-    if (shape === "nova" || shape === "circle") {
-      this.skillVfx.spawn("cloud", pos, 4, 1.0);
-    }
+  /**
+   * Hotkey VFX from vfxgrudge.puter.site + runs/dist GLB pack.
+   * Always spawns the catalog GLB for the skill slot; shape still drives size.
+   */
+  private spawnSkillVfx(
+    pos: THREE.Vector3,
+    shape: SkillShapeKind,
+    element: SkillElement,
+    slot: number,
+  ) {
+    const bind = vfxForArchetype(element, shape, slot) ?? vfxForSkillSlot(slot);
+    const radius =
+      shape === "nova" || shape === "circle" ? 4.5 : shape === "line" ? 3.2 : 3.5;
+    this.skillVfx.spawn(bind.glb, pos, radius, 1.15);
   }
 
   /**

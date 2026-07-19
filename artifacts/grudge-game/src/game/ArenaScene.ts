@@ -7,6 +7,7 @@ import {
   type HeroLike,
 } from "./kaykitHero";
 import { SkillVfx } from "./skillVfx";
+import { vfxForArchetype, vfxForSkillSlot } from "../data/vfxHotkeys";
 import { archetypeForSkill } from "./combat/skillArchetypes";
 import { pointInShape, type ShapeQuery } from "./combat/damageShapes";
 import { TelegraphField } from "./combat/telegraphs";
@@ -772,9 +773,10 @@ export class ArenaScene {
       kind === "circle" || kind === "nova"
         ? origin.clone()
         : origin.clone().add(dir.clone().multiplyScalar(reach * 0.5));
-    if (kind === "nova" || kind === "circle") {
-      this.skillVfx.spawn("cloud", center, 4);
-      if (arch.element === "fire") this.skillVfx.spawn("tornado", center, 3.5);
+    // vfxgrudge.puter.site hotkeys → weapon skill GLB pack
+    {
+      const bind = vfxForArchetype(arch.element, kind, idx) ?? vfxForSkillSlot(idx);
+      this.skillVfx.spawn(bind.glb, center, kind === "nova" || kind === "circle" ? 4.5 : 3.5, 1.15);
     }
     this.combatVfx.pulseCastAura(origin, arch.element);
     if (kind === "line") {

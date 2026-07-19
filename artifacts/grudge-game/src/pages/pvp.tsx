@@ -40,7 +40,7 @@ export default function PvpLobby() {
   }, [client]);
 
   const connectAndJoin = useCallback(
-    async (mode: "arena" | "pve") => {
+    async (mode: "1v1" | "2v2" | "ffa" | "pve") => {
       if (!getAuthToken()) {
         toast({
           title: "Sign in required",
@@ -83,16 +83,21 @@ export default function PvpLobby() {
         },
       };
       try {
+        // Prefer race mesh from runs/dist pack when available
+        const raceUrl = `${window.location.origin}/models/races/human.glb`;
         await mp.connect({
           name: fighter.name,
-          modelUrl: `${window.location.origin}/models/skins/${fighter.skinId}.glb`,
+          modelUrl: raceUrl,
           raceId: fighter.id,
         });
-        if (mode === "arena") mp.joinArena("flare-quick");
-        else mp.joinPve("dark_elf_camp");
+        if (mode === "pve") mp.joinPve("dark_elf_camp");
+        else if (mode === "1v1") mp.join1v1("flare-quick");
+        else if (mode === "2v2") mp.join2v2("flare-quick");
+        else mp.joinArena("flare-quick", "ffa");
         setClient(mp);
+        const labels = { "1v1": "1v1 Arena", "2v2": "2v2 Arena", ffa: "FFA Arena", pve: "Co-op Camp" };
         toast({
-          title: mode === "arena" ? "Joined PvP arena" : "Joined co-op PvE",
+          title: `Joined ${labels[mode]}`,
           description: mpUrl,
         });
       } catch (e) {
@@ -122,7 +127,7 @@ export default function PvpLobby() {
       <PageHeader
         kicker="Grudge Studio · multiplayer"
         title="PvP Arena"
-        subtitle="Socket.IO fleet rooms — free-for-all arena or co-op instance. Engine uses VITE_MP_URL / production mp-server."
+        subtitle="Production deployment rooms — 1v1 · 2v2 · FFA · co-op. Characters from runs/dist races pack. Weapon skills use vfxgrudge.puter.site hotkey VFX."
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -162,10 +167,27 @@ export default function PvpLobby() {
               <Button
                 className="font-serif tracking-widest"
                 disabled={status === "connecting" || status === "in_room"}
-                onClick={() => void connectAndJoin("arena")}
+                onClick={() => void connectAndJoin("1v1")}
               >
                 <Swords className="mr-2 h-4 w-4" />
-                Quickmatch Arena
+                Arena 1v1
+              </Button>
+              <Button
+                className="font-serif tracking-widest"
+                variant="secondary"
+                disabled={status === "connecting" || status === "in_room"}
+                onClick={() => void connectAndJoin("2v2")}
+              >
+                <Users className="mr-2 h-4 w-4" />
+                Arena 2v2
+              </Button>
+              <Button
+                variant="outline"
+                className="font-serif tracking-widest"
+                disabled={status === "connecting" || status === "in_room"}
+                onClick={() => void connectAndJoin("ffa")}
+              >
+                FFA
               </Button>
               <Button
                 variant="outline"
@@ -173,7 +195,6 @@ export default function PvpLobby() {
                 disabled={status === "connecting" || status === "in_room"}
                 onClick={() => void connectAndJoin("pve")}
               >
-                <Users className="mr-2 h-4 w-4" />
                 Co-op Camp
               </Button>
               {status === "in_room" && (
@@ -184,13 +205,16 @@ export default function PvpLobby() {
               <Button asChild variant="ghost" className="font-serif tracking-widest">
                 <Link href="/leaderboards">Leaderboards</Link>
               </Button>
+              <Button asChild variant="ghost" className="font-serif tracking-widest">
+                <Link href="/boss">Boss Fight</Link>
+              </Button>
             </div>
 
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              Full 3D PvP combat still runs through the arena instance once the room is up. This lobby
-              verifies the grudge-studio multiplayer connection and scoreboard hooks. Deploy{" "}
-              <code className="text-primary">artifacts/mp-server</code> on Railway and set{" "}
-              <code className="text-primary">VITE_MP_URL</code> on Vercel.
+              Rooms: <code className="text-primary">arena:1v1:…</code> (cap 2) ·{" "}
+              <code className="text-primary">arena:2v2:…</code> (cap 4). Character models from{" "}
+              <code className="text-primary">models/races/*</code> (staged from runs/dist). Weapon skills
+              fire hotkey VFX from vfxgrudge.puter.site.
             </p>
           </CardContent>
         </Card>

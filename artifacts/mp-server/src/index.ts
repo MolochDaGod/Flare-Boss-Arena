@@ -36,6 +36,9 @@ const INSTANCE_CAPS: Record<string, number> = {
   dungeon_stronghold: 5,
   dungeon_underground_ruins: 4,
   arena_flat: 8,
+  /** Production PvP deployment rooms */
+  arena_1v1: 2,
+  arena_2v2: 4,
 };
 
 interface NetPlayer {
@@ -112,7 +115,11 @@ function getOrCreateRoom(name: string, kind: RoomKind, instanceId: string): Room
 }
 
 function roomCap(instanceId: string, kind: RoomKind): number {
-  if (kind === "arena") return INSTANCE_CAPS.arena_flat ?? 8;
+  if (kind === "arena") {
+    if (instanceId === "arena_1v1") return 2;
+    if (instanceId === "arena_2v2") return 4;
+    return INSTANCE_CAPS[instanceId] ?? INSTANCE_CAPS.arena_flat ?? 8;
+  }
   return INSTANCE_CAPS[instanceId] ?? 4;
 }
 
