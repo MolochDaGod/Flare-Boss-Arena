@@ -13,6 +13,14 @@ import { TelegraphField } from "./combat/telegraphs";
 import { ParticleVfx } from "./combat/particles";
 import { CombatVfx } from "./combat/combatVfx";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
+import {
+  createIsoCameraState,
+  isoCameraWheel,
+  applyOrthoFrustum,
+  updateIsoCamera,
+  kickCameraShake,
+  type IsoCameraState,
+} from "./combat/isoCamera";
 import { canDodge } from "./combatInput";
 import type { ClassSkill } from "../data/classSkills";
 import { loadMonsterModel, disposeMonsterModel, isMonsterId, isBossMonsterId } from "./MonsterModels";
@@ -279,11 +287,15 @@ export class ArenaScene {
   private projectiles: Projectile[] = [];
   private telegraphs: Telegraph[] = [];
 
-  // Orthographic frustum half-height (wheel zoom). Smaller = closer.
-  private cameraD = 13;
-  private readonly CAMERA_D_MIN = 6;
-  private readonly CAMERA_D_MAX = 26;
-  private readonly CAMERA_D_DEFAULT = 13;
+  /** Iso camera: smooth zoom, velocity lead, combat shake. */
+  private isoCam: IsoCameraState = createIsoCameraState({
+    d: 13,
+    dMin: 6,
+    dMax: 26,
+    offset: new THREE.Vector3(22, 24, 22),
+  });
+  private playerVel = new THREE.Vector3();
+  private _dustAccum = 0;
 
   // HUD streaming
   private damageNumbers: ArenaDamageNumber[] = [];
@@ -320,11 +332,11 @@ export class ArenaScene {
     const w = container.clientWidth;
     const h = container.clientHeight;
     const aspect = w / h;
-    const d = this.cameraD;
+    const d = this.isoCam.d;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x070608);
-    this.scene.fog = new THREE.FogExp2(0x0a0608, 0.02);
+    this.scene.fog = new THREE.Fog(0x0a0608, 22, 72);
     this.skillVfx = new SkillVfx(this.scene, new GLTFLoader());
     this.skillTelegraphs = new TelegraphField(this.scene);
     this.particles = new ParticleVfx(this.scene);
@@ -333,6 +345,7 @@ export class ArenaScene {
     this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 400);
     this.camera.position.set(22, 24, 22);
     this.camera.lookAt(0, 0, 0);
+    this.isoCam.look.set(0, 0, 0);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setSize(w, h);
@@ -340,9 +353,16 @@ export class ArenaScene {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.98;
+    this.renderer.toneMappingExposure = 1.02;
     container.appendChild(this.renderer.domElement);
-    this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h);
+    this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h, {
+      strength: 0.7,
+      radius: 0.52,
+      threshold: 0.78,
+      resolutionScale: 0.5,
+      vignette: 0.85,
+      warmth: 0.055,
+    });
 
     this.buildLighting();
     this.buildTerrain();
@@ -361,29 +381,15 @@ export class ArenaScene {
     this.animFrameId = requestAnimationFrame(this.animate);
   }
 
-  /** Orthographic wheel zoom — scroll up = closer, down = wider. Shift = larger steps. */
   private _onWheel = (e: WheelEvent) => {
-    e.preventDefault();
-    const step = e.shiftKey ? 1.4 : 0.7;
-    const dir = Math.sign(e.deltaY); // +1 scroll down → zoom out (larger frustum)
-    this.cameraD = Math.min(
-      this.CAMERA_D_MAX,
-      Math.max(this.CAMERA_D_MIN, this.cameraD + dir * step),
-    );
-    this.applyCameraFrustum();
+    isoCameraWheel(this.isoCam, e, 0.75, 1.5);
   };
 
   private applyCameraFrustum() {
     if (!this.container || !this.camera) return;
     const w = this.container.clientWidth;
     const h = Math.max(1, this.container.clientHeight);
-    const aspect = w / h;
-    const d = this.cameraD;
-    this.camera.left = -d * aspect;
-    this.camera.right = d * aspect;
-    this.camera.top = d;
-    this.camera.bottom = -d;
-    this.camera.updateProjectionMatrix();
+    applyOrthoFrustum(this.camera, this.isoCam.d, w / h);
   }
 
   // ── Environment ───────────────────────────────────────────────────────────
@@ -1061,6 +1067,8 @@ export class ArenaScene {
     const label = phaseNames[phase] ?? `Phase ${phase}`;
     this.pushLog(`⚠ STAGE ${phase}: ${this.boss.name} — ${label}!`);
     this.activeTelegraphLabel = `STAGE ${phase} — ${label}`;
+    kickCameraShake(this.isoCam, 0.55 + phase * 0.12);
+    this.bloom?.kick(0.55);
 
     // Arena-wide phase shockwave: ring of warning circles + nova VFX.
     this.spawnVfx(this.bossPos.clone(), phase >= 3 ? 0xff0044 : 0xff4400, 9, 0.8);
@@ -1129,6 +1137,8 @@ export class ArenaScene {
     const mitigated = Math.max(4, Math.round(amount));
     this.playerHp = Math.max(0, this.playerHp - mitigated);
     this.heroAnim?.trigger("hit");
+    kickCameraShake(this.isoCam, Math.min(0.6, 0.2 + mitigated * 0.005));
+    this.bloom?.kick(0.28);
     this.spawnDamageNumber(
       this.playerPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 2.4, 0)),
       mitigated, false, false,
@@ -1188,8 +1198,10 @@ export class ArenaScene {
     const elapsed = this.clock.getElapsedTime();
     const now = performance.now();
     const speed = now < this.slowUntil ? this.playerSpeed * 0.45 : this.playerSpeed;
+    const accel = 34;
+    const friction = 18;
 
-    // ── Player movement ──
+    // ── Player movement (velocity-based for camera lead + dust) ──
     const raw = new THREE.Vector2();
     if (this.keys.has("KeyW") || this.keys.has("ArrowUp")) { raw.x -= 1; raw.y -= 1; }
     if (this.keys.has("KeyS") || this.keys.has("ArrowDown")) { raw.x += 1; raw.y += 1; }
@@ -1199,36 +1211,58 @@ export class ArenaScene {
     let moving = false;
     if (raw.length() > 0 && this.outcome === "fighting") {
       raw.normalize();
-      this.playerPos.x += raw.x * speed * delta;
-      this.playerPos.z += raw.y * speed * delta;
-      this.clampToArena(this.playerPos);
+      const k = 1 - Math.exp(-accel * delta);
+      this.playerVel.x += (raw.x * speed - this.playerVel.x) * k;
+      this.playerVel.z += (raw.y * speed - this.playerVel.z) * k;
       this.playerTarget = null;
       this.attackBoss = false;
       this.playerFacing = Math.atan2(raw.x, raw.y);
       moving = true;
-    } else if (this.attackBoss && this.bossAlive) {
+    } else if (this.attackBoss && this.bossAlive && this.outcome === "fighting") {
       const to = new THREE.Vector3().subVectors(this.bossPos, this.playerPos).setY(0);
       const d = to.length();
       this.playerFacing = Math.atan2(to.x, to.z);
       if (d > this.attackRange) {
         to.normalize();
-        this.playerPos.x += to.x * speed * delta;
-        this.playerPos.z += to.z * speed * delta;
-        this.clampToArena(this.playerPos);
+        const k = 1 - Math.exp(-accel * delta);
+        this.playerVel.x += (to.x * speed - this.playerVel.x) * k;
+        this.playerVel.z += (to.z * speed - this.playerVel.z) * k;
         moving = true;
+      } else {
+        this.playerVel.multiplyScalar(Math.exp(-friction * delta));
       }
-    } else if (this.playerTarget) {
+    } else if (this.playerTarget && this.outcome === "fighting") {
       const to = new THREE.Vector3().subVectors(this.playerTarget, this.playerPos).setY(0);
       const d = to.length();
-      if (d > 0.2) {
+      if (d > 0.25) {
         to.normalize();
-        this.playerPos.x += to.x * speed * delta;
-        this.playerPos.z += to.z * speed * delta;
+        const k = 1 - Math.exp(-accel * delta);
+        this.playerVel.x += (to.x * speed - this.playerVel.x) * k;
+        this.playerVel.z += (to.z * speed - this.playerVel.z) * k;
         this.playerFacing = Math.atan2(to.x, to.z);
         moving = true;
       } else {
         this.playerTarget = null;
+        this.playerVel.set(0, 0, 0);
       }
+    } else {
+      this.playerVel.multiplyScalar(Math.exp(-friction * delta));
+      if (this.playerVel.lengthSq() < 0.04) this.playerVel.set(0, 0, 0);
+    }
+    if (this.playerVel.lengthSq() > 1e-6) {
+      this.playerPos.x += this.playerVel.x * delta;
+      this.playerPos.z += this.playerVel.z * delta;
+      this.clampToArena(this.playerPos);
+      if (this.playerVel.lengthSq() > 1.2) moving = true;
+    }
+    if (moving && this.playerVel.lengthSq() > 12) {
+      this._dustAccum += delta;
+      if (this._dustAccum >= 0.1) {
+        this._dustAccum = 0;
+        this.particles?.impact(this.playerPos.clone().setY(0.12), 0x8a7060, 0.26);
+      }
+    } else {
+      this._dustAccum = 0;
     }
 
     // Root motion: let lunging/dodge/jump clips carry the logical position so
@@ -1383,10 +1417,22 @@ export class ArenaScene {
       if (light) light.intensity = 3.6 + Math.sin(elapsed * 6.5 + f.position.x) * 0.6;
     }
 
-    // Camera + sun follow the player.
-    const camTarget = new THREE.Vector3(this.playerPos.x * 0.5, 0, this.playerPos.z * 0.5);
-    this.camera.position.lerp(camTarget.clone().add(new THREE.Vector3(22, 24, 22)), 0.05);
-    this.camera.lookAt(camTarget);
+    // Iso camera: velocity lead, smooth zoom, combat shake; mild dual-focus with boss.
+    const focus = this.playerPos.clone();
+    if (this.bossAlive) {
+      // Pull framing slightly toward the boss so both fighters stay readable.
+      focus.x = this.playerPos.x * 0.72 + this.bossPos.x * 0.28;
+      focus.z = this.playerPos.z * 0.72 + this.bossPos.z * 0.28;
+    }
+    updateIsoCamera(this.camera, this.isoCam, focus, this.playerVel, delta, {
+      lead: 0.18,
+      follow: 8,
+      lookFollow: 10,
+      zoomFollow: 12,
+      defaultD: 13,
+    });
+    this.applyCameraFrustum();
+    this.bloom?.update(delta);
     if (this.sun) {
       this.sun.position.set(this.playerPos.x + 18, 30, this.playerPos.z + 12);
       this.sun.target.position.set(this.playerPos.x, 0, this.playerPos.z);
@@ -1505,8 +1551,7 @@ export class ArenaScene {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
     this.renderer.setSize(w, h);
-    this.bloom?.composer.setSize(w, h);
-    this.bloom?.bloomPass.resolution.set(w, h);
+    this.bloom?.setSize(w, h, 0.5);
     this.applyCameraFrustum();
   };
 
@@ -1546,7 +1591,7 @@ export class ArenaScene {
     this.bossGroup = null;
     disposeObject3D(this.scene);
     this.scene.clear();
-    this.bloom?.composer.dispose();
+    this.bloom?.dispose();
     this.bloom = null;
     this.renderer.dispose();
   }

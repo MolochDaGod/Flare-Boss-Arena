@@ -15,6 +15,13 @@ import { TelegraphField } from "./combat/telegraphs";
 import { ParticleVfx } from "./combat/particles";
 import { CombatVfx, statusFromSkill } from "./combat/combatVfx";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
+import {
+  createIsoCameraState,
+  isoCameraWheel,
+  applyOrthoFrustum,
+  updateIsoCamera,
+  type IsoCameraState,
+} from "./combat/isoCamera";
 import type { ClassSkill } from "../data/classSkills";
 import { CAMP_PROP_PLACEMENTS } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
@@ -217,9 +224,13 @@ export class CampScene {
   private readonly STATION_RADIUS = 12.4; // engage marker (doorway) distance from centre
   private readonly BUILDING_RADIUS = 18.4; // building distance from centre
   private readonly BOUNDS = CAMP_YARD_BOUNDS;
-  private cameraHalf = 15;
-  private readonly CAMERA_HALF_MIN = 7;
-  private readonly CAMERA_HALF_MAX = 28;
+  private isoCam: IsoCameraState = createIsoCameraState({
+    d: 15,
+    dMin: 7,
+    dMax: 28,
+    offset: new THREE.Vector3(22, 22, 22),
+  });
+  private playerVel = new THREE.Vector3();
   private readonly CAM_OFFSET = 22;
 
   private options: CampSceneOptions;
@@ -242,10 +253,11 @@ export class CampScene {
     const w = container.clientWidth;
     const h = container.clientHeight;
     const aspect = w / h;
-    const d = this.cameraHalf;
+    const d = this.isoCam.d;
+    this.isoCam.baseOffset.set(this.CAM_OFFSET, this.CAM_OFFSET, this.CAM_OFFSET);
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x8eb8e8, 0.006);
+    this.scene.fog = new THREE.Fog(0x8eb8e8, 40, 160);
     this.skillVfx = new SkillVfx(this.scene, new GLTFLoader());
     this.telegraphs = new TelegraphField(this.scene);
     this.particles = new ParticleVfx(this.scene);
@@ -254,6 +266,7 @@ export class CampScene {
     this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 280);
     this.camera.position.set(this.CAM_OFFSET, this.CAM_OFFSET, this.CAM_OFFSET);
     this.camera.lookAt(0, 0, 0);
+    this.isoCam.look.set(0, 0, 0);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setSize(w, h);
@@ -261,9 +274,16 @@ export class CampScene {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.95;
+    this.renderer.toneMappingExposure = 1.0;
     container.appendChild(this.renderer.domElement);
-    this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h);
+    this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h, {
+      strength: 0.48,
+      radius: 0.42,
+      threshold: 0.86,
+      resolutionScale: 0.5,
+      vignette: 0.55,
+      warmth: 0.06,
+    });
 
     this.campSky = createCampSky({ scene: this.scene, renderer: this.renderer });
     this.buildEnvironment();
@@ -287,27 +307,14 @@ export class CampScene {
   }
 
   private _onWheel = (e: WheelEvent) => {
-    e.preventDefault();
-    const step = e.shiftKey ? 1.5 : 0.75;
-    const dir = Math.sign(e.deltaY);
-    this.cameraHalf = Math.min(
-      this.CAMERA_HALF_MAX,
-      Math.max(this.CAMERA_HALF_MIN, this.cameraHalf + dir * step),
-    );
-    this.applyCameraFrustum();
+    isoCameraWheel(this.isoCam, e, 0.8, 1.6);
   };
 
   private applyCameraFrustum() {
     if (!this.container || !this.camera) return;
     const w = this.container.clientWidth;
     const h = Math.max(1, this.container.clientHeight);
-    const aspect = w / h;
-    const d = this.cameraHalf;
-    this.camera.left = -d * aspect;
-    this.camera.right = d * aspect;
-    this.camera.top = d;
-    this.camera.bottom = -d;
-    this.camera.updateProjectionMatrix();
+    applyOrthoFrustum(this.camera, this.isoCam.d, w / h);
   }
 
   private buildEnvironment() {
@@ -1270,11 +1277,22 @@ export class CampScene {
       if (dn.age > 1.4) this.damageNumbers.splice(i, 1);
     }
 
-    // Camera follow (gentle)
-    const camOffset = new THREE.Vector3(this.CAM_OFFSET, this.CAM_OFFSET, this.CAM_OFFSET);
-    const camTarget = new THREE.Vector3(this.playerPos.x * 0.4, 0, this.playerPos.z * 0.4).add(camOffset);
-    this.camera.position.lerp(camTarget, 0.04);
-    this.camera.lookAt(this.playerPos.x * 0.4, 0, this.playerPos.z * 0.4);
+    // Iso camera: smooth zoom + light velocity lead (camp is calmer than dungeon).
+    if (moving) {
+      this.playerVel.set(Math.sin(this.playerFacing) * 5, 0, Math.cos(this.playerFacing) * 5);
+    } else {
+      this.playerVel.multiplyScalar(Math.exp(-10 * delta));
+    }
+    const focus = new THREE.Vector3(this.playerPos.x * 0.45, 0, this.playerPos.z * 0.45);
+    updateIsoCamera(this.camera, this.isoCam, focus, this.playerVel, delta, {
+      lead: 0.12,
+      follow: 6,
+      lookFollow: 7,
+      zoomFollow: 10,
+      defaultD: 15,
+    });
+    this.applyCameraFrustum();
+    this.bloom?.update(delta);
 
     // World prop animation mixers + floating perk symbols.
     for (const wp of this.worldProps) {
@@ -1423,8 +1441,7 @@ export class CampScene {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
     this.renderer.setSize(w, h);
-    this.bloom?.composer.setSize(w, h);
-    this.bloom?.bloomPass.resolution.set(w, h);
+    this.bloom?.setSize(w, h, 0.5);
     this.applyCameraFrustum();
   };
 
@@ -1476,7 +1493,7 @@ export class CampScene {
     // environment, labels/CanvasTextures, campfire, embers, vfx, dummies).
     disposeObject3D(this.scene);
     this.scene.clear();
-    this.bloom?.composer.dispose();
+    this.bloom?.dispose();
     this.bloom = null;
     this.renderer.dispose();
   }

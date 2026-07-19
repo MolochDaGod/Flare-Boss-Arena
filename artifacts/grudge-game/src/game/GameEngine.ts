@@ -75,6 +75,14 @@ import { ParticleVfx, elementColor } from "./combat/particles";
 import { TelegraphField } from "./combat/telegraphs";
 import { DeployableManager } from "./combat/deployables";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
+import {
+  createIsoCameraState,
+  isoCameraWheel,
+  applyOrthoFrustum,
+  updateIsoCamera,
+  kickCameraShake,
+  type IsoCameraState,
+} from "./combat/isoCamera";
 import { SlashWaveField } from "./combat/slashVfx";
 import { AuraField } from "./combat/auras";
 import { ProjectileField } from "./combat/projectiles";
@@ -308,10 +316,16 @@ export class GameEngine {
   private telegraphs!: TelegraphField;
   private deployables!: DeployableManager;
   private bloom: BloomComposer | null = null;
-  /** Orthographic frustum half-height — wheel zoom (smaller = closer). */
-  private cameraD = 18;
-  private readonly CAMERA_D_MIN = 8;
-  private readonly CAMERA_D_MAX = 36;
+  /** Orthographic iso rig — smooth zoom, velocity lead, combat shake. */
+  private isoCam: IsoCameraState = createIsoCameraState({
+    d: 16,
+    dMin: 8,
+    dMax: 34,
+    offset: new THREE.Vector3(18, 18, 18),
+  });
+  /** Horizontal velocity for accel/decel + camera lead (open-world feel). */
+  private playerVel = new THREE.Vector3();
+  private _dustAccum = 0;
   /** Resolved HUD skills for archetype mapping; idx fallback works if unset. */
   private hudSkills: (ClassSkill | undefined)[] = [];
   private pointerDown = false;
@@ -326,7 +340,6 @@ export class GameEngine {
   private playerMixer: THREE.AnimationMixer | null = null;
   private playerAnimator: PlayerAnimator | null = null;
   private initStats!: PlayerInitStats;
-  private _camLook = new THREE.Vector3(0, 0, 0);
   private playerPos = new THREE.Vector3(0, 0, 0);
   private _rmTmp = new THREE.Vector3();
   /** Per-frame scratch vectors — never allocate in the hot loop. */
@@ -334,7 +347,6 @@ export class GameEngine {
   private _tmpV3a = new THREE.Vector3();
   private _tmpV3b = new THREE.Vector3();
   private _tmpV3c = new THREE.Vector3();
-  private _camOffset = new THREE.Vector3(18, 18, 18);
   private _projectScratch = new THREE.Vector3();
   private _slashTargetScratch: Array<{ id: string; position: THREE.Vector3; alive: boolean }> = [];
   private _enemyTargetScratch: CombatTarget[] = [];
@@ -512,19 +524,19 @@ export class GameEngine {
     } catch {
       /* ignore */
     }
-    this._camLook.copy(this.playerPos);
+    this.isoCam.look.copy(this.playerPos);
 
     const w = container.clientWidth;
     const h = container.clientHeight;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x060608);
-    // Linear fog is cheaper than Exp2 on fill-bound GPUs; density tuned for arena scale.
-    this.scene.fog = new THREE.Fog(0x060608, 28, 110);
+    // Linear fog: nearer start so open-world depth reads without killing VFX mid-range.
+    this.scene.fog = new THREE.Fog(0x07060a, 36, 130);
 
     const aspect = w / h;
-    const d = this.cameraD;
-    this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 300);
+    const d = this.isoCam.d;
+    this.camera = new THREE.OrthographicCamera(-d * aspect, d * aspect, d, -d, 0.1, 360);
     this.camera.position.set(18, 18, 18);
     this.camera.lookAt(0, 0, 0);
 
@@ -546,7 +558,7 @@ export class GameEngine {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.08;
     // Manual shadow updates every other frame (see animate) — big fill win.
     this.renderer.shadowMap.autoUpdate = false;
     this.renderer.shadowMap.needsUpdate = true;
@@ -579,12 +591,14 @@ export class GameEngine {
     this.skillCursor.visible = false;
     this.skillCursor.renderOrder = 6;
     this.scene.add(this.skillCursor);
-    // Half-res selective bloom (see combat/bloom.ts). Null if headless / no-GPU.
+    // Bloom + vignette + warm grade (see combat/bloom.ts). Null if headless / no-GPU.
     this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h, {
-      strength: 0.55,
-      radius: 0.4,
-      threshold: 0.88,
+      strength: 0.64,
+      radius: 0.5,
+      threshold: 0.8,
       resolutionScale: 0.5,
+      vignette: 0.8,
+      warmth: 0.05,
     });
 
     this.buildDungeon();
@@ -627,26 +641,16 @@ export class GameEngine {
     this.animate();
   }
 
-  /** Orthographic wheel zoom — scroll up = closer, Shift = larger steps. */
+  /** Orthographic wheel zoom — smooth target; applied each frame via isoCam. */
   private _onWheel = (e: WheelEvent) => {
-    e.preventDefault();
-    const step = e.shiftKey ? 1.6 : 0.85;
-    const dir = Math.sign(e.deltaY);
-    this.cameraD = Math.min(this.CAMERA_D_MAX, Math.max(this.CAMERA_D_MIN, this.cameraD + dir * step));
-    this.applyCameraFrustum();
+    isoCameraWheel(this.isoCam, e, 0.9, 1.7);
   };
 
   private applyCameraFrustum() {
     if (!this.container || !this.camera) return;
     const w = this.container.clientWidth;
     const h = Math.max(1, this.container.clientHeight);
-    const aspect = w / h;
-    const d = this.cameraD;
-    this.camera.left = -d * aspect;
-    this.camera.right = d * aspect;
-    this.camera.top = d;
-    this.camera.bottom = -d;
-    this.camera.updateProjectionMatrix();
+    applyOrthoFrustum(this.camera, this.isoCam.d, w / h);
   }
 
   private buildDungeon() {
@@ -1764,7 +1768,7 @@ export class GameEngine {
     }
   }
 
-  /** Space — jump (clip + hop). */
+  /** Space — jump (clip + hop). Velocity hop + small dust. */
   doJump() {
     if (this.playerY > 0.05 || this.jumpVel > 0) return;
     this.jumpVel = 7.5;
@@ -1818,6 +1822,8 @@ export class GameEngine {
     this.playerFacing = Math.atan2(dir.x, dir.z);
     this.playerPos.x += dir.x * this.DODGE_DISTANCE;
     this.playerPos.z += dir.z * this.DODGE_DISTANCE;
+    // Carry velocity into the dodge direction so the camera keeps leading.
+    this.playerVel.set(dir.x * this.playerSpeed * 1.35, 0, dir.z * this.playerSpeed * 1.35);
     this.clampToArena(this.playerPos);
     this.resolvePlayer();
 
@@ -1830,7 +1836,10 @@ export class GameEngine {
 
     this.dodgeIframeUntil = now + 380;
     this.dodgeCdUntil = now + this.DODGE_COOLDOWN * 1000;
-    this.particles?.impact(this.playerPos.clone().setY(0.35), 0xc5e8ff, 0.55);
+    this.particles?.impact(this.playerPos.clone().setY(0.35), 0xc5e8ff, 0.7);
+    this.particles?.impact(this.playerPos.clone().setY(0.15), 0x8a9aaa, 0.45);
+    kickCameraShake(this.isoCam, 0.12);
+    this.bloom?.kick(0.15);
     this.notifyState(true);
   }
 
@@ -2433,6 +2442,8 @@ export class GameEngine {
       this.clampToArena(this.playerPos);
     }
     this.playerAttackCooldown = this.playerMaxAttackCooldown;
+    this.bloom?.kick(0.28);
+    kickCameraShake(this.isoCam, 0.08);
 
     const origin = this.playerPos.clone();
 
@@ -2851,6 +2862,8 @@ export class GameEngine {
     }
     this.playerHp = Math.max(0, this.playerHp - mitigated);
     if (this.playerHp <= 0) this.combatFsm.die();
+    kickCameraShake(this.isoCam, Math.min(0.55, 0.18 + mitigated * 0.004));
+    this.bloom?.kick(0.22);
     const wp = this.playerPos.clone();
     wp.y += 2.5;
     this.damageNumbers.push({ id: `d${this.idCounter++}`, value: mitigated, worldPos: wp, age: 0, isPlayer: true, isCrit: false });
@@ -2933,57 +2946,60 @@ export class GameEngine {
       if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) { raw.x += 1; raw.y -= 1; }
     }
 
+    // Velocity-based locomotion: resolve desired velocity from WASD / RMB chase /
+    // click-move, then integrate once. Drives camera look-ahead + foot dust.
     let playerMoving = false;
+    const maxSpd = this.playerSpeed;
+    const accel = 32;
+    const friction = 16;
+    let wantX = 0;
+    let wantZ = 0;
+    let hasWant = false;
+
     if (raw.lengthSq() > 0) {
       raw.normalize();
-      this.playerPos.x += raw.x * this.playerSpeed * delta;
-      this.playerPos.z += raw.y * this.playerSpeed * delta;
+      wantX = raw.x * maxSpd;
+      wantZ = raw.y * maxSpd;
+      hasWant = true;
       this.playerTarget = null;
       this.targetEnemy = null;
       if (this.indicatorRing) this.indicatorRing.visible = false;
       this.playerFacing = Math.atan2(raw.x, raw.y);
       playerMoving = true;
-    }
-    this.combatFsm.setMoving(playerMoving && this.playerY <= 0.05);
-
-    // RIGHT mouse held = attack. Lock the LEFT-selected enemy if it's still
-    // alive, otherwise auto-acquire the nearest one; advance into melee, strike.
-    let attacking = false;
-    if (!playerMoving && this.attackHeld) {
+    } else if (this.attackHeld) {
+      // RIGHT mouse held = attack. Lock selected or nearest foe; chase into melee.
       const locked =
         this.targetEnemy && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death"
           ? this.targetEnemy
           : this.nearestEnemy(14);
       if (!locked) {
-        // RMB with no foe: harvest nearby tree / stone.
         this.tryHarvestAttack();
-      } else if (locked) {
+      } else {
         this.targetEnemy = locked;
         const toFoe = this._tmpV3a.subVectors(locked.position, this.playerPos);
         const dist = toFoe.length();
         this.playerFacing = Math.atan2(toFoe.x, toFoe.z);
         if (dist > 3.0) {
           toFoe.normalize();
-          this.playerPos.x += toFoe.x * this.playerSpeed * delta;
-          this.playerPos.z += toFoe.z * this.playerSpeed * delta;
+          wantX = toFoe.x * maxSpd;
+          wantZ = toFoe.z * maxSpd;
+          hasWant = true;
           playerMoving = true;
         } else if (this.playerAttackCooldown <= 0) {
           this.doAttack(locked);
         }
-        attacking = true;
         this.playerTarget = null;
         if (this.indicatorRing) this.indicatorRing.visible = false;
       }
-    }
-
-    // LEFT-click move (selection / move) — no auto-attack; attacking is RMB-only.
-    if (!attacking && this.playerTarget) {
+    } else if (this.playerTarget) {
+      // LEFT-click move — no auto-attack; attacking is RMB-only.
       const toTarget = this._tmpV3a.subVectors(this.playerTarget, this.playerPos);
       const distToTarget = toTarget.length();
-      if (distToTarget > 0.2) {
+      if (distToTarget > 0.25) {
         toTarget.normalize();
-        this.playerPos.x += toTarget.x * this.playerSpeed * delta;
-        this.playerPos.z += toTarget.z * this.playerSpeed * delta;
+        wantX = toTarget.x * maxSpd;
+        wantZ = toTarget.z * maxSpd;
+        hasWant = true;
         this.playerFacing = Math.atan2(toTarget.x, toTarget.z);
         playerMoving = true;
       } else {
@@ -2991,6 +3007,37 @@ export class GameEngine {
         if (this.indicatorRing) this.indicatorRing.visible = false;
       }
     }
+
+    if (hasWant) {
+      const k = 1 - Math.exp(-accel * delta);
+      this.playerVel.x += (wantX - this.playerVel.x) * k;
+      this.playerVel.z += (wantZ - this.playerVel.z) * k;
+    } else {
+      const damp = Math.exp(-friction * delta);
+      this.playerVel.x *= damp;
+      this.playerVel.z *= damp;
+      if (this.playerVel.lengthSq() < 0.04) this.playerVel.set(0, 0, 0);
+    }
+    if (this.playerVel.lengthSq() > 1e-6) {
+      this.playerPos.x += this.playerVel.x * delta;
+      this.playerPos.z += this.playerVel.z * delta;
+      if (this.playerVel.lengthSq() > 1.2) playerMoving = true;
+    }
+    // Foot dust when skimming ground at speed (open-world velocity read).
+    if (playerMoving && this.playerY <= 0.08 && this.playerVel.lengthSq() > 8) {
+      this._dustAccum += delta;
+      if (this._dustAccum >= 0.09) {
+        this._dustAccum = 0;
+        this.particles?.impact(
+          this._tmpV3a.set(this.playerPos.x, 0.12, this.playerPos.z),
+          0x9a8a6a,
+          0.28,
+        );
+      }
+    } else {
+      this._dustAccum = 0;
+    }
+    this.combatFsm.setMoving(playerMoving && this.playerY <= 0.05);
 
     // Jump arc (Space).
     if (this.jumpVel !== 0 || this.playerY > 0) {
@@ -3147,14 +3194,17 @@ export class GameEngine {
       }
     }
 
-    // Smooth follow camera — eases both position and look-at toward the player.
-    const camTarget = this._tmpV3c
-      .set(this.playerPos.x, 0, this.playerPos.z)
-      .add(this._camOffset);
-    this.camera.position.lerp(camTarget, 0.12);
-    this._tmpV3a.set(this.playerPos.x, 0, this.playerPos.z);
-    this._camLook.lerp(this._tmpV3a, 0.15);
-    this.camera.lookAt(this._camLook);
+    // Iso camera: velocity look-ahead, smooth zoom, combat shake.
+    this._tmpV3c.set(this.playerPos.x, this.playerY, this.playerPos.z);
+    updateIsoCamera(this.camera, this.isoCam, this._tmpV3c, this.playerVel, delta, {
+      lead: 0.22,
+      follow: 9,
+      lookFollow: 11,
+      zoomFollow: 14,
+      defaultD: 16,
+    });
+    this.applyCameraFrustum();
+    this.bloom?.update(delta);
 
     // Sun + shadow rig tracks the player so shadows stay sharp across the big map.
     if (this.sun) {
@@ -3569,11 +3619,7 @@ export class GameEngine {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
     this.renderer.setSize(w, h);
-    // Composer full-res; bloom blur RTs stay half-res (see combat/bloom.ts).
-    this.bloom?.composer.setSize(w, h);
-    const bw = Math.max(1, Math.floor(w * 0.5));
-    const bh = Math.max(1, Math.floor(h * 0.5));
-    this.bloom?.bloomPass.resolution.set(bw, bh);
+    this.bloom?.setSize(w, h, 0.5);
     this.renderer.shadowMap.needsUpdate = true;
     this.applyCameraFrustum();
   };
@@ -3685,7 +3731,7 @@ export class GameEngine {
       this.rockField.geometry.dispose();
       (this.rockField.material as THREE.Material).dispose();
     }
-    this.bloom?.composer.dispose();
+    this.bloom?.dispose();
     this.bloom = null;
     this.renderer.dispose();
     for (const en of this.enemies) {
