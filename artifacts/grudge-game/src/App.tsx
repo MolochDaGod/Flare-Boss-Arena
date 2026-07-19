@@ -7,6 +7,7 @@ import NotFound from "@/pages/not-found";
 import Shell from "@/components/layout/Shell";
 import { AuthGate } from "@/components/AuthGate";
 import { ensureEconomyBootstrapped } from "@/data/flareEconomy";
+import { bootArmadaEngine } from "@/data/armadaEngine";
 
 // Route pages are lazy-loaded so the initial bundle/dev-transform of the entry
 // graph does not have to pull in the heavy Three.js engines (game/camp/boss).
@@ -31,6 +32,9 @@ const Camp = lazy(() => import("@/pages/camp"));
 const Party = lazy(() => import("@/pages/party"));
 const Moba = lazy(() => import("@/pages/moba"));
 const AuthCallback = lazy(() => import("@/pages/auth-callback"));
+const Leaderboards = lazy(() => import("@/pages/leaderboards"));
+const Pvp = lazy(() => import("@/pages/pvp"));
+const Connections = lazy(() => import("@/pages/connections"));
 
 const queryClient = new QueryClient();
 
@@ -67,6 +71,9 @@ function Router() {
             <Route path="/account" component={Account} />
             <Route path="/content" component={Content} />
             <Route path="/enemies" component={Enemies} />
+            <Route path="/leaderboards" component={Leaderboards} />
+            <Route path="/pvp" component={Pvp} />
+            <Route path="/connections" component={Connections} />
             <Route component={NotFound} />
           </Switch>
         </Shell>
@@ -79,6 +86,7 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.add("dark");
     ensureEconomyBootstrapped();
+    bootArmadaEngine();
   }, []);
 
   return (

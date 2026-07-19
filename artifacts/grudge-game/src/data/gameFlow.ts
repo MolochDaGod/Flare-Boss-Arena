@@ -17,6 +17,9 @@ import {
   Gem,
   UserPlus,
   Home,
+  Trophy,
+  Crosshair,
+  Network,
 } from "lucide-react";
 
 /**
@@ -39,7 +42,10 @@ export type NavHref =
   | "/rewards"
   | "/account"
   | "/content"
-  | "/game";
+  | "/game"
+  | "/pvp"
+  | "/leaderboards"
+  | "/connections";
 
 export interface NavItem {
   label: string;
@@ -67,6 +73,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Content Atlas", href: "/content", icon: Map, description: "Modes, zones, interactables" },
       { label: "Rewards", href: "/rewards", icon: Gift, description: "Dailies, season, achievements" },
       { label: "Account & Wallet", href: "/account", icon: Wallet, description: "Gold, embers, souls, tokens" },
+      { label: "Connections", href: "/connections", icon: Network, description: "Fleet deploy probes", badge: "FLEET" },
     ],
   },
   {
@@ -88,6 +95,8 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Enter World", href: "/game", icon: Swords, description: "Dungeon islands & rounds", primary: true },
       { label: "Boss Arena", href: "/boss", icon: Skull, description: "Standalone boss fight", primary: true },
+      { label: "PvP Arena", href: "/pvp", icon: Crosshair, description: "Fleet Socket.IO multiplayer", badge: "LIVE", primary: true },
+      { label: "Leaderboards", href: "/leaderboards", icon: Trophy, description: "Boss · island · arena ranks" },
       { label: "Sanctuary Camp", href: "/camp", icon: Tent, description: "Training ground & stations" },
       { label: "Bestiary", href: "/enemies", icon: Shield, description: "Enemy units" },
     ],

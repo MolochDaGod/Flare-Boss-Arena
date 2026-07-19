@@ -26,6 +26,7 @@ import { useResolvedSkills } from "@/data/skillsResolver";
 import { skillIconSrc } from "@/data/skillIcons";
 import { getActiveFighterId } from "@/data/fighters";
 import { recordBossKill, grantFighterXp, BOSSES_PER_TOKEN } from "@/data/flareEconomy";
+import { recordScoreEvent } from "@/data/flareLeaderboards";
 import {
   Loader2,
   Skull,
@@ -235,6 +236,7 @@ function BossArena() {
         if (bossId != null) {
           // Production economy: boss kills → Flare Grudge Tokens; XP only if owned.
           const kill = recordBossKill();
+          void recordScoreEvent({ type: "boss_kill" });
           const fighterId = getActiveFighterId();
           let xpNote = "";
           if (fighterId) {

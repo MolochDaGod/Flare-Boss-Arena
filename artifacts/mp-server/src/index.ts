@@ -147,6 +147,7 @@ function leaveRoom(p: NetPlayer, io: Server) {
 
 const app = express();
 app.use(cors({ origin: CORS_ORIGIN === "*" ? true : CORS_ORIGIN }));
+app.use(express.json({ limit: "32kb" }));
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
@@ -154,6 +155,7 @@ app.get("/health", (_req, res) => {
     tickHz: TICK_HZ,
     players: players.size,
     rooms: rooms.size,
+    leaderboards: true,
   });
 });
 app.get("/instances", (_req, res) => {
@@ -165,6 +167,76 @@ app.get("/instances", (_req, res) => {
     })),
   });
 });
+
+/* ── Flare / Grudge Studio leaderboards (in-memory, best-effort fleet) ── */
+type LbEntry = {
+  accountId: string;
+  displayName: string;
+  fighterId?: string;
+  fighterName?: string;
+  score: number;
+  updatedAt: number;
+};
+const leaderboards = new Map<string, Map<string, LbEntry>>();
+const LB_BOARDS = new Set(["boss_kills", "island_rounds", "pvp_kills", "flare_score"]);
+
+function lbMap(board: string): Map<string, LbEntry> {
+  let m = leaderboards.get(board);
+  if (!m) {
+    m = new Map();
+    leaderboards.set(board, m);
+  }
+  return m;
+}
+
+function lbSorted(board: string, limit = 25): LbEntry[] {
+  return [...lbMap(board).values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.min(50, Math.max(1, limit)));
+}
+
+app.get("/leaderboards/:board", (req, res) => {
+  const board = String(req.params.board || "");
+  if (!LB_BOARDS.has(board)) {
+    res.status(404).json({ error: "unknown_board", boards: [...LB_BOARDS] });
+    return;
+  }
+  const limit = Number(req.query.limit ?? 25);
+  const entries = lbSorted(board, limit).map((e, i) => ({ ...e, rank: i + 1 }));
+  res.json({ board, entries, ts: Date.now() });
+});
+
+app.post("/leaderboards/:board", (req, res) => {
+  const board = String(req.params.board || "");
+  if (!LB_BOARDS.has(board)) {
+    res.status(404).json({ error: "unknown_board" });
+    return;
+  }
+  const body = req.body as Partial<LbEntry>;
+  const accountId = String(body.accountId || "").slice(0, 64);
+  if (!accountId) {
+    res.status(400).json({ error: "accountId_required" });
+    return;
+  }
+  const score = Math.max(0, Math.floor(Number(body.score) || 0));
+  const prev = lbMap(board).get(accountId);
+  // Only accept equal or higher scores (anti-regress)
+  if (prev && score < prev.score) {
+    res.json({ ok: true, kept: true, entry: { ...prev, rank: 0 } });
+    return;
+  }
+  const entry: LbEntry = {
+    accountId,
+    displayName: String(body.displayName || "Hunter").slice(0, 32),
+    fighterId: body.fighterId ? String(body.fighterId).slice(0, 48) : undefined,
+    fighterName: body.fighterName ? String(body.fighterName).slice(0, 48) : undefined,
+    score,
+    updatedAt: Date.now(),
+  };
+  lbMap(board).set(accountId, entry);
+  res.json({ ok: true, entry });
+});
+
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {

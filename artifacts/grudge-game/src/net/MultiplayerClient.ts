@@ -13,6 +13,8 @@ import type {
   Vec3,
 } from "@workspace/net-protocol";
 import { NET_PROTOCOL_VERSION } from "@workspace/net-protocol";
+import { getMpServerUrl } from "@/data/grudgeFleet";
+import { recordScoreEvent } from "@/data/flareLeaderboards";
 
 export interface MpClientOpts {
   url?: string;
@@ -52,7 +54,12 @@ export class MultiplayerClient {
   handlers: MpHandlers = {};
 
   constructor(opts: MpClientOpts = {}) {
-    this.url = opts.url ?? (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_MP_URL ?? "http://localhost:4100";
+    // Production: VITE_MP_URL / fleet getMpServerUrl(); local: :4100
+    this.url = opts.url ?? getMpServerUrl();
+  }
+
+  get serverUrl(): string {
+    return this.url;
   }
 
   connect(identity: { name: string; modelUrl?: string; raceId?: string }): Promise<void> {
@@ -119,6 +126,10 @@ export class MultiplayerClient {
         break;
       case "kill":
         this.handlers.onKill?.(msg.event);
+        // Fleet leaderboard: credit PvP kill when we are the killer
+        if (this.playerId && msg.event && (msg.event as { killerId?: string }).killerId === this.playerId) {
+          void recordScoreEvent({ type: "pvp_kill" });
+        }
         break;
       case "chat":
         this.handlers.onChat?.(msg.playerId, msg.name, msg.text);
