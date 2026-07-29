@@ -44,6 +44,8 @@ import {
 import { CAMP_TILEABLE_FLOOR, CAMP_TILEABLE_SCATTER } from "../data/tileablePixelPack";
 import { buildTileableCamp, type TileablePackHandle } from "./TileablePackLoader";
 import { createCampSky, type CampSkyHandle } from "./CampSky";
+import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
+import { buildOrcCamp, type CampHandle } from "./CampBuilder";
 
 export type CampStationId =
   | "anvil"
@@ -242,6 +244,10 @@ export class CampScene {
   private options: CampSceneOptions;
   private _engaged = false;
   private tileableHandle: TileablePackHandle | null = null;
+  private groundMesh: THREE.Mesh | null = null;
+  private terrainMesh: THREE.Mesh | null = null;
+  private rockField: THREE.InstancedMesh | null = null;
+  private orcCamp: CampHandle | null = null;
 
   constructor(options: CampSceneOptions = {}) {
     this.options = options;
@@ -295,6 +301,7 @@ export class CampScene {
     this.campSky = createCampSky({ scene: this.scene, renderer: this.renderer });
     this.buildEnvironment();
     this.buildTileableWorld();
+    this.loadOrcCampDecor();
     this.buildStations();
     this.loadTown();
     this.buildWorldProps();
@@ -324,27 +331,102 @@ export class CampScene {
     applyOrthoFrustum(this.camera, this.isoCam.d, w / h);
   }
 
+  /**
+   * Real Three.js terrain stack (same family as dungeon / boss arena):
+   * cobble playable plane + noise heightmap skirt + instanced rock field.
+   * Tileable pixel props stream on top; this is the solid ground even if GLBs lag.
+   */
   private buildEnvironment() {
-    // Dark underlay — visible until the tileable floor grid streams in.
-    const floorGeom = new THREE.CircleGeometry(this.BOUNDS, 64);
-    const floorMat = new THREE.MeshStandardMaterial({
-      color: 0x0e0c0a,
+    const aniso = this.renderer.capabilities.getMaxAnisotropy();
+    const yard = this.BOUNDS;
+
+    // Flat cobble yard — always present, receives shadows, walkable y≈0.
+    const groundMat = makeGroundMaterial(Math.max(8, Math.round(yard / 3)), aniso);
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(yard * 2.05, yard * 2.05),
+      groundMat,
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = 0;
+    ground.receiveShadow = true;
+    ground.name = "camp_ground";
+    this.scene.add(ground);
+    this.groundMesh = ground;
+
+    // Heightmap foothills + ridge outside the walkable square (Chebyshev mask).
+    const skirt = makeTerrainSkirt(yard, Math.max(280, yard * 8), 160, -0.06);
+    skirt.name = "camp_terrain_skirt";
+    this.scene.add(skirt);
+    this.terrainMesh = skirt;
+
+    // Rocks ring the yard edge / hills (one InstancedMesh).
+    const rocks = makeRockField(200, yard * 0.72, yard + 28);
+    rocks.name = "camp_rock_field";
+    this.scene.add(rocks);
+    this.rockField = rocks;
+
+    // Edge marker stones along the walkable square (reads as a real yard).
+    const edgeGeom = new THREE.DodecahedronGeometry(0.85, 0);
+    const edgeMat = new THREE.MeshStandardMaterial({
+      color: 0x2a241c,
       roughness: 1,
-      metalness: 0,
+      flatShading: true,
     });
-    const floor = new THREE.Mesh(floorGeom, floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -0.02;
-    floor.receiveShadow = true;
-    this.scene.add(floor);
+    const per = 14;
+    const total = per * 4;
+    const edgeInst = new THREE.InstancedMesh(edgeGeom, edgeMat, total);
+    const m = new THREE.Matrix4();
+    const edge = yard - 0.75;
+    let idx = 0;
+    for (let side = 0; side < 4; side++) {
+      for (let i = 0; i < per; i++) {
+        const t = (i / Math.max(1, per - 1)) * 2 - 1;
+        let x = 0;
+        let z = 0;
+        if (side === 0) {
+          x = t * edge;
+          z = -edge;
+        } else if (side === 1) {
+          x = t * edge;
+          z = edge;
+        } else if (side === 2) {
+          x = -edge;
+          z = t * edge;
+        } else {
+          x = edge;
+          z = t * edge;
+        }
+        const s = 0.5 + (i % 5) * 0.14;
+        m.compose(
+          new THREE.Vector3(x, s * 0.32, z),
+          new THREE.Quaternion().setFromEuler(new THREE.Euler(i * 0.4, i * 0.9, i * 0.25)),
+          new THREE.Vector3(s, s * 0.75, s),
+        );
+        edgeInst.setMatrixAt(idx++, m);
+      }
+    }
+    edgeInst.castShadow = true;
+    edgeInst.receiveShadow = true;
+    this.scene.add(edgeInst);
   }
 
-  /** Modular grass/stone floor, trees, rocks, walls, and town-upgrade buildings. */
+  /** Modular grass/stone tiles + scatter props (async) on top of real terrain. */
   private buildTileableWorld() {
     const loader = createGltfLoader();
     this.tileableHandle = buildTileableCamp(loader, this.scene, {
       floor: { ...CAMP_TILEABLE_FLOOR, bounds: this.BOUNDS },
       scatter: CAMP_TILEABLE_SCATTER,
+    });
+  }
+
+  /** Orc RTS prop atlas (cabins, piles, palisade) as outer-camp decoration. */
+  private loadOrcCampDecor() {
+    const loader = createGltfLoader();
+    const url = `${import.meta.env.BASE_URL}models/buildings/orc_camp_set.glb`;
+    // Scale down so atlas radii fit the ~36u yard (props stay outside the inner ring).
+    this.orcCamp = buildOrcCamp(loader, this.scene, url, {
+      scale: 0.55,
+      name: "camp_orc_decor",
     });
   }
 
@@ -1493,6 +1575,26 @@ export class CampScene {
     this.worldProps = [];
     this.tileableHandle?.dispose();
     this.tileableHandle = null;
+    this.orcCamp?.dispose();
+    this.orcCamp = null;
+    const freeMesh = (mesh: THREE.Mesh | THREE.InstancedMesh | null) => {
+      if (!mesh) return;
+      mesh.geometry?.dispose();
+      const mat = mesh.material;
+      const list = Array.isArray(mat) ? mat : mat ? [mat] : [];
+      for (const m of list) {
+        for (const v of Object.values(m)) {
+          if (v && (v as THREE.Texture).isTexture) (v as THREE.Texture).dispose();
+        }
+        m.dispose();
+      }
+    };
+    freeMesh(this.groundMesh);
+    freeMesh(this.terrainMesh);
+    freeMesh(this.rockField);
+    this.groundMesh = null;
+    this.terrainMesh = null;
+    this.rockField = null;
     this.embers = [];
     this.vfx = [];
     this.dummies = [];
