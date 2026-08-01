@@ -224,6 +224,43 @@ export function loadMonsterModel(
     mixer: null,
   };
 
+  // R2 threejs-games creeps are FBX — GLTFLoader cannot parse them.
+  if (/\.fbx(\?|$)/i.test(def.url)) {
+    void (async () => {
+      try {
+        const { FBXLoader } = await import("three/examples/jsm/loaders/FBXLoader.js");
+        const fbxLoader = new FBXLoader();
+        const obj = await new Promise<THREE.Group>((resolve, reject) => {
+          fbxLoader.load(def.url, (o) => resolve(o as THREE.Group), undefined, reject);
+        });
+        if (group.userData.disposed) return;
+        const clips: THREE.AnimationClip[] =
+          (obj as THREE.Object3D & { animations?: THREE.AnimationClip[] }).animations || [];
+        const norm = normalizeCharacterRoot(obj, {
+          targetHeight: def.height,
+          pinRootHorizontal: true,
+        });
+        model.height = norm.height;
+        model.bodyMats.push(...norm.bodyMats);
+        model.originalColors.push(...norm.originalColors);
+        model.baseY = 0;
+        group.userData.baseY = 0;
+        group.userData.rootBone = norm.rootBone;
+        group.add(obj);
+        if (clips.length) {
+          model.clipBank = new GlbClipBank(obj, clips, null, def.clip);
+        } else {
+          model.mixer = null;
+        }
+        onReady?.(model);
+      } catch (err) {
+        console.warn("[MonsterModels] FBX creep load failed", id, err);
+        onReady?.(model);
+      }
+    })();
+    return model;
+  }
+
   loader.load(
     def.url,
     (gltf) => {

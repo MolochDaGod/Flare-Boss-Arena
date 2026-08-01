@@ -41,6 +41,21 @@ export const CDN_MONSTER_DEFS: CdnMonsterDef[] = [
   // Extra undead / void bodies when CDN paths resolve (local kit skeletons still preferred for skeleton fights).
   { id: "cdn_undead_brute", name: "Undead Brute", type: "undead", tier: 3, hp: 340, damage: 22, url: `${CDN}/models/monsters/big/Orc_Skull.glb`, archetype: "humanoid", height: 2.2, clipHint: null },
   { id: "cdn_void_shade", name: "Void Shade", type: "aberration", tier: 3, hp: 250, damage: 21, url: `${CDN}/models/monsters/flying/Ghost_Skull.gltf`, archetype: "flying", height: 1.95, clipHint: null },
+
+  // ── WC3-style neutrals (threejs-games mirrored to R2) — FBX ──────────────
+  // Fleet SSOT: objectstore.grudge-studio.com/api/v1/neutral-creeps.json
+  { id: "tjg_goblin", name: "Goblin", type: "creep", tier: 1, hp: 35, damage: 6, url: `${CDN}/models/creeps/threejs-games/goblin/model.fbx`, archetype: "humanoid", height: 1.35, clipHint: "idle" },
+  { id: "tjg_orc", name: "Orc", type: "creep", tier: 2, hp: 55, damage: 10, url: `${CDN}/models/creeps/threejs-games/orc/model.fbx`, archetype: "humanoid", height: 1.85, clipHint: "idle" },
+  { id: "tjg_skeleton", name: "Skeleton", type: "creep", tier: 1, hp: 40, damage: 8, url: `${CDN}/models/creeps/threejs-games/skeleton/model.fbx`, archetype: "humanoid", height: 1.8, clipHint: "idle" },
+  { id: "tjg_troll", name: "Troll", type: "creep", tier: 3, hp: 110, damage: 13, url: `${CDN}/models/creeps/threejs-games/troll/model.fbx`, archetype: "humanoid", height: 2.3, clipHint: "idle" },
+  { id: "tjg_golem", name: "Golem", type: "creep", tier: 4, hp: 140, damage: 16, url: `${CDN}/models/creeps/threejs-games/golem/model.fbx`, archetype: "golem", height: 2.4, clipHint: "idle" },
+  { id: "tjg_demon", name: "Demon", type: "creep", tier: 3, hp: 90, damage: 14, url: `${CDN}/models/creeps/threejs-games/demon/model.fbx`, archetype: "humanoid", height: 2.2, clipHint: "idle" },
+  { id: "tjg_witch", name: "Witch", type: "creep", tier: 2, hp: 48, damage: 11, url: `${CDN}/models/creeps/threejs-games/witch/model.fbx`, archetype: "humanoid", height: 1.7, clipHint: "idle" },
+  { id: "tjg_sorceress", name: "Sorceress", type: "creep", tier: 2, hp: 45, damage: 12, url: `${CDN}/models/creeps/threejs-games/sorceress/model.fbx`, archetype: "humanoid", height: 1.75, clipHint: "idle" },
+  { id: "tjg_orc_ogre", name: "Orc Ogre", type: "creep", tier: 3, hp: 120, damage: 18, url: `${CDN}/models/creeps/threejs-games/orc-ogre/model.fbx`, archetype: "golem", height: 2.5, clipHint: "idle" },
+  { id: "tjg_zombie", name: "Zombie", type: "creep", tier: 1, hp: 50, damage: 9, url: `${CDN}/models/creeps/threejs-games/zombie/zombie-barefoot.fbx`, archetype: "humanoid", height: 1.75, clipHint: "idle" },
+  { id: "tjg_zombie_guard", name: "Zombie Guard", type: "creep", tier: 2, hp: 70, damage: 11, url: `${CDN}/models/creeps/threejs-games/zombie/zombie-guard.fbx`, archetype: "humanoid", height: 1.85, clipHint: "idle" },
+  { id: "tjg_zombie_cop", name: "Zombie Cop", type: "creep", tier: 2, hp: 60, damage: 10, url: `${CDN}/models/creeps/threejs-games/zombie/zombie-cop.fbx`, archetype: "humanoid", height: 1.8, clipHint: "idle" },
 ];
 
 export const CDN_MONSTER_BY_ID = new Map(CDN_MONSTER_DEFS.map((d) => [d.id, d]));
