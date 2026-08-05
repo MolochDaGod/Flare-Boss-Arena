@@ -24,6 +24,7 @@ import {
 } from "@/data/stones";
 import { getGameLoadout } from "@/data/gameCombat";
 import { getActiveFighter } from "@/data/fighters";
+import { getEquipmentCombatMods } from "@/data/equipmentLoadout";
 import { Tent, Gem } from "lucide-react";
 import { toast } from "sonner";
 
@@ -35,14 +36,16 @@ export default function Equipment() {
   const stash = getStoneStash();
   const loadout = getStoneLoadout();
   const mods = getStoneCombatMods();
-  const combat = getGameLoadout(getActiveFighter().id).combat;
+  const fighter = getActiveFighter();
+  const combat = getGameLoadout(fighter.id).combat;
+  const gear = getEquipmentCombatMods(fighter.id);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <PageHeader
-        kicker="Attribute stones"
+        kicker="Attribute stones + gear"
         title="Stone Sockets"
-        subtitle="Eight colors · five rarities · up to five effects — socket stones from dungeon loot"
+        subtitle="Stones + Main Panel weapons/armor both boost combat stats"
         action={
           <Button asChild variant="outline" className="font-serif tracking-widest border-primary/40">
             <Link href="/game" className="flex items-center gap-2">
@@ -52,7 +55,7 @@ export default function Equipment() {
         }
       />
 
-      {/* Live combat summary */}
+      {/* Live combat summary (stones + equipped weapons/armor) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
         {[
           ["HP", combat.maxHp],
@@ -70,6 +73,13 @@ export default function Equipment() {
           </div>
         ))}
       </div>
+      {gear.pieces.length > 0 && (
+        <p className="text-[11px] text-muted-foreground font-mono">
+          Gear bonus: +{gear.damage} dmg · +{gear.health} HP · +{Math.round(gear.crit * 100)}% crit ·{" "}
+          {gear.pieces.slice(0, 4).join(", ")}
+          {gear.pieces.length > 4 ? "…" : ""} (equip in Main Panel · C)
+        </p>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 8 sockets */}

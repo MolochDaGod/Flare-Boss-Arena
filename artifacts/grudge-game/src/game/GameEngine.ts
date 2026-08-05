@@ -11,6 +11,10 @@ import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./procedura
 import { buildOrcCamp, type CampHandle } from "./CampBuilder";
 import { buildDarkElfCampPrefab, type DarkElfCampHandle } from "./DarkElfCamp";
 import {
+  buildDarkElfCrystalEvent,
+  type DarkElfEventWithVisuals,
+} from "./DarkElfEvent";
+import {
   DARK_ELF_SPAWN_TEMPLATES,
   SPIDER_SPAWN_TEMPLATES,
   SKELETON_SPAWN_TEMPLATES,
@@ -48,13 +52,19 @@ import {
   type HarvestField,
   type HarvestNode,
 } from "./Harvestables";
-import { addResource, getResources, type ResourceBag } from "../data/resources";
+import { addResource, getResources, spendResources, type ResourceBag } from "../data/resources";
 import { getWallet, saveWallet } from "../data/wallet";
 import {
   getActiveFighterKit,
   type FighterKit,
 } from "../data/fighterSkills";
 import { getActiveFighter, RACALVIN_ID } from "../data/fighters";
+import {
+  getRacalvinWeapons,
+  launchRacalvinMindStrike,
+  updateRacalvinMindSwords,
+  RACALVIN_PSYCHIC_COLOR,
+} from "./racalvinHero";
 import {
   getActivePerkMods,
   grantPerk,
@@ -78,7 +88,12 @@ import type { CombatTarget } from "./combat/types";
 import { ParticleVfx, elementColor, type SkillElement } from "./combat/particles";
 import { vfxForArchetype, vfxForSkillSlot } from "../data/vfxHotkeys";
 import { TelegraphField } from "./combat/telegraphs";
-import { DeployableManager } from "./combat/deployables";
+import {
+  DeployableManager,
+  createDeployableGhost,
+  createCampGhost,
+} from "./combat/deployables";
+import type { DeployableKind } from "./combat/skillArchetypes";
 import { makeBloomComposer, type BloomComposer } from "./combat/bloom";
 import {
   createIsoCameraState,
@@ -93,9 +108,15 @@ import { AuraField } from "./combat/auras";
 import { ProjectileField } from "./combat/projectiles";
 import { PendingStrikeField } from "./combat/pendingStrikes";
 import { CombatStateMachine } from "./combatState";
+import {
+  resolveDodge,
+  dodgeClipCandidates,
+  DODGE_IFRAME_S,
+  DODGE_COOLDOWN_S,
+} from "./dodgeMath";
 import { getActiveCombatProfile, brainTuning, type BrainArchetype } from "../data/characterCombatProfiles";
 import { pickHeroEnemies, heroEnemyAsTemplate } from "../data/heroEnemyLibrary";
-import { CDN_MONSTER_TEMPLATES } from "../data/cdnMonsters";
+import { CDN_ANIMATED_TEMPLATES, CDN_MONSTER_TEMPLATES } from "../data/cdnMonsters";
 import { getStoneCombatMods, addStone, rollStoneDrop, STONE_META } from "../data/stones";
 import { resolveSkillBoost } from "../data/abilityUpgrades";
 import {
@@ -108,19 +129,56 @@ import {
   isBlurActive,
 } from "../data/procs";
 import { getGameLoadout } from "../data/gameCombat";
-import { getPartyAllyIds, getGrudge6Hero, MAX_PARTY_ALLIES } from "../data/grudge6Roster";
 import { Grudge6Factory, type Grudge6PrefabDebug } from "./grudge6/Grudge6Character";
 import {
-  createAllyAgent,
   thinkAlly,
   stepAllyMovement,
+  manTower,
   type AllyAgent,
   type AllyState,
 } from "./grudge6/AllyBrain";
+import {
+  createPlayerCampField,
+  buildPlayerCamp,
+  isInsidePlayerCamp,
+  nearestPlayerCamp,
+  pushOutOfCamps,
+  CAMP_BUILD_COST,
+  type PlayerCampField,
+} from "./PlayerCamp";
 import { FX2D } from "./FX2D";
 import { DUNGEON_COLLECTABLES } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
 import { loadGLTFCached } from "./assets";
+import { RunDirector, type RunEvent } from "./RunDirector";
+import { FogOfWar, type FogMinimapSnapshot } from "./FogOfWar";
+import { generateIslandPaths, type IslandPathMap } from "./IslandPathMap";
+import { zoneLabel } from "../data/islandRun";
+import type { ActiveIslandEvent } from "../data/islandEvents";
+import type { PlayerSnapshot } from "@workspace/net-protocol";
+import { pickDungeonBossDef } from "../data/bossRoster";
+import { findPath, advanceAlongPath } from "./pathfind";
+import {
+  generateWorldChunkManifest,
+  nearestClaimableZone,
+  zoneAt,
+  zoneSpawnBias,
+  type WorldChunkManifest,
+  type WorldZone,
+} from "../data/worldZones";
+import {
+  configureDracoLoader,
+  bakeIslandScene,
+  scatterZoneDebris,
+  disposeDracoLoader,
+} from "./sceneBake";
+import { createOpenWater, type OpenWaterHandle, type PlayDomain } from "./OpenWater";
+import { buildHarborDistrict, type HarborDistrictHandle } from "./HarborDistrict";
+import { generateArchipelago } from "../data/archipelago";
+import { buildWorldChunkMap, type WorldChunkMapHandle } from "./WorldChunkMap";
+import { manaRegenPerSec, hpRegenPerSec, applyRegen } from "../data/combatStats";
+import { deployAllyTo } from "./grudge6/AllyBrain";
+// PlayerCamp + farm modular imported above
 
 const OBJECTSTORE_BASE = "https://molochdagod.github.io/ObjectStore";
 
@@ -185,6 +243,10 @@ export interface EnemyInstance {
   aggroRange: number;
   attackRange: number;
   speed: number;
+  /** A* waypoints for wander / chase. */
+  path: THREE.Vector3[];
+  pathRepathAt: number;
+  idleUntil: number;
 }
 
 export interface DamageNumber {
@@ -229,6 +291,8 @@ export interface AllyHudSnapshot {
   maxHp: number;
   state: AllyState;
   brain: string;
+  /** Active goal/objective label from goal AI. */
+  goal?: string;
   loadOk: boolean;
   dead: boolean;
   respawnSec: number;
@@ -285,6 +349,68 @@ export interface GameState {
   invulnerable: boolean;
   /** Alive foe count (GrudgeUi strip). */
   aliveEnemies: number;
+  /** Fog-of-war minimap snapshot (world map). */
+  fogMinimap: FogMinimapSnapshot | null;
+  /** 0–100 explored percentage of the island grid. */
+  exploredPct: number;
+  /** Party allies for PartyHud. */
+  allies: AllyHudSnapshot[];
+  /** Ally load failures. */
+  partyLoadErrors: string[];
+  /** Island beat card (mission / boss / sail / event). */
+  beat: GameBeat | null;
+  /** True when captain re-sail is unlocked (boss defeated). */
+  canSail: boolean;
+  /** Island run phase. */
+  islandPhase: string;
+  /** Mission progress text. */
+  missionTitle: string;
+  missionKills: number;
+  missionGoal: number;
+  /** Multiplayer remote player count (excluding local). */
+  remotePlayerCount: number;
+  /** Co-op / PvP room label when connected. */
+  mpRoom: string | null;
+  /** Player dead → IslandBeatOverlay respawn. */
+  playerDead: boolean;
+  /** Bearing degrees toward Pirate Cove (for sail UI). */
+  coveBearing: number | null;
+  /** Current world zone name (chunk map). */
+  currentZone: string | null;
+  /** Claimable zone nearby prompt. */
+  nearbyClaimZone: string | null;
+  /** Player-owned claim count. */
+  claimsOwned: number;
+  /** Zone list for world map UI. */
+  worldZones: Array<{
+    id: string;
+    name: string;
+    kind: string;
+    x: number;
+    z: number;
+    radius: number;
+    color: number;
+    claimable: boolean;
+    owner: string;
+    chunkX: number;
+    chunkZ: number;
+    areaLevel?: number;
+    density?: number;
+  }>;
+  playerMapX: number;
+  playerMapZ: number;
+  /** land | open_water — helm mode for open sea. */
+  playDomain: PlayDomain;
+  /** Helm HUD when aboard. */
+  boatHeading?: number;
+  boatSpeed?: number;
+  nearbyIslandName?: string | null;
+  /** Harbor shop/training prompt. */
+  nearbyHarborStation?: string | null;
+  /** Prompt to board skiff at dock. */
+  canEmbark?: boolean;
+  /** Prompt to land at island. */
+  canLand?: boolean;
 }
 
 export interface PlayerInitStats {
@@ -416,7 +542,7 @@ export class GameEngine {
   private camp: CampHandle | null = null;
   private pirates: PirateHandle[] = [];
   private townsfolk: Townsperson[] = [];
-  private coveProps: THREE.Group[] = [];
+  private coveProps: THREE.Object3D[] = [];
   private worldCollectables: LoadedWorldProp[] = [];
   private collectedPropIds = new Set<string>();
   private coveLabel: THREE.Sprite | null = null;
@@ -432,7 +558,32 @@ export class GameEngine {
   /** Callback when captain sails — React can hard-refresh or show toast. */
   public onMapReseed: ((seed: number) => void) | null = null;
   public onOpenVendor: (() => void) | null = null;
+  public onOpenTraveler: (() => void) | null = null;
   public onSailBoss: (() => void) | null = null;
+  /** Island progression director (persisted run, missions, events, sail gate). */
+  private runDirector = new RunDirector();
+  private fog: FogOfWar | null = null;
+  private pathMap: IslandPathMap | null = null;
+  private pathVisual: THREE.Group | null = null;
+  private currentBeat: GameBeat | null = null;
+  private fogSaveAccum = 0;
+  private partyLoadErrors: string[] = [];
+  private mpRoom: string | null = null;
+  private remoteAvatars = new Map<
+    string,
+    { group: THREE.Group; target: THREE.Vector3; yaw: number; name: string }
+  >();
+  private worldManifest: WorldChunkManifest | null = null;
+  private worldChunkMap: WorldChunkMapHandle | null = null;
+  private nearbyClaimZone: WorldZone | null = null;
+  private currentZone: WorldZone | null = null;
+  private claimsOwned = 0;
+  /** Attribute-ish regen inputs (from player stats at init). */
+  private regenIntellect = 4;
+  private regenWisdom = 3;
+  private regenVitality = 3;
+  private regenEndurance = 2;
+  private combatUntil = 0;
 
   private fighterKit: FighterKit = getActiveFighterKit();
   private slashField: SlashWaveField | null = null;
@@ -442,7 +593,18 @@ export class GameEngine {
   private warningFx: WarningEffectField | null = null;
   private camps: CampHandle[] = [];
   private darkElfCamp: DarkElfCampHandle | null = null;
+  /** Crystal + 4 assets + barriers (damageable) around the dark-elf ritual. */
+  private darkElfEvent: DarkElfEventWithVisuals | null = null;
+  private readonly darkElfCampAnchor = new THREE.Vector3(-42, 0, -32);
   private claimFlags: ClaimFlagField | null = null;
+  /** Player-built camps (fence + watchtower) — enemy exclusion zones. */
+  private playerCamps: PlayerCampField | null = null;
+  private farmField: { dispose: () => void } | null = null;
+  private zoneDebris: { dispose: () => void } | null = null;
+  private sceneBaked = false;
+  private openWater: OpenWaterHandle | null = null;
+  private harborDistrict: HarborDistrictHandle | null = null;
+  private playDomain: PlayDomain = "land";
   private wispEvents: WispEventField | null = null;
   private claimPlaceCd = 0;
   /** Boss special attack cooldowns by enemy id. */
@@ -456,8 +618,44 @@ export class GameEngine {
   private allies: AllyAgent[] = [];
   private grudge6Factory = new Grudge6Factory();
   private partySpawned = false;
+  /** True while a manual V-key summon is in flight. */
+  private partySummoning = false;
   /** -1 = none; 0-4 = skill awaiting ground placement. */
   private pendingSkillIdx = -1;
+  /**
+   * Active mouse-ghost placement (skill AoE, combat deployable, or camp).
+   * LMB confirms; Esc cancels. Ghost follows pointerGround.
+   */
+  private placeMode:
+    | null
+    | {
+        kind: "skill_aoe";
+        skillIdx: number;
+        maxRange: number;
+        radius: number;
+        color: number;
+      }
+    | {
+        kind: "deployable";
+        /** Fighter kit skill index, or -1 for legacy HUD skill bar. */
+        skillIdx: number;
+        legacyHud: boolean;
+        deployKind: DeployableKind;
+        maxRange: number;
+        radius: number;
+        color: number;
+        damage: number;
+        manaCost: number;
+        cooldown: number;
+      }
+    | {
+        kind: "camp";
+        radius: number;
+        padId: string | null;
+        padX: number;
+        padZ: number;
+      } = null;
+  private placeGhost: THREE.Group | null = null;
   private skillCdUntil = [0, 0, 0, 0, 0];
   private specialCdUntil = 0;
   private blocking = false;
@@ -466,10 +664,6 @@ export class GameEngine {
   private dodgeIframeUntil = 0;
   /** Next time Shift dodge may fire (ms, performance.now). */
   private dodgeCdUntil = 0;
-  /** World units (meters) of mouse-aimed dodge dash. */
-  private readonly DODGE_DISTANCE = 4;
-  /** Seconds between dodges. */
-  private readonly DODGE_COOLDOWN = 0.95;
   /** Tag-based combat FSM (annihilate Maria pattern). */
   private combatFsm = new CombatStateMachine();
   private skillCursor: THREE.Mesh | null = null;
@@ -521,6 +715,12 @@ export class GameEngine {
     this.playerMaxAttackCooldown = stats.attackSpeed;
     this.enemyTemplates = enemyTemplates;
     this.initStats = stats;
+    // Soft attribute proxies for regen (class-ish defaults until full attr pass-through)
+    const cls = (stats.charClass ?? "warrior").toLowerCase();
+    this.regenIntellect = cls.includes("mage") || cls.includes("sorc") ? 10 : cls.includes("priest") ? 8 : 4;
+    this.regenWisdom = cls.includes("mage") || cls.includes("priest") ? 8 : 3;
+    this.regenVitality = cls.includes("warrior") || cls.includes("tank") ? 8 : 4;
+    this.regenEndurance = cls.includes("warrior") || cls.includes("ranger") ? 6 : 3;
     // Attribute stones + fighter loadout → speed / defense baseline
     try {
       const lo = getGameLoadout();
@@ -530,6 +730,11 @@ export class GameEngine {
       /* ignore */
     }
     this.isoCam.look.copy(this.playerPos);
+
+    // Restore persistent island run (seed / round / phase / fog).
+    this.runDirector = new RunDirector();
+    this.mapSeed = this.runDirector.run.seed;
+    this.islandRound = this.runDirector.run.round;
 
     const w = container.clientWidth;
     const h = container.clientHeight;
@@ -571,6 +776,7 @@ export class GameEngine {
 
     this.timer.connect(document);
     this.loader = createGltfLoader();
+    configureDracoLoader(this.loader);
     this.skillVfx = new SkillVfx(this.scene, this.loader);
     this.particles = new ParticleVfx(this.scene);
     this.telegraphs = new TelegraphField(this.scene);
@@ -607,37 +813,59 @@ export class GameEngine {
     });
 
     this.buildDungeon();
+    this.initIslandSystems();
+    this.initWorldChunkMap();
     this.loadEnvironment();
     const campUrl = `${import.meta.env.BASE_URL}models/buildings/orc_camp_set.glb`;
     // Green orc war-camp near east ridge.
     this.camp = buildOrcCamp(this.loader, this.scene, campUrl, {
       theme: "orc",
       offset: new THREE.Vector3(38, 0, 28),
-      scale: 0.92,
+      // Keep war-camp human-scale vs ~2m fighter (was nearly map-sized at times).
+      scale: 0.72,
       name: "orc_camp",
     });
     this.camps.push(this.camp);
-    // Dark-elf camp prefab (Unity pattern → Three.js; falls back to themed atlas).
+    // Dark-elf camp prefab (backdrop) + crystal event (4 assets, barriers, HP).
     this.darkElfCamp = buildDarkElfCampPrefab(
       this.loader,
       this.scene,
-      new THREE.Vector3(-42, 0, -32),
+      this.darkElfCampAnchor.clone(),
       campUrl,
     );
+    if (this.darkElfCamp?.group) {
+      this.darkElfCamp.group.scale.multiplyScalar(0.75);
+    }
+    this.darkElfEvent = buildDarkElfCrystalEvent(
+      this.loader,
+      this.scene,
+      this.darkElfCampAnchor.clone(),
+    );
+    this.log("Void crystal hums — shatter the four pylons and barriers around it.");
     this.claimFlags = createClaimFlagField(this.scene);
+    this.playerCamps = createPlayerCampField(this.scene);
     this.wispEvents = createWispEventField(this.scene);
-    // Seed claim near cove for harvest scripting demo.
+    // Harvest nodes near cove only — no auto camp / yellow ring.
     this.plantStarterClaim();
     this.spawnWispEvents();
     this.buildPirateCove();
+    this.buildHarborAndOpenWater();
     this.buildHarvestables();
     this.buildWorldCollectables();
     this.scatterGenerativeProps();
+    this.scatterModularOutposts();
+    this.scatterFarmFields();
+    this.bakeWorldAfterScatter();
     this.setupLighting();
     this.loadPlayerModel();
     this.spawnInitialEnemies();
-    this.spawnDungeonBoss();
+    // Boss only after mission kill goal (or resume mid boss fight / victory).
+    this.maybeSpawnRunBoss();
     this.setupInput(container);
+    this.log(this.runDirector.zone);
+    this.log(
+      `${this.runDirector.mission.title}: 0/${this.runDirector.mission.killGoal} culls · E at captain to sail after Colossus`,
+    );
 
     this.fx = new FX2D(container);
 
@@ -731,9 +959,457 @@ export class GameEngine {
         { x: this.coveCenter.x, z: this.coveCenter.z, half: 16 }, // pirate cove
         { x: -52, z: 38, half: 12 }, // boss staging default
         { x: 0, z: -8, half: 8 }, // camp / forge approach
+        // Dark-elf crystal event — clear yard so 4 assets + barriers + spawns fit
+        { x: this.darkElfCampAnchor.x, z: this.darkElfCampAnchor.z, half: 18 },
       ],
     });
     this.scene.add(this.maze.group);
+  }
+
+  /** Zone chunk map — Diablo-2 style seeded districts + waypoint graph. */
+  private initWorldChunkMap() {
+    this.worldChunkMap?.dispose();
+    this.worldChunkMap = null;
+    this.worldManifest = generateWorldChunkManifest(
+      this.mapSeed,
+      this.islandRound,
+      this.DUNGEON,
+    );
+    this.worldChunkMap = buildWorldChunkMap(this.scene, this.worldManifest);
+    this.claimsOwned = this.worldManifest.zones.filter((z) => z.owner === "player").length;
+    // Rebuild maze open yards from zone anchors (deterministic per seed).
+    this.rebuildMazeOpenZonesFromManifest();
+    this.log(
+      `World chart act#${this.worldManifest.actSeed.toString(16).slice(0, 4)}: ${this.worldManifest.zones.length} zones · ${this.worldManifest.waypointPath.length} waypoints · seed #${this.mapSeed.toString(16)}`,
+    );
+  }
+
+  /** Expand maze open circles from zone centers so packs/camps fit. */
+  private rebuildMazeOpenZonesFromManifest() {
+    if (!this.maze || !this.worldManifest) return;
+    // MazeArena is rebuilt only on re-sail; openZones set at construction.
+    // Soft-clear walls near critical zones by regenerating maze with zone opens.
+    const opens = [
+      { x: 0, z: 0, half: 14 },
+      { x: this.coveCenter.x, z: this.coveCenter.z, half: 16 },
+      { x: this.darkElfCampAnchor.x, z: this.darkElfCampAnchor.z, half: 18 },
+      ...this.worldManifest.zones
+        .filter((z) => z.kind === "boss_gate" || z.kind === "harbor" || z.claimable || z.kind === "farm")
+        .map((z) => ({ x: z.x, z: z.z, half: Math.max(8, z.radius * 0.85) })),
+    ];
+    this.maze?.dispose();
+    this.maze = new MazeArena({
+      halfExtent: this.DUNGEON,
+      cellSize: 5,
+      wallHeight: 3.4,
+      seed: this.mapSeed ^ 0x4d415a45,
+      largeRoomCount: 7 + Math.min(4, this.islandRound),
+      openZones: opens,
+    });
+    this.scene.add(this.maze.group);
+    if (this.maze.group) {
+      this.maze.group.name = "maze";
+      this.maze.group.userData.bakeStatic = true;
+    }
+  }
+
+  /**
+   * After modular/farm/props stream, place instanced debris and freeze statics.
+   * Async loads continue to attach; bake marks existing static roots.
+   */
+  private bakeWorldAfterScatter() {
+    this.zoneDebris?.dispose();
+    this.zoneDebris = null;
+    if (this.worldManifest) {
+      this.zoneDebris = scatterZoneDebris(
+        this.scene,
+        this.worldManifest.zones.map((z) => ({
+          x: z.x,
+          z: z.z,
+          radius: z.radius,
+          kind: z.kind,
+        })),
+        this.mapSeed ^ this.worldManifest.actSeed,
+      );
+    }
+    // Defer final freeze so async atlas props land, then bake.
+    window.setTimeout(() => {
+      if (this.disposed) return;
+      bakeIslandScene(this.scene);
+      this.sceneBaked = true;
+      this.log("Island scene baked — static batches frozen · instanced debris online.");
+    }, 2200);
+  }
+
+  /**
+   * Fog-of-war world map + seed-driven island road network.
+   * Restores explored cells from the persisted island run.
+   */
+  private initIslandSystems() {
+    // Paths first so open-zone layout can bias toward roads.
+    if (this.pathVisual) {
+      this.scene.remove(this.pathVisual);
+      this.pathVisual.traverse((c) => {
+        const m = c as THREE.Mesh;
+        if (m.isMesh) {
+          m.geometry?.dispose();
+          const mat = m.material;
+          if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
+          else (mat as THREE.Material | undefined)?.dispose();
+        }
+      });
+      this.pathVisual = null;
+    }
+    this.pathMap = generateIslandPaths(this.mapSeed, this.DUNGEON);
+    const aniso = this.renderer?.capabilities?.getMaxAnisotropy?.() ?? 4;
+    this.pathVisual = this.pathMap.buildVisual(aniso);
+    this.scene.add(this.pathVisual);
+    if (this.terrainMesh) this.pathMap.flattenTerrain(this.terrainMesh);
+
+    this.fog?.dispose();
+    this.fog = new FogOfWar(this.scene, this.DUNGEON, 2.5);
+    const saved = this.runDirector.run.exploredCells ?? [];
+    if (saved.length) this.fog.loadExplored(saved);
+    // Seed vision at hub + cove so the player always has a foothold on the map.
+    this.fog.revealAt(0, 0, 14);
+    this.fog.revealAt(this.coveCenter.x, this.coveCenter.z, 12);
+  }
+
+  /** Spawn Island Colossus when mission complete or resuming a boss phase. */
+  private maybeSpawnRunBoss() {
+    const phase = this.runDirector.phase;
+    if (phase === "victory" || phase === "sail") return;
+    if (phase === "boss_alert" || phase === "boss_fight") {
+      if (!this.bossEnemyId) {
+        this.spawnDungeonBoss();
+        this.runDirector.beginBossFight();
+      }
+      return;
+    }
+    // explore — boss waits for kill goal
+  }
+
+  private processRunEvents(events: RunEvent[]) {
+    for (const ev of events) {
+      if (ev.type === "mission_progress") {
+        // Quiet progress in log only; beat card when goal hits via boss_alert
+        if (ev.kills === 1 || ev.kills === Math.floor(ev.goal / 2) || ev.kills >= ev.goal - 1) {
+          this.log(`Mission ${ev.kills}/${ev.goal}`);
+        }
+      } else if (ev.type === "boss_alert") {
+        this.currentBeat = {
+          kind: "boss_alert",
+          title: "Island Colossus Approaches",
+          subtitle: `${this.runDirector.mission.title} complete — the titan stirs in the ruins.`,
+        };
+        this.log("Boss alert — Island Colossus has entered the field!");
+        if (!this.bossEnemyId) this.spawnDungeonBoss();
+        this.runDirector.beginBossFight();
+      } else if (ev.type === "boss_defeated") {
+        this.currentBeat = {
+          kind: "boss_defeated",
+          title: "Colossus Fallen",
+          subtitle: "Return to Pirate Cove and speak with Captain Barbarossa (E) to sail onward.",
+        };
+        this.log("Victory — speak to the captain at Pirate Cove to re-sail.");
+      } else if (ev.type === "sail") {
+        this.currentBeat = {
+          kind: "sail",
+          title: `Island Round ${ev.round}`,
+          subtitle: `New chart · seed #${ev.seed.toString(16)} · foes scale up.`,
+        };
+      } else if (ev.type === "island_event") {
+        this.applyIslandEvent(ev.event);
+      }
+    }
+  }
+
+  private applyIslandEvent(ev: ActiveIslandEvent) {
+    this.currentBeat = {
+      kind: "island_event",
+      title: ev.title,
+      subtitle: ev.description,
+    };
+    this.log(`Island event: ${ev.title}`);
+    switch (ev.kind) {
+      case "supply_cache": {
+        addResource("wood", 8 + this.islandRound);
+        addResource("stone", 6 + this.islandRound);
+        this.playerMana = Math.min(this.playerMaxMana, this.playerMana + 40);
+        this.log("Supply cache looted (+wood/stone, mana surge).");
+        break;
+      }
+      case "shrine_buff":
+        this.runDirector.applyShrineBuff(90);
+        this.log("Grudge shrine blessing — damage and regen for 90s.");
+        break;
+      case "merchant_visit":
+        this.log("A drift merchant signals near the crossroads — vendor open.");
+        this.onOpenVendor?.();
+        break;
+      case "relic_find":
+        this.playerXp += 120 + this.islandRound * 40;
+        this.log("Relic unearthed — bonus XP.");
+        break;
+      case "ambush_wave":
+      case "patrol_elite": {
+        const n = ev.kind === "patrol_elite" ? 1 : 3 + Math.min(3, this.islandRound);
+        const rng = mulberry(this.mapSeed ^ (this.runDirector.run.killsThisRound * 9176));
+        for (let i = 0; i < n; i++) {
+          const t =
+            this.enemyTemplates[Math.floor(rng() * Math.max(1, this.enemyTemplates.length))] ??
+            ({
+              id: "ambush_skirmisher",
+              name: ev.kind === "patrol_elite" ? "Elite Patrol" : "Ambush Skirmisher",
+              type: "humanoid",
+              tier: ev.kind === "patrol_elite" ? 4 : 2,
+              hp: 180,
+              damage: 18,
+            } satisfies EnemyTemplate);
+          const pos = this.pathMap?.sampleSpawnPoint(rng) ?? new THREE.Vector3(ev.x, 0, ev.z);
+          pos.x += (rng() - 0.5) * 4;
+          pos.z += (rng() - 0.5) * 4;
+          this.createEnemy(this.scaleTemplate(t), this.snapToWalkable(pos));
+        }
+        break;
+      }
+      case "storm_front":
+        this.fog?.revealAt(this.playerPos.x, this.playerPos.z, 6);
+        this.log("Ash storm — vision shrinks; elites drop richer spoils.");
+        break;
+      default:
+        break;
+    }
+    this.runDirector.clearActiveEvent();
+  }
+
+  /** Public: dismiss beat overlay. */
+  dismissBeat() {
+    this.currentBeat = null;
+    this.notifyState(true);
+  }
+
+  /** Public: sail to next island (UI / captain). */
+  sailToNextIsland() {
+    if (!this.runDirector.canSail() && this.runDirector.phase !== "victory") {
+      this.log("Defeat the Island Colossus before sailing.");
+      return false;
+    }
+    const ev = this.runDirector.sailToNextIsland();
+    this.processRunEvents([ev]);
+    this.applySailState();
+    // Refresh archipelago chart for new round seed
+    if (this.openWater) {
+      const chart = generateArchipelago(this.mapSeed, this.islandRound, {
+        coveX: this.coveCenter.x,
+        coveZ: this.coveCenter.z,
+        seaHalfExtent: 220,
+      });
+      this.openWater.setChart(chart);
+    }
+    return true;
+  }
+
+  /**
+   * B — board skiff for open water, or land at nearest island / home dock.
+   * Flexible: works from dock or mid-sea landfall.
+   */
+  tryToggleEmbark() {
+    if (!this.openWater) {
+      this.log("Open water systems offline.");
+      return;
+    }
+    if (this.playDomain === "open_water") {
+      const isle = this.openWater.nearestIsland(32);
+      if (!isle) {
+        this.log("No landfall in range — sail closer to an island buoy.");
+        return;
+      }
+      // Land: home dock or satellite landfall
+      if (isle.isHome) {
+        const dock = new THREE.Vector3(this.coveCenter.x + 2, 0, this.coveCenter.z + 1);
+        this.openWater.disembark(dock);
+        this.playDomain = "land";
+        this.playerPos.copy(dock);
+        this.playerPos.x -= 2;
+        if (this.playerGroup) {
+          this.playerGroup.visible = true;
+          this.playerGroup.position.set(this.playerPos.x, 0, this.playerPos.z);
+        }
+        this.log(`Landed at ${isle.name}. Harbor shops & training are ashore.`);
+      } else {
+        // Satellite landfall — require colossus cleared for voyage (flexible: allow explore land)
+        this.openWater.disembark(
+          new THREE.Vector3(isle.x - isle.radius * 0.4, 0, isle.z),
+        );
+        this.playDomain = "land";
+        this.playerPos.set(isle.x - isle.radius * 0.5, 0, isle.z);
+        if (this.playerGroup) {
+          this.playerGroup.visible = true;
+          this.playerGroup.position.set(this.playerPos.x, 0, this.playerPos.z);
+        }
+        this.log(
+          `Landfall ${isle.name} (L${isle.areaLevel}). Sail home or press Sail when Colossus is down for a full reseed.`,
+        );
+        // Optional full reseed if voyage unlocked
+        if (this.runDirector.canSail() || this.runDirector.phase === "victory") {
+          this.log("Voyage ready — use captain Sail for a full next-island generation.");
+        }
+      }
+      this.notifyState(true);
+      return;
+    }
+
+    // Board near docked skiff
+    const dock = new THREE.Vector3(this.coveCenter.x + 6, 0, this.coveCenter.z - 3);
+    const d = Math.hypot(this.playerPos.x - dock.x, this.playerPos.z - dock.z);
+    if (d > 10) {
+      this.log("Move to the docked skiff (east jetty), then press B to board.");
+      return;
+    }
+    this.openWater.boatPos.copy(dock);
+    this.openWater.embark();
+    this.playDomain = "open_water";
+    if (this.playerGroup) this.playerGroup.visible = false;
+    this.playerTarget = null;
+    this.attackHeld = false;
+    this.log(
+      "Helm free — WASD sail, B land at buoy/home. Party crew rides the deck. Open-water combat next.",
+    );
+    this.notifyState(true);
+  }
+
+  /** Public: respawn at Pirate Cove after death. */
+  respawnAtCove() {
+    if (this.playerHp > 0) return;
+    this.playerHp = Math.max(1, Math.floor(this.playerMaxHp * 0.5));
+    this.playerMana = Math.floor(this.playerMaxMana * 0.5);
+    this.playerPos.set(this.coveCenter.x - 4, 0, this.coveCenter.z);
+    this.playerY = 0;
+    this.jumpVel = 0;
+    if (this.playerGroup) {
+      this.playerGroup.position.set(this.playerPos.x, 0, this.playerPos.z);
+    }
+    this.log("You wash ashore at Pirate Cove…");
+    this.notifyState(true);
+  }
+
+  /** Multiplayer: set room label for HUD. */
+  setMpRoom(room: string | null) {
+    this.mpRoom = room;
+    this.notifyState(true);
+  }
+
+  /**
+   * Multiplayer: sync remote player avatars from Socket.IO snapshots.
+   * Capsules lerp toward server positions; local id is skipped.
+   */
+  syncRemotePlayers(snaps: PlayerSnapshot[], localId: string | null) {
+    const seen = new Set<string>();
+    for (const s of snaps) {
+      if (localId && s.id === localId) continue;
+      seen.add(s.id);
+      let rem = this.remoteAvatars.get(s.id);
+      if (!rem) {
+        const group = this.makeRemoteAvatarCapsule(0x4488ff);
+        group.position.set(s.p.x, 0, s.p.z);
+        this.scene.add(group);
+        rem = {
+          group,
+          target: new THREE.Vector3(s.p.x, s.p.y, s.p.z),
+          yaw: s.r,
+          name: s.id.slice(0, 6),
+        };
+        this.remoteAvatars.set(s.id, rem);
+      }
+      rem.target.set(s.p.x, s.p.y, s.p.z);
+      rem.yaw = s.r;
+    }
+    for (const [id, rem] of this.remoteAvatars) {
+      if (!seen.has(id)) {
+        this.scene.remove(rem.group);
+        rem.group.traverse((c) => {
+          const m = c as THREE.Mesh;
+          if (m.isMesh) {
+            m.geometry?.dispose();
+            (m.material as THREE.Material)?.dispose();
+          }
+        });
+        this.remoteAvatars.delete(id);
+      }
+    }
+  }
+
+  private makeRemoteAvatarCapsule(color: number): THREE.Group {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.35, 1.0, 4, 8),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.15 }),
+    );
+    body.position.y = 1.0;
+    body.castShadow = true;
+    g.add(body);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.45, 0.58, 24),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, side: THREE.DoubleSide }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.05;
+    g.add(ring);
+    return g;
+  }
+
+  private applySailState() {
+    this.mapSeed = this.runDirector.run.seed;
+    this.islandRound = this.runDirector.run.round;
+    // Clear enemies and respawn scaled for the new round.
+    for (const en of [...this.enemies]) {
+      this.scene.remove(en.model.group);
+      en.model.group.userData.disposed = true;
+      if (en.model.kit) disposeKitModel(en.model);
+      else if (en.model.isGLB) disposeMonsterModel(en.model);
+    }
+    this.enemies = [];
+    this.enemyBrains.clear();
+    this.bossEnemyId = null;
+    this.bossSpecialCd.clear();
+    this.projectileField?.clear();
+    this.pendingStrikes?.clear();
+    this.auras?.clear();
+    if (this.playerGroup) {
+      this.auras?.attach(this.playerAuraElement, {
+        follow: this.playerGroup,
+        radius: 1.35,
+        yOffset: 0.05,
+      });
+    }
+    this.buildMaze();
+    this.initIslandSystems();
+    this.initWorldChunkMap();
+    this.buildHarvestables();
+    this.spawnInitialEnemies();
+    this.maybeSpawnRunBoss();
+    this.playerPos.set(0, 0, 0);
+    if (this.maze) {
+      const hub = this.maze.nearestWalkable(0, 0);
+      this.playerPos.set(hub.x, 0, hub.z);
+    }
+    this.playerY = 0;
+    this.jumpVel = 0;
+    this.dodgeCdUntil = 0;
+    this.dodgeIframeUntil = 0;
+    this.combatFsm.reset();
+    if (this.playerGroup) {
+      this.playerGroup.position.set(this.playerPos.x, 0, this.playerPos.z);
+    }
+    this.playerHp = Math.min(this.playerMaxHp, this.playerHp + this.playerMaxHp * 0.35);
+    this.playerMana = Math.min(this.playerMaxMana, this.playerMana + this.playerMaxMana * 0.4);
+    const mult = this.difficultyMult();
+    this.log(
+      `Round ${this.islandRound} — island #${this.mapSeed.toString(16)} · enemies ×${mult.toFixed(2)}`,
+    );
+    this.onMapReseed?.(this.mapSeed);
+    this.notifyState(true);
   }
 
   /**
@@ -748,13 +1424,16 @@ export class GameEngine {
 
   /**
    * Resolve the just-moved player against maze walls (AABB slide, annihilate
-   * Box-style) and optional dungeon BVH. Floor stays flat y=0 unless BVH floor.
+   * Box-style), dark-elf barriers, and optional dungeon BVH.
+   * Floor stays flat y=0 unless BVH floor.
    */
   private resolvePlayer() {
     const dm = this.dungeonMap;
     if (dm?.ready) dm.collideHorizontal(this.playerPos, this.PLAYER_RADIUS, this.PLAYER_HEIGHT);
     // Maze walls — primary layout collision for the open-arena path.
     this.maze?.collideHorizontal(this.playerPos, this.PLAYER_RADIUS);
+    // Living void barriers / crystal / pylons at the dark-elf event.
+    this.darkElfEvent?.collideHorizontal(this.playerPos, this.PLAYER_RADIUS);
     const D = this.DUNGEON - 1;
     this.playerPos.x = Math.max(-D, Math.min(D, this.playerPos.x));
     this.playerPos.z = Math.max(-D, Math.min(D, this.playerPos.z));
@@ -764,12 +1443,60 @@ export class GameEngine {
     this.playerPos.y = fy ?? 0;
   }
 
+  /**
+   * Damage wisps + dark-elf event structures inside a world circle
+   * (skills / AoEs). Returns true if anything took a hit.
+   */
+  private damageEventPropsInRadius(center: THREE.Vector3, radius: number, dmg: number): boolean {
+    let hit = false;
+    if (this.wispEvents) {
+      for (const w of this.wispEvents.wisps) {
+        if (!w.alive) continue;
+        if (Math.hypot(w.position.x - center.x, w.position.z - center.z) <= radius + 0.8) {
+          damageWisp(w, dmg);
+          hit = true;
+        }
+      }
+    }
+    if (this.darkElfEvent?.isActive()) {
+      for (const s of this.darkElfEvent.structures) {
+        if (!s.alive) continue;
+        if (Math.hypot(s.position.x - center.x, s.position.z - center.z) <= radius + s.hitRadius * 0.5) {
+          const killed = this.darkElfEvent.damageStructure(s, dmg);
+          if (killed) {
+            this.log(s.kind === "crystal" ? "Void Crystal shattered!" : `${s.name} destroyed!`);
+          }
+          hit = true;
+        }
+      }
+    }
+    return hit;
+  }
+
+  /**
+   * Continuous move + collide so high-speed frames (sprint / dodge residual)
+   * cannot tunnel through maze walls or event barriers.
+   */
+  private movePlayerHorizontal(dx: number, dz: number) {
+    if (this.maze) {
+      this.maze.moveAndCollide(this.playerPos, dx, dz, this.PLAYER_RADIUS);
+    } else {
+      this.playerPos.x += dx;
+      this.playerPos.z += dz;
+    }
+    this.darkElfEvent?.collideHorizontal(this.playerPos, this.PLAYER_RADIUS);
+    const D = this.DUNGEON - 1;
+    this.playerPos.x = Math.max(-D, Math.min(D, this.playerPos.x));
+    this.playerPos.z = Math.max(-D, Math.min(D, this.playerPos.z));
+  }
+
   /** Clamp an arbitrary XZ point to the playable arena and out of maze walls. */
   private clampToArena(v: THREE.Vector3) {
     const D = this.DUNGEON - 1;
     v.x = Math.max(-D, Math.min(D, v.x));
     v.z = Math.max(-D, Math.min(D, v.z));
-    this.maze?.collideHorizontal(v, this.PLAYER_RADIUS * 0.85);
+    this.maze?.collideHorizontal(v, this.PLAYER_RADIUS * 0.9);
+    this.darkElfEvent?.collideHorizontal(v, this.PLAYER_RADIUS * 0.9);
   }
 
   /** Snap a proposed spawn to a walkable maze cell (no enemies inside walls). */
@@ -794,17 +1521,72 @@ export class GameEngine {
    * added to `this.enemies`, and carry no `enemyId`, so they can't be targeted
    * or attacked. They signal that the pirate crew will aid you in the Boss Arena.
    */
+  /**
+   * Harbor shops/training on-island + open-water ocean/skiff (archipelago chart).
+   * Flexible: land gameplay unchanged; B boards skiff for open sea.
+   */
+  private buildHarborAndOpenWater() {
+    this.harborDistrict?.dispose();
+    this.harborDistrict = buildHarborDistrict(this.scene, this.coveCenter);
+
+    const chart = generateArchipelago(this.mapSeed, this.islandRound, {
+      coveX: this.coveCenter.x,
+      coveZ: this.coveCenter.z,
+      seaHalfExtent: 220,
+    });
+    this.openWater?.dispose();
+    this.openWater = createOpenWater(this.scene, this.loader, {
+      seaHalfExtent: chart.seaHalfExtent,
+      chart,
+      embarkWorld: new THREE.Vector3(this.coveCenter.x + 6, 0, this.coveCenter.z - 3),
+      boatLength: 8.5,
+    });
+    this.playDomain = "land";
+    this.log(
+      `Harbor district online · archipelago ${chart.islands.length} isles · board skiff (B) for open water`,
+    );
+  }
+
   private buildPirateCove() {
     const c = this.coveCenter;
-    // Boat assistance: docked ships as the cove landmark + jetty + loot.
-    this.loadCoveProp("world/Ship_Small.gltf", new THREE.Vector3(c.x + 7, 0, c.z - 4), 16, Math.PI * 0.18);
-    this.loadCoveProp("world/Ship_Large.gltf", new THREE.Vector3(c.x + 14, 0, c.z - 8), 22, Math.PI * 0.08);
-    this.loadCoveProp("world/Environment_Dock.gltf", new THREE.Vector3(c.x + 1, 0, c.z), 11, 0);
-    this.loadCoveProp("world/Environment_Dock_Pole.gltf", new THREE.Vector3(c.x - 4, 0, c.z + 4), 2.2, 0.3);
-    this.loadCoveProp("world/Prop_Chest_Gold.gltf", new THREE.Vector3(c.x - 2.5, 0, c.z + 2.5), 1.3, 0.6);
-    this.loadCoveProp("world/Prop_Barrel.gltf", new THREE.Vector3(c.x - 3.5, 0, c.z + 1), 1.1, 0);
-    this.loadCoveProp("world/Prop_Anchor.gltf", new THREE.Vector3(c.x - 1.5, 0, c.z + 3.5), 1.4, -0.4);
-    this.loadCoveProp("world/Prop_Coins.gltf", new THREE.Vector3(c.x - 2, 0, c.z + 1.5), 0.9, 0.2);
+    // Dock scene — ships/dock sized for ~2m player (not stadium props).
+    // Skiff is player helm vessel (OpenWater); large ship is scenery berth.
+    this.loadCoveProp("world/Ship_Small.gltf", new THREE.Vector3(c.x + 6, 0, c.z - 3), 9, Math.PI * 0.18, {
+      interact: "dock",
+      label: "Docked skiff — B board · open water",
+    });
+    this.loadCoveProp("world/Ship_Large.gltf", new THREE.Vector3(c.x + 12, 0, c.z - 7), 12, Math.PI * 0.08, {
+      interact: "dock",
+      label: "Corsair ship",
+    });
+    this.loadCoveProp("world/Environment_Dock.gltf", new THREE.Vector3(c.x + 1, 0, c.z), 7.5, 0, {
+      interact: "dock",
+      label: "Jetty",
+    });
+    this.loadCoveProp("world/Environment_Dock_Pole.gltf", new THREE.Vector3(c.x - 4, 0, c.z + 4), 1.6, 0.3);
+    // Loot chests — E to open (not auto-eat)
+    this.loadCoveProp("world/Prop_Chest_Gold.gltf", new THREE.Vector3(c.x - 2.5, 0, c.z + 2.5), 1.05, 0.6, {
+      interact: "chest",
+      label: "Cove Loot Chest",
+      lootGold: 45,
+      lootWood: 4,
+    });
+    this.loadCoveProp("world/Prop_Chest_Gold.gltf", new THREE.Vector3(c.x + 3, 0, c.z + 5), 1.0, -0.3, {
+      interact: "chest",
+      label: "Jetty Chest",
+      lootGold: 25,
+      lootStone: 3,
+    });
+    this.loadCoveProp("world/Prop_Barrel.gltf", new THREE.Vector3(c.x - 3.5, 0, c.z + 1), 0.95, 0, {
+      interact: "barrel",
+      label: "Supply Barrel",
+      lootWood: 2,
+    });
+    this.loadCoveProp("world/Prop_Anchor.gltf", new THREE.Vector3(c.x - 1.5, 0, c.z + 3.5), 1.15, -0.4);
+    this.loadCoveProp("world/Prop_Coins.gltf", new THREE.Vector3(c.x - 2, 0, c.z + 1.5), 0.7, 0.2);
+
+    // Dock Quest Traveler — tutorial NPC on the jetty
+    this.spawnDockTraveler(new THREE.Vector3(c.x - 0.5, 0, c.z + 3.2));
 
     // Full crew: vendor (Anne), captain (Barbarossa), + crew for atmosphere.
     PIRATE_DEFS.forEach((def, i) => {
@@ -822,9 +1604,49 @@ export class GameEngine {
       this.pirates.push(handle);
     });
 
-    this.addCoveLabel(new THREE.Vector3(c.x + 1, 4.6, c.z));
+    this.addCoveLabel(new THREE.Vector3(c.x + 1, 3.2, c.z));
 
     this.buildTownsfolk();
+  }
+
+  /** Dock Quest Traveler — KayKit/pirate NPC marker for tutorial opener. */
+  private spawnDockTraveler(pos: THREE.Vector3) {
+    // Reuse pirate crew mesh pipeline if available; else a lit marker + label.
+    const def = PIRATE_DEFS.find((p) => p.role === "crew") ?? PIRATE_DEFS[0];
+    if (def) {
+      const handle = loadPirate(
+        {
+          ...def,
+          id: "dock_traveler",
+          name: "Dock Quest Traveler",
+          title: "Tutorial Guide",
+          role: "crew",
+          prompt: "Speak — Dock Quest tutorial",
+        },
+        this.loader,
+      );
+      handle.group.position.copy(pos);
+      handle.group.rotation.y = Math.PI;
+      handle.group.userData.waveTimer = 2;
+      handle.group.userData.pirateId = "dock_traveler";
+      handle.group.userData.pirateRole = "traveler";
+      handle.group.userData.isTraveler = true;
+      this.scene.add(handle.group);
+      this.pirates.push(handle);
+    }
+    // Beach marker for "learn_move" step
+    const marker = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.35, 0.45, 0.15, 12),
+      new THREE.MeshStandardMaterial({
+        color: 0xc5a059,
+        emissive: 0x664400,
+        emissiveIntensity: 0.5,
+      }),
+    );
+    marker.position.set(pos.x - 8, 0.08, pos.z + 2);
+    marker.name = "traveler_beach_marker";
+    this.scene.add(marker);
+    this.coveProps.push(marker);
   }
 
   /** Tall generative trees (2–4× character height) + stone piles + island rocks. */
@@ -839,6 +1661,7 @@ export class GameEngine {
     opts?: { radius?: number; nodeCount?: number; seed?: number },
   ) {
     if (!this.claimFlags || !this.harvestField) return;
+    // Harvest scripting only — no yellow ring (camps use fence + tower visuals).
     const { claim, nodeSpawns } = placeClaimFlag(this.claimFlags, {
       position: pos,
       radius: opts?.radius ?? 12,
@@ -849,6 +1672,8 @@ export class GameEngine {
       maxTier: 2,
       seed: opts?.seed ?? (this.mapSeed ^ hashString("claim")),
       now: performance.now() / 1000,
+      showRing: false,
+      showFlag: false,
     });
     const created = spawnScriptedHarvestNodes(
       this.harvestField,
@@ -864,7 +1689,7 @@ export class GameEngine {
       })),
     );
     bindClaimNodes(claim, created);
-    this.log(`Claim flag planted — ${created.length} harvest nodes scripted in the claim.`);
+    this.log(`Harvest parcel set — ${created.length} nodes inside the claim.`);
   }
 
   private spawnWispEvents() {
@@ -875,6 +1700,20 @@ export class GameEngine {
       new THREE.Vector3(-8, 0, -22),
       new THREE.Vector3(32, 0, 8),
     ];
+    // Ritual wisps orbit the dark-elf crystal event
+    if (this.darkElfEvent) {
+      for (const s of this.darkElfEvent.wispSpots) {
+        anchors.push(s.clone());
+      }
+    }
+    // Snap to walkable so wisps never sit inside maze walls
+    for (const a of anchors) {
+      if (this.maze && !this.maze.isWalkableWorld(a.x, a.z)) {
+        const w = this.maze.nearestWalkable(a.x, a.z);
+        a.x = w.x;
+        a.z = w.z;
+      }
+    }
     spawnWispEventPack(this.wispEvents, this.mapSeed, anchors);
     this.log("Colored wisps stir on the island — watch for sky beams.");
   }
@@ -897,7 +1736,7 @@ export class GameEngine {
       attachRockFieldNodes(this.harvestField, this.rockField, meta.positions, meta.scales);
     }
 
-    // Starter claim parcel near pirate cove — scripts harvest nodes in radius.
+    // Starter harvest parcel near pirate cove — no camp, no yellow ring.
     this.applyClaimNodes(new THREE.Vector3(58, 0, -10), {
       radius: 14,
       nodeCount: 10,
@@ -905,25 +1744,148 @@ export class GameEngine {
     });
   }
 
-  /** Scatter extra pirate-kit props as generative dungeon flavor. */
+  /** Generative farm zones from farm_-_low_poly_moduler_pack atlas. */
+  private scatterFarmFields() {
+    this.farmField?.dispose();
+    this.farmField = null;
+    void import("./farmModular").then(({ scatterFarmModular }) => {
+      if (this.disposed) return;
+      const farmZones =
+        this.worldManifest?.zones.filter((z) => z.kind === "farm" || z.kind === "cropland") ?? [];
+      this.farmField = scatterFarmModular(this.loader, this.scene, {
+        halfExtent: this.DUNGEON,
+        seed: this.mapSeed ^ 0x4641524d, // "FARM"
+        clusterCount: 4 + Math.min(3, this.islandRound) + farmZones.length,
+        partsPerCluster: 8,
+        unitScale: 0.4,
+        zoneCenters: farmZones.map((z) => ({ x: z.x, z: z.z, r: z.radius })),
+        avoid: [
+          { x: 0, z: 0, r: 18 },
+          { x: this.coveCenter.x, z: this.coveCenter.z, r: 22 },
+          { x: this.darkElfCampAnchor.x, z: this.darkElfCampAnchor.z, r: 20 },
+          { x: 38, z: 28, r: 16 },
+        ],
+        snapWalkable: (x, z) =>
+          this.maze?.nearestWalkable(x, z) ?? new THREE.Vector3(x, 0, z),
+      });
+    });
+  }
+
+  /**
+   * Generative island expansion — best pirate-kit props + world catalog pieces.
+   * Chests/barrels are interactable loot; docks/anchors/coins fill the wilds.
+   */
   private scatterGenerativeProps() {
     const rng = mulberry(this.mapSeed ^ 0x9e3779b9);
-    const props: Array<{ rel: string; extent: number }> = [
-      { rel: "world/Prop_Barrel.gltf", extent: 1.0 },
-      { rel: "world/Prop_Chest_Gold.gltf", extent: 1.1 },
-      { rel: "world/Prop_Anchor.gltf", extent: 1.2 },
-      { rel: "world/Prop_Coins.gltf", extent: 0.85 },
+    const props: Array<{
+      rel: string;
+      extent: number;
+      interact?: "chest" | "barrel";
+      label?: string;
+      weight?: number;
+    }> = [
+      { rel: "world/Prop_Barrel.gltf", extent: 0.9, interact: "barrel", label: "Supply Barrel", weight: 4 },
+      { rel: "world/Prop_Chest_Gold.gltf", extent: 1.0, interact: "chest", label: "Island Chest", weight: 3 },
+      { rel: "world/Prop_Anchor.gltf", extent: 1.05, weight: 2 },
+      { rel: "world/Prop_Coins.gltf", extent: 0.65, weight: 3 },
+      { rel: "world/Environment_Dock_Pole.gltf", extent: 1.4, weight: 2 },
+      { rel: "world/Ship_Small.gltf", extent: 3.2, weight: 1 },
     ];
-    for (let i = 0; i < 14; i++) {
-      const p = props[i % props.length]!;
+    // Weighted pool for variety (more loot than scenery).
+    const pool: typeof props = [];
+    for (const p of props) {
+      const w = p.weight ?? 1;
+      for (let k = 0; k < w; k++) pool.push(p);
+    }
+    const count = 28 + Math.min(14, this.islandRound * 3);
+    for (let i = 0; i < count; i++) {
+      const p = pool[Math.floor(rng() * pool.length)]!;
       const a = rng() * Math.PI * 2;
-      const r = 18 + rng() * (this.DUNGEON - 28);
+      const r = 22 + rng() * (this.DUNGEON - 36);
       let x = Math.cos(a) * r;
       let z = Math.sin(a) * r;
-      // Keep clear of cove cluster.
+      // Keep clear of cove + hub center (no giant clutter at origin).
+      if (Math.hypot(x, z) < 14) {
+        x += 18;
+        z += 10;
+      }
       if (x > 55 && Math.abs(z + 14) < 20) x -= 25;
-      this.loadCoveProp(p.rel, new THREE.Vector3(x, 0, z), p.extent * (0.85 + rng() * 0.4), rng() * Math.PI * 2);
+      // Clear dark-elf ritual yard
+      if (Math.hypot(x + 42, z + 32) < 20) {
+        x += 14;
+        z -= 10;
+      }
+      // Clear east orc war-camp
+      if (Math.hypot(x - 38, z - 28) < 16) {
+        x -= 12;
+        z += 10;
+      }
+      const pos = this.maze?.nearestWalkable(x, z) ?? new THREE.Vector3(x, 0, z);
+      this.loadCoveProp(
+        p.rel,
+        pos,
+        p.extent * (0.85 + rng() * 0.3),
+        rng() * Math.PI * 2,
+        p.interact
+          ? {
+              interact: p.interact,
+              label: p.label ?? p.interact,
+              lootGold: p.interact === "chest" ? 12 + Math.floor(rng() * 40) : 4 + Math.floor(rng() * 8),
+              lootWood: p.interact === "barrel" ? 2 + Math.floor(rng() * 4) : rng() < 0.4 ? 1 : 0,
+              lootStone: p.interact === "chest" && rng() < 0.5 ? 1 + Math.floor(rng() * 3) : 0,
+            }
+          : undefined,
+      );
     }
+
+    // Scatter a few catalogued world props (grass trenches as wild landmarks).
+    const landmarkCount = 3 + Math.min(2, this.islandRound);
+    for (let i = 0; i < landmarkCount; i++) {
+      const a = rng() * Math.PI * 2;
+      const r = 35 + rng() * (this.DUNGEON - 50);
+      let x = Math.cos(a) * r;
+      let z = Math.sin(a) * r;
+      if (Math.hypot(x, z) < 20) continue;
+      if (Math.hypot(x - this.coveCenter.x, z - this.coveCenter.z) < 24) continue;
+      const pos = this.maze?.nearestWalkable(x, z) ?? new THREE.Vector3(x, 0, z);
+      try {
+        const loaded = loadWorldProp("prop_grass_trenches", this.loader, {
+          position: pos,
+          rotationY: rng() * Math.PI * 2,
+        });
+        this.worldCollectables.push(loaded);
+        this.scene.add(loaded.holder);
+      } catch {
+        /* optional asset */
+      }
+    }
+  }
+
+  /** Generative modular outposts from orc_camp_set atlas parts (best static meshes). */
+  private modularField: { dispose: () => void } | null = null;
+  private scatterModularOutposts() {
+    this.modularField?.dispose();
+    this.modularField = null;
+    void import("./modularBuildings").then(({ scatterModularBuildings }) => {
+      if (this.disposed) return;
+      const campUrl = `${import.meta.env.BASE_URL}models/buildings/orc_camp_set.glb`;
+      this.modularField = scatterModularBuildings(this.loader, this.scene, campUrl, {
+        halfExtent: this.DUNGEON,
+        seed: this.mapSeed ^ 0x4d4f4455, // "MODU"
+        // Expand with island round — more outposts deeper into the run
+        clusterCount: 6 + Math.min(4, this.islandRound),
+        partsPerCluster: 7,
+        unitScale: 0.52,
+        avoid: [
+          { x: 0, z: 0, r: 18 },
+          { x: this.coveCenter.x, z: this.coveCenter.z, r: 22 },
+          { x: this.darkElfCampAnchor.x, z: this.darkElfCampAnchor.z, r: 22 },
+          { x: 38, z: 28, r: 16 },
+        ],
+        snapWalkable: (x, z) =>
+          this.maze?.nearestWalkable(x, z) ?? new THREE.Vector3(x, 0, z),
+      });
+    });
   }
 
   /** Neutral KayKit townsfolk wandering near the cove — ambient population only,
@@ -994,22 +1956,42 @@ export class GameEngine {
     }
   }
 
-  /** Load a self-contained pirate-kit prop, scaled so its longest XZ ≈ extent. */
-  private loadCoveProp(rel: string, pos: THREE.Vector3, extent: number, rotY: number) {
+  /**
+   * Load a pirate-kit prop. `extent` = target footprint (m). Hard-capped so
+   * broken bboxes never produce map-scale ships/chests in the hub.
+   */
+  private loadCoveProp(
+    rel: string,
+    pos: THREE.Vector3,
+    extent: number,
+    rotY: number,
+    interact?: {
+      interact: "chest" | "barrel" | "dock" | "traveler";
+      label: string;
+      lootGold?: number;
+      lootWood?: number;
+      lootStone?: number;
+    },
+  ) {
     const url = `${import.meta.env.BASE_URL}models/pirates/${rel}`;
+    const safeExtent = Math.min(14, Math.max(0.4, extent));
     loadGLTFCached(this.loader, url).then(
       (gltf) => {
-        // Teardown-race guard: if the engine was disposed mid-load, release the
-        // streamed scene instead of attaching it to a dead engine.
         if (this.disposed) {
           return;
         }
-        // Cache holds the template — always clone before mutating.
         const root = gltf.scene.clone(true);
         const bbox = new THREE.Box3().setFromObject(root);
         const size = this._tmpV3a;
         bbox.getSize(size);
-        root.scale.setScalar(extent / (Math.max(size.x, size.z) || 1));
+        const foot = Math.max(size.x, size.z, 0.05);
+        let s = safeExtent / foot;
+        // Height safety: nothing taller than ~8m unless it's a ship
+        const isShip = /ship/i.test(rel);
+        const maxH = isShip ? 10 : 3.5;
+        if (size.y * s > maxH) s = maxH / Math.max(size.y, 0.05);
+        s = Math.min(8, Math.max(0.05, s));
+        root.scale.setScalar(s);
         const b2 = new THREE.Box3().setFromObject(root);
         const ctr = this._tmpV3b;
         b2.getCenter(ctr);
@@ -1023,8 +2005,21 @@ export class GameEngine {
         });
         const holder = new THREE.Group();
         holder.position.copy(pos);
+        // Never stack giant props on world origin by accident
+        if (Math.hypot(pos.x, pos.z) < 0.5 && !interact) {
+          holder.position.set(6, 0, 6);
+        }
         holder.rotation.y = rotY;
         holder.add(root);
+        if (interact) {
+          holder.userData.interact = interact.interact;
+          holder.userData.interactLabel = interact.label;
+          holder.userData.lootGold = interact.lootGold ?? 0;
+          holder.userData.lootWood = interact.lootWood ?? 0;
+          holder.userData.lootStone = interact.lootStone ?? 0;
+          holder.userData.looted = false;
+          holder.userData.interactRadius = interact.interact === "dock" ? 4.5 : 2.6;
+        }
         this.scene.add(holder);
         this.coveProps.push(holder);
       },
@@ -1114,14 +2109,14 @@ export class GameEngine {
       this.loadRacalvinModel();
       return;
     }
-    // Annihilate / Warlords g6_{race}_{class} — Toon-RTS multi-mesh race path
+    // Annihilate / Warlords g6_{race}_{class} — CDN Toon-RTS + baked anim packs
     const g6 = this.initStats.skinId?.match(
       /^g6_(human|barbarian|elf|dwarf|orc|undead)_(warrior|mage|ranger|worge)$/,
     );
     if (g6) {
       this.initStats.charRace = g6[1];
       this.initStats.charClass = g6[2];
-      this.loadRaceModel();
+      this.loadGrudge6Player(this.initStats.skinId!);
       return;
     }
     const skin = getSkin(this.initStats.skinId);
@@ -1129,14 +2124,62 @@ export class GameEngine {
     else this.loadRaceModel();
   }
 
-  /** Racalvin (Corsair King) — bespoke base model + library clips + sword. */
+  /** Playable Grudge6 / Warlords 24 — correct scale, wardrobe, baked Bip001 clips. */
+  private loadGrudge6Player(heroId: string) {
+    void import("./grudge6/loadGrudge6Hero").then(({ loadGrudge6PlayableHero }) => {
+      void loadGrudge6PlayableHero(heroId, this.loader).then((res) => {
+        if (!res || this.disposed) {
+          if (res) res.animator.dispose();
+          this.loadRaceModel();
+          return;
+        }
+        this.finalizePlayer(res.wrapper, res.animator);
+      }).catch(() => this.loadRaceModel());
+    });
+  }
+
+  /** Racalvin (Corsair King) — dual Brothers' Keeper mind-swords + clips. */
   private loadRacalvinModel() {
     loadRacalvinForDungeon(
       this.loader,
       1.9,
-      (wrapper, animator) => this.finalizePlayer(wrapper, animator),
+      (wrapper, animator) => {
+        this.finalizePlayer(wrapper, animator);
+        // Mind-sword hit pulse → soft AoE when blades strike
+        const model = wrapper.children[0] ?? wrapper;
+        const rig = getRacalvinWeapons(model);
+        rig?.setStrikeHitHandler((worldPos) => {
+          this.particles?.impact(worldPos.clone().setY(1.1), RACALVIN_PSYCHIC_COLOR, 1.4);
+          this.auras?.pulse("arcane", worldPos.clone(), 2.2, 0.35);
+          // Damage nearby foes on psychic blade impact
+          for (const en of this.enemies) {
+            if (en.state === "dead" || en.state === "death") continue;
+            if (en.position.distanceTo(worldPos) < 3.2) {
+              this.damageEnemy(en, this.playerBaseDamage * 0.85, Math.random() < this.playerCritChance + 0.1);
+            }
+          }
+        });
+      },
       () => this.loadRaceModel(),
     );
+  }
+
+  /** Launch Brothers' Keeper dual blades toward current aim / nearest foe. */
+  private launchRacalvinSwords() {
+    if (!this.playerGroup) return;
+    const model = this.playerGroup.children[0] ?? this.playerGroup;
+    if (!getRacalvinWeapons(model)) return;
+    const en = this.targetEnemy && this.targetEnemy.state !== "dead" && this.targetEnemy.state !== "death"
+      ? this.targetEnemy
+      : this.nearestEnemy(12);
+    const target = en
+      ? en.position.clone().setY(1.15)
+      : this.playerPos
+          .clone()
+          .add(
+            new THREE.Vector3(Math.sin(this.playerFacing) * 5, 1.15, Math.cos(this.playerFacing) * 5),
+          );
+    launchRacalvinMindStrike(model, target, this.playerFacing);
   }
 
   /** One Piece champion skin — fully rigged GLB, plays its own labelled clips. */
@@ -1304,16 +2347,21 @@ export class GameEngine {
       this.enemyBrains.set(h.id, h.brain);
     }
 
-    // CDN monster pack (D1 / assets.grudge-studio.com) — streams at runtime.
+    // CDN Quaternius pack (assets.grudge-studio.com) — real stems + multi-clip banks.
     const cdnRng = mulberry(this.mapSeed ^ 0xcd4);
-    const cdnPick = [...CDN_MONSTER_TEMPLATES].sort(() => cdnRng() - 0.5).slice(0, 3 + Math.min(4, this.islandRound));
+    const cdnPool = CDN_ANIMATED_TEMPLATES.length ? CDN_ANIMATED_TEMPLATES : CDN_MONSTER_TEMPLATES;
+    const cdnCount = 6 + Math.min(8, this.islandRound * 2);
+    const cdnPick = [...cdnPool].sort(() => cdnRng() - 0.5).slice(0, cdnCount);
     for (const m of cdnPick) configs.push({ template: m, count: 1 });
 
     const rng = mulberry(this.mapSeed ^ 0x51aced);
     // Faction home anchors (match camp placements).
-    const darkCampAnchor = new THREE.Vector3(-42, 0, -32);
+    const darkCampAnchor = this.darkElfCampAnchor.clone();
     const spiderDenAnchor = new THREE.Vector3(22, 0, -48);
     const undeadAnchor = new THREE.Vector3(-18, 0, 40);
+    // Prefer curated crystal-ring spawn spots for dark elves
+    const darkSpots = this.darkElfEvent?.spawnSpots ?? [];
+    let darkSpotIdx = 0;
     for (const { template, count } of configs) {
       for (let i = 0; i < count; i++) {
         // Prefer maze corridors / rooms; fall back to open ring if maze missing.
@@ -1322,8 +2370,22 @@ export class GameEngine {
         const biasDark = id.startsWith("mon_dark_elf");
         const biasSpider = /spider|pincher|brood/i.test(id);
         const biasSkel = /skeleton|legionnaire|ummo/i.test(id);
-        if (biasDark || biasSpider || biasSkel) {
-          const anchor = biasDark ? darkCampAnchor : biasSpider ? spiderDenAnchor : undeadAnchor;
+        if (biasDark) {
+          if (darkSpots.length > 0) {
+            pos = darkSpots[darkSpotIdx % darkSpots.length]!.clone();
+            darkSpotIdx++;
+            pos.x += (rng() - 0.5) * 2.2;
+            pos.z += (rng() - 0.5) * 2.2;
+          } else {
+            pos = new THREE.Vector3(
+              darkCampAnchor.x + (rng() - 0.5) * 14,
+              0,
+              darkCampAnchor.z + (rng() - 0.5) * 14,
+            );
+          }
+          if (this.maze) pos = this.maze.nearestWalkable(pos.x, pos.z);
+        } else if (biasSpider || biasSkel) {
+          const anchor = biasSpider ? spiderDenAnchor : undeadAnchor;
           pos = new THREE.Vector3(
             anchor.x + (rng() - 0.5) * 16,
             0,
@@ -1344,34 +2406,87 @@ export class GameEngine {
         if (Math.hypot(pos.x, pos.z) < 8) {
           pos = this.maze?.nearestWalkable(pos.x + 12, pos.z + 8) ?? pos.set(14, 0, 10);
         }
-        this.createEnemy(this.scaleTemplate(template), this.snapToWalkable(pos));
+        // Density gate — sparse zones skip some trash
+        const bias = zoneSpawnBias(this.worldManifest, pos.x, pos.z);
+        if (rng() > 0.35 + bias.density * 0.65) continue;
+        const tpl = this.scaleTemplate(template);
+        if (bias.areaLevel > 4) {
+          tpl.hp = Math.round(tpl.hp * (1 + (bias.areaLevel - 3) * 0.06));
+          tpl.damage = Math.round(tpl.damage * (1 + (bias.areaLevel - 3) * 0.04));
+        }
+        this.createEnemy(tpl, this.snapToWalkable(pos));
       }
     }
-    // Extra packs on later rounds
-    const extra = Math.min(12, (this.islandRound - 1) * 2);
+    // Extra packs weighted by zone density / area level (D2 pack feel)
+    const extra = Math.min(20, (this.islandRound - 1) * 2 + 4);
     if (extra > 0 && this.enemyTemplates.length) {
       const rng2 = mulberry(this.mapSeed ^ 0xdead);
       for (let i = 0; i < extra; i++) {
         const t = this.enemyTemplates[Math.floor(rng2() * this.enemyTemplates.length)]!;
-        const pos = this.maze?.randomWalkable(rng2) ?? new THREE.Vector3(
-          (rng2() * 2 - 1) * (this.DUNGEON - 4),
-          0,
-          (rng2() * 2 - 1) * (this.DUNGEON - 4),
-        );
+        let pos: THREE.Vector3;
+        let zBias = { density: 0.5, areaLevel: 3, zone: null as WorldZone | null };
+        if (this.worldManifest && rng2() < 0.72) {
+          // Prefer denser zones
+          const pool = [...this.worldManifest.zones].sort(
+            (a, b) => b.density * b.areaLevel - a.density * a.areaLevel,
+          );
+          const z = pool[Math.floor(rng2() * Math.min(8, pool.length))]!;
+          pos = new THREE.Vector3(
+            z.x + (rng2() - 0.5) * z.radius * 1.1,
+            0,
+            z.z + (rng2() - 0.5) * z.radius * 1.1,
+          );
+          if (this.maze) pos = this.maze.nearestWalkable(pos.x, pos.z);
+          zBias = { density: z.density, areaLevel: z.areaLevel, zone: z };
+        } else {
+          pos =
+            this.maze?.randomWalkable(rng2) ??
+            new THREE.Vector3(
+              (rng2() * 2 - 1) * (this.DUNGEON - 4),
+              0,
+              (rng2() * 2 - 1) * (this.DUNGEON - 4),
+            );
+          zBias = zoneSpawnBias(this.worldManifest, pos.x, pos.z);
+        }
         if (Math.hypot(pos.x, pos.z) < 8) continue;
-        this.createEnemy(this.scaleTemplate(t), this.snapToWalkable(pos));
+        if (rng2() > 0.25 + zBias.density * 0.75) continue;
+        const tpl = this.scaleTemplate(t);
+        tpl.hp = Math.round(tpl.hp * (1 + zBias.areaLevel * 0.05));
+        tpl.damage = Math.round(tpl.damage * (1 + zBias.areaLevel * 0.03));
+        this.createEnemy(tpl, this.snapToWalkable(pos));
+      }
+    }
+    // Guaranteed zone guards on hostile / high-density areas
+    if (this.worldManifest) {
+      const rng3 = mulberry(this.mapSeed ^ 0x20e);
+      for (const z of this.worldManifest.zones) {
+        if (z.density < 0.5 && z.kind !== "ruins" && z.kind !== "dungeon_mouth") continue;
+        if (z.kind === "harbor" || z.kind === "farm" || z.kind === "cropland") continue;
+        const packs = 1 + Math.floor(z.density * 2);
+        for (let p = 0; p < packs; p++) {
+          const t =
+            this.enemyTemplates[Math.floor(rng3() * Math.max(1, this.enemyTemplates.length))] ??
+            ANIMATED_MONSTER_TEMPLATES[0];
+          if (!t) continue;
+          const ang = rng3() * Math.PI * 2;
+          const r = rng3() * z.radius * 0.7;
+          const pos =
+            this.maze?.nearestWalkable(z.x + Math.cos(ang) * r, z.z + Math.sin(ang) * r) ??
+            new THREE.Vector3(z.x, 0, z.z);
+          const tpl = this.scaleTemplate(t);
+          tpl.hp = Math.round(tpl.hp * (1 + z.areaLevel * 0.05));
+          this.createEnemy(tpl, this.snapToWalkable(pos));
+        }
       }
     }
   }
 
   /**
-   * One generative dungeon boss in a large maze room (far from hub when
-   * possible). Uses the largest monster GLB when available.
+   * Island Colossus — roster-driven boss (boss_ / mon_ / cdn_ models) with style tags.
    */
   private spawnDungeonBoss() {
     const rng = mulberry(this.mapSeed ^ 0xb055);
     let bossPos = this.maze?.randomLargeRoomCenter(rng) ?? new THREE.Vector3(-52, 0, 38);
-    // Prefer a large room away from spawn.
     if (this.maze) {
       let best = bossPos;
       let bestD = Math.hypot(best.x, best.z);
@@ -1387,26 +2502,53 @@ export class GameEngine {
     }
     this.snapToWalkable(bossPos);
     const m = this.difficultyMult();
+
+    // Prefer RunDirector bossId when it's a real model id; else seeded roster pick.
+    const def = pickDungeonBossDef(this.mapSeed, this.islandRound);
+    let modelId = this.runDirector.run.bossId || def.modelId;
+    let displayName = def.name;
+    let style: string = def.style;
+    if (
+      !modelId ||
+      !(
+        modelId.startsWith("boss_") ||
+        modelId.startsWith("mon_") ||
+        modelId.startsWith("cdn_")
+      )
+    ) {
+      modelId = def.modelId;
+      displayName = def.name;
+      style = def.style;
+    } else if (modelId === def.modelId) {
+      displayName = def.name;
+      style = def.style;
+    }
+
     const template: EnemyTemplate = {
-      id: "mon_big_scary_t3",
-      name: this.islandRound > 1 ? `R${this.islandRound} Island Colossus` : "Island Colossus",
-      type: "titan",
+      id: modelId,
+      name: this.islandRound > 1 ? `R${this.islandRound} ${displayName}` : displayName,
+      type: style,
       tier: 5,
       hp: Math.round(1400 * m * 1.1),
       damage: Math.round(38 * (1 + (this.islandRound - 1) * 0.15)),
     };
-    // Prefer animated medusa/dante if t3 fails resolution — createEnemy maps mon_*.
+    // Boss always spawns outside player camps
+    pushOutOfCamps(this.playerCamps, bossPos, 4);
     const boss = this.createEnemy(template, bossPos);
+    if (!boss) {
+      this.log("Boss spawn blocked — no walkable site clear of camps.");
+      return;
+    }
     boss.aggroRange = 14;
-    boss.attackRange = 4.2;
-    boss.speed = 1.7;
+    boss.attackRange = style === "artillery" || style === "necromancer" ? 9 : 4.2;
+    boss.speed = style === "skirmisher" || style === "duelist" ? 2.4 : style === "colossus" ? 1.4 : 1.7;
     boss.model.group.scale.multiplyScalar(1.35);
     boss.model.height *= 1.35;
     this.bossEnemyId = boss.id;
     boss.model.group.userData.isBoss = true;
+    boss.model.group.userData.bossStyle = style;
     this.bossSpecialCd.set(boss.id, 1.5);
-    this.log(`${boss.template.name} stirs in a large chamber — watch for red circles and bolts.`);
-    this.log(`${template.name} stirs in the western ruins…`);
+    this.log(`${boss.template.name} [${style}] stirs in a large chamber — red circles and bolts!`);
   }
 
   /** FNV-1a hash → deterministic per-template model pick. */
@@ -1438,18 +2580,29 @@ export class GameEngine {
     const seed = this.hashStr(template.id || template.name);
     const t = Math.max(1, Math.min(template.tier, 5));
     let pool: string[];
+    // Only ids that map to real mesh files (local mon_* or CDN stems).
     switch (archetypeFor(template.type)) {
-      case "arachnid": pool = ["mon_pincher"]; break;
-      case "quadruped": pool = ["mon_dante_beast", "mon_pincher"]; break;
-      case "dragon": pool = ["mon_dante_beast"]; break;
-      case "golem": pool = ["mon_dante_beast", "mon_medusa"]; break;
-      case "flying": pool = ["mon_sky_wraith", "cdn_ghost"]; break;
+      case "arachnid":
+        pool = ["mon_pincher", "cdn_crab"];
+        break;
+      case "quadruped":
+        pool = ["mon_dante_beast", "cdn_yeti", "cdn_dino", "cdn_wolf", "cdn_bear", "cdn_monkroose"];
+        break;
+      case "dragon":
+        pool = ["cdn_dragon", "mon_dante_beast"];
+        break;
+      case "golem":
+        pool = ["cdn_demon", "cdn_cyclops", "cdn_mushroom_king", "cdn_cthulhu", "mon_medusa"];
+        break;
+      case "flying":
+        pool = ["cdn_ghost", "cdn_ghost_skull", "cdn_armabee", "cdn_armabee_evolved", "cdn_flying_demon", "cdn_dragon", "cdn_bat", "cdn_pigeon"];
+        break;
       case "humanoid":
       default:
-        if (t <= 1) pool = ["mon_skeleton_warrior_ummo", "mon_skeleton_ummo"];
-        else if (t === 2) pool = ["mon_skeleton_ummo", "mon_cultist", "mon_dark_elf_raider"];
-        else if (t === 3) pool = ["mon_dark_elf", "mon_cultist", "mon_skeleton_ummo"];
-        else pool = ["mon_dark_elf", "mon_medusa", "mon_dark_elf_captain"];
+        if (t <= 1) pool = ["mon_skeleton_warrior_ummo", "mon_skeleton_ummo", "cdn_bunny", "cdn_chicken"];
+        else if (t === 2) pool = ["mon_skeleton_ummo", "mon_cultist", "cdn_orc", "cdn_ninja", "mon_dark_elf_raider"];
+        else if (t === 3) pool = ["mon_dark_elf", "mon_cultist", "cdn_orc_skull", "cdn_alien", "cdn_ninja"];
+        else pool = ["mon_dark_elf", "mon_medusa", "cdn_demon", "mon_dark_elf_captain", "cdn_cyclops"];
         break;
     }
     const chosen = pool[seed % pool.length] ?? UMMO_BY_TIER[t - 1] ?? "mon_skeleton_ummo";
@@ -1479,7 +2632,13 @@ export class GameEngine {
     }
   }
 
-  private createEnemy(template: EnemyTemplate, pos: THREE.Vector3): EnemyInstance {
+  private createEnemy(template: EnemyTemplate, pos: THREE.Vector3): EnemyInstance | null {
+    // Never spawn inside player-built camps
+    if (isInsidePlayerCamp(this.playerCamps, pos.x, pos.z, 0.5)) {
+      if (!pushOutOfCamps(this.playerCamps, pos, 2.5)) return null;
+      // Still inside after push? skip
+      if (isInsidePlayerCamp(this.playerCamps, pos.x, pos.z, 0.2)) return null;
+    }
     const id = `e${this.enemyIdCounter++}`;
     this.snapToWalkable(pos);
     const retag = (m: EnemyModel) => {
@@ -1538,6 +2697,9 @@ export class GameEngine {
       aggroRange,
       attackRange,
       speed,
+      path: [],
+      pathRepathAt: 0,
+      idleUntil: performance.now() / 1000 + Math.random() * 2,
     };
 
     // Make every mesh under the enemy carry the enemyId for raycast hits
@@ -1597,10 +2759,22 @@ export class GameEngine {
       }
       if (e.code === "KeyC") {
         e.preventDefault();
-        this.tryPlantClaimFlag();
+        this.beginCampPlacement();
+      }
+      if (e.code === "KeyV") {
+        e.preventDefault();
+        this.tryDeployAllies();
+      }
+      if (e.code === "KeyB") {
+        e.preventDefault();
+        this.tryToggleEmbark();
+      }
+      if (e.code === "KeyT") {
+        e.preventDefault();
+        this.onOpenTraveler?.();
       }
       if (e.code === "Escape") {
-        this.cancelSkillTargeting();
+        this.cancelPlacement();
       }
       const n = Number(e.key);
       if (n >= 1 && n <= 5) {
@@ -1732,12 +2906,19 @@ export class GameEngine {
     );
     this.raycaster.setFromCamera(mouse, this.camera);
 
-    // Ground pick (used for AoE placement and move).
+    // Ground pick (used for AoE / deployable / camp placement and move).
     const pt = this.dungeonMap?.ready
       ? this.dungeonMap.floorPickFromRay(this.raycaster.ray)
       : (this.raycaster.intersectObject(this.floorPlane)[0]?.point ?? null);
 
-    // Skill targeting: first number key selects, this LMB places & casts.
+    // Placement mode: LMB confirms ghost place (skill AoE, deployable, camp).
+    if (this.placeMode && pt) {
+      this.clampToArena(pt);
+      const world = this.clampPlacementPoint(new THREE.Vector3(pt.x, 0, pt.z));
+      this.confirmPlacement(world);
+      return;
+    }
+    // Legacy skill index (kept in sync with placeMode)
     if (this.pendingSkillIdx >= 0 && pt) {
       this.clampToArena(pt);
       this.castPendingSkillAt(new THREE.Vector3(pt.x, 0, pt.z));
@@ -1782,69 +2963,69 @@ export class GameEngine {
   }
 
   /**
-   * Shift — 4m dodge with cooldown + i-frames.
+   * Shift — controlled-distance dodge with cooldown + i-frames.
    *
-   * Direction priority (all work together):
-   *  1. A / ← — strafe left of current facing
-   *  2. D / → — strafe right of current facing
-   *  3. else mouse ground point (cursor) when available
-   *  4. else forward along facing
+   * Direction:
+   *  1. WASD / arrows held → dash along that iso move vector
+   *  2. Shift alone → away from nearest living enemy / wisp threat
+   *  3. else pointer ground aim, then facing forward
    *
-   * W/S do not steer the dash (move keys stay for locomotion only).
+   * Distance is engine-owned (see dodgeMath) so skins without root-motion
+   * dodge clips still clear telegraphs. Root motion is ignored while i-frames
+   * are active so clips cannot double-travel the dash.
    */
   doDodge() {
     const now = performance.now();
     if (now < this.dodgeCdUntil) return;
     if (this.playerHp <= 0) return;
-    if (!this.combatFsm.dodge(0.38)) return;
+    if (!this.combatFsm.dodge(DODGE_IFRAME_S)) return;
 
-    const dir = this._tmpV3a;
-    const faceSin = Math.sin(this.playerFacing);
-    const faceCos = Math.cos(this.playerFacing);
-    const holdA = this.keys.has("KeyA") || this.keys.has("ArrowLeft");
-    const holdD = this.keys.has("KeyD") || this.keys.has("ArrowRight");
-
-    if (holdA && !holdD) {
-      // Left of facing (old strafe-dodge)
-      dir.set(-faceCos, 0, faceSin);
-    } else if (holdD && !holdA) {
-      // Right of facing
-      dir.set(faceCos, 0, -faceSin);
-    } else if (this.pointerGround) {
-      // Cursor aim (default when not strafing)
-      dir.set(
-        this.pointerGround.x - this.playerPos.x,
-        0,
-        this.pointerGround.z - this.playerPos.z,
-      );
-      if (dir.lengthSq() < 1e-6) dir.set(faceSin, 0, faceCos);
-    } else {
-      dir.set(faceSin, 0, faceCos);
+    const threats: { x: number; z: number }[] = [];
+    for (const en of this.enemies) {
+      if (en.state === "dead" || en.state === "death") continue;
+      threats.push({ x: en.position.x, z: en.position.z });
     }
-    dir.normalize();
+    if (this.wispEvents) {
+      for (const w of this.wispEvents.wisps ?? []) {
+        if (!w.alive) continue;
+        threats.push({ x: w.position.x, z: w.position.z });
+      }
+    }
 
-    // Face the dash direction so the body matches the roll.
-    this.playerFacing = Math.atan2(dir.x, dir.z);
-    this.playerPos.x += dir.x * this.DODGE_DISTANCE;
-    this.playerPos.z += dir.z * this.DODGE_DISTANCE;
-    // Carry velocity into the dodge direction so the camera keeps leading.
-    this.playerVel.set(dir.x * this.playerSpeed * 1.35, 0, dir.z * this.playerSpeed * 1.35);
-    this.clampToArena(this.playerPos);
+    const dash = resolveDodge({
+      keys: this.keys,
+      facingYaw: this.playerFacing,
+      playerX: this.playerPos.x,
+      playerZ: this.playerPos.z,
+      threats,
+      aimX: this.pointerGround?.x ?? null,
+      aimZ: this.pointerGround?.z ?? null,
+      threatRange: 24,
+    });
+
+    // Face the dash so body + directional clips match travel.
+    this.playerFacing = Math.atan2(dash.dirX, dash.dirZ);
+    // Sub-stepped collide so a 5m roll cannot tunnel a wall cell.
+    this.movePlayerHorizontal(dash.dirX * dash.distance, dash.dirZ * dash.distance);
     this.resolvePlayer();
 
-    this.playerAnimator?.triggerRole("dodge");
-    this.playerAnimator?.triggerNamed(["dodge", "roll"]);
+    // Prefer directional clip names; role dodge as fallback. Never attack.
+    const clips = dodgeClipCandidates(dash.relative);
+    if (!this.playerAnimator?.triggerNamed(clips, { rootMotion: false, allowAttackFallback: false })) {
+      this.playerAnimator?.triggerRole("dodge", { rootMotion: false });
+    }
+
     this.playerTarget = null;
     this.attackHeld = false;
     this.targetEnemy = null;
     if (this.indicatorRing) this.indicatorRing.visible = false;
 
-    this.dodgeIframeUntil = now + 380;
-    this.dodgeCdUntil = now + this.DODGE_COOLDOWN * 1000;
-    this.particles?.impact(this.playerPos.clone().setY(0.35), 0xc5e8ff, 0.7);
+    this.dodgeIframeUntil = now + DODGE_IFRAME_S * 1000;
+    this.dodgeCdUntil = now + DODGE_COOLDOWN_S * 1000;
+    this.particles?.impact(this.playerPos.clone().setY(0.35), 0xc5e8ff, 0.55);
     this.particles?.impact(this.playerPos.clone().setY(0.15), 0x8a9aaa, 0.45);
-    kickCameraShake(this.isoCam, 0.12);
-    this.bloom?.kick(0.15);
+    try { kickCameraShake(this.isoCam, 0.12); } catch { /* optional */ }
+    try { this.bloom?.kick?.(0.15); } catch { /* optional */ }
     this.notifyState(true);
   }
 
@@ -1852,11 +3033,11 @@ export class GameEngine {
     return this.combatFsm.invulnerable || performance.now() < this.dodgeIframeUntil;
   }
 
-  /** 1-5: select skill. Ground-AoE skills wait for LMB; others cast immediately. */
+  /** 1-5: select skill. Ground-AoE / deployable wait for LMB + ghost; others cast now. */
   selectSkill(idx: number) {
     const skill = this.fighterKit.skills[idx];
     if (!skill) {
-      // Fall back to legacy class skill path.
+      // Fall back to legacy class skill path (also uses place mode for deployables).
       this.useSkill(idx);
       return;
     }
@@ -1869,28 +3050,283 @@ export class GameEngine {
       this.log("Not enough mana.");
       return;
     }
+
+    // Infer deployable from explicit targeting, shape, or archetype tags.
+    const arch = archetypeForSkill(
+      {
+        id: skill.id,
+        name: skill.name,
+        type: skill.element === "physical" ? "physical" : "magical",
+        manaCost: skill.manaCost,
+        cooldown: skill.cooldown,
+        effects: [skill.description, skill.id, skill.name],
+      } as import("../data/classSkills").ClassSkill,
+      idx,
+    );
+    const isDeploy =
+      skill.targeting === "deployable" ||
+      skill.shape === "deployable" ||
+      !!skill.deployable ||
+      arch.shape === "deployable";
+
+    if (isDeploy) {
+      const dep = (skill.deployable ?? arch.deployable ?? "fire_totem") as DeployableKind;
+      const color = skill.color ?? arch.color;
+      const radius = (skill.aoeRadius ?? arch.radius ?? 4) * this.perkMods().aoeRadiusMult;
+      const maxRange = skill.placeRange ?? arch.range ?? 6;
+      this.beginDeployablePlacement({
+        skillIdx: idx,
+        legacyHud: false,
+        deployKind: dep,
+        maxRange,
+        radius,
+        color,
+        damage: this.playerBaseDamage * skill.damageMult * arch.damageMult,
+        manaCost: skill.manaCost,
+        cooldown: skill.cooldown,
+      });
+      this.log(`${skill.name} — ghost ready. LMB to deploy (Esc cancel).`);
+      return;
+    }
+
     if (skill.targeting === "ground_aoe") {
-      this.pendingSkillIdx = idx;
-      if (this.skillCursor && this.skillCursorMat) {
-        this.skillCursor.visible = true;
-        const r = (skill.aoeRadius ?? 4) * this.perkMods().aoeRadiusMult;
-        this.skillCursor.scale.setScalar(r);
-        this.skillCursorMat.color.setHex(skill.color ?? elementColor(skill.element));
-      }
+      const r = (skill.aoeRadius ?? 4) * this.perkMods().aoeRadiusMult;
+      const color = skill.color ?? elementColor(skill.element);
+      this.beginSkillAoePlacement(idx, r, color, skill.placeRange ?? 9);
       this.log(`${skill.name} ready — LMB to place AoE (Esc cancel).`);
-      this.notifyState();
       return;
     }
     this.castFighterSkill(idx, null);
   }
 
+  /** Esc / cancel — clear ghost placement. */
   cancelSkillTargeting() {
+    this.cancelPlacement();
+  }
+
+  cancelPlacement() {
     this.pendingSkillIdx = -1;
+    this.placeMode = null;
     if (this.skillCursor) this.skillCursor.visible = false;
+    this.clearPlaceGhost();
     this.notifyState();
   }
 
+  private clearPlaceGhost() {
+    if (!this.placeGhost) return;
+    this.scene.remove(this.placeGhost);
+    this.placeGhost.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.geometry?.dispose();
+      const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
+      for (const mat of mats) mat.dispose();
+    });
+    this.placeGhost = null;
+  }
+
+  private setPlaceGhost(group: THREE.Group) {
+    this.clearPlaceGhost();
+    this.placeGhost = group;
+    this.scene.add(group);
+    const p = this.pointerGround ?? this.playerPos;
+    group.position.set(p.x, 0, p.z);
+  }
+
+  private beginSkillAoePlacement(idx: number, radius: number, color: number, maxRange: number) {
+    this.cancelPlacement();
+    this.pendingSkillIdx = idx;
+    this.placeMode = { kind: "skill_aoe", skillIdx: idx, maxRange, radius, color };
+    if (this.skillCursor && this.skillCursorMat) {
+      this.skillCursor.visible = true;
+      this.skillCursor.scale.setScalar(radius);
+      this.skillCursorMat.color.setHex(color);
+    }
+    this.notifyState();
+  }
+
+  private beginDeployablePlacement(opts: {
+    skillIdx: number;
+    legacyHud: boolean;
+    deployKind: DeployableKind;
+    maxRange: number;
+    radius: number;
+    color: number;
+    damage: number;
+    manaCost: number;
+    cooldown: number;
+  }) {
+    this.cancelPlacement();
+    this.pendingSkillIdx = opts.skillIdx;
+    this.placeMode = {
+      kind: "deployable",
+      skillIdx: opts.skillIdx,
+      legacyHud: opts.legacyHud,
+      deployKind: opts.deployKind,
+      maxRange: opts.maxRange,
+      radius: opts.radius,
+      color: opts.color,
+      damage: opts.damage,
+      manaCost: opts.manaCost,
+      cooldown: opts.cooldown,
+    };
+    // Ring + 3D ghost
+    if (this.skillCursor && this.skillCursorMat) {
+      this.skillCursor.visible = true;
+      this.skillCursor.scale.setScalar(Math.max(1.2, opts.radius * 0.45));
+      this.skillCursorMat.color.setHex(opts.color);
+    }
+    this.setPlaceGhost(createDeployableGhost(opts.deployKind, opts.color, opts.radius));
+    this.notifyState();
+  }
+
+  /** Clamp place point to maxRange from player and arena. */
+  private clampPlacementPoint(world: THREE.Vector3): THREE.Vector3 {
+    const mode = this.placeMode;
+    const maxR = mode && "maxRange" in mode ? mode.maxRange : 12;
+    const to = world.clone().sub(this.playerPos);
+    to.y = 0;
+    if (to.length() > maxR) to.setLength(maxR);
+    const out = this.playerPos.clone().add(to);
+    out.y = 0;
+    this.clampToArena(out);
+    // Camps snap to claim pads when close
+    if (mode?.kind === "camp" && mode.padId) {
+      const d = Math.hypot(out.x - mode.padX, out.z - mode.padZ);
+      if (d < 14) {
+        out.set(mode.padX, 0, mode.padZ);
+      }
+    }
+    // Avoid placing combat deployables deep inside enemy-only camps? allow player camps
+    return out;
+  }
+
+  private updatePlaceGhostFollow() {
+    if (!this.placeMode) return;
+    const raw = this.pointerGround
+      ? this.pointerGround.clone()
+      : this.playerPos.clone().add(
+          new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing)).multiplyScalar(4),
+        );
+    const p = this.clampPlacementPoint(raw);
+    if (this.placeGhost) {
+      this.placeGhost.position.set(p.x, 0, p.z);
+      // Soft pulse
+      const t = performance.now() / 1000;
+      this.placeGhost.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh) return;
+        const mat = m.material as THREE.MeshStandardMaterial;
+        if (mat?.opacity != null) {
+          mat.opacity = 0.35 + 0.15 * Math.sin(t * 4);
+        }
+      });
+      // Valid/invalid tint for camp (inside pad / resources already checked on enter)
+      if (this.placeMode.kind === "camp") {
+        const ok = this.isCampPlaceValid(p);
+        this.placeGhost.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (!m.isMesh) return;
+          const mat = m.material as THREE.MeshStandardMaterial;
+          if (mat?.emissive) mat.emissive.setHex(ok ? 0x44aa66 : 0xaa3333);
+        });
+      }
+    }
+    if (this.skillCursor && this.placeMode.kind !== "camp") {
+      this.skillCursor.visible = true;
+      this.skillCursor.position.set(p.x, 0.12, p.z);
+    }
+  }
+
+  private isCampPlaceValid(p: THREE.Vector3): boolean {
+    if (isInsidePlayerCamp(this.playerCamps, p.x, p.z)) return false;
+    if (this.placeMode?.kind === "camp" && this.placeMode.padId) {
+      return Math.hypot(p.x - this.placeMode.padX, p.z - this.placeMode.padZ) < 14;
+    }
+    // Free place allowed if near a claimable zone or any open ground within range
+    const pad =
+      this.worldManifest &&
+      nearestClaimableZone(this.worldManifest, p.x, p.z, 12);
+    if (pad && pad.owner !== "none" && pad.owner !== "wild") return false;
+    return true;
+  }
+
+  private confirmPlacement(world: THREE.Vector3) {
+    const mode = this.placeMode;
+    if (!mode) return;
+    const p = this.clampPlacementPoint(world);
+
+    if (mode.kind === "skill_aoe") {
+      const idx = mode.skillIdx;
+      this.cancelPlacement();
+      this.castFighterSkill(idx, p);
+      return;
+    }
+
+    if (mode.kind === "deployable") {
+      const m = mode;
+      // Re-check mana/cd at confirm
+      if (m.skillIdx >= 0 && !m.legacyHud) {
+        const skill = this.fighterKit.skills[m.skillIdx];
+        if (skill) {
+          if (this.playerMana < skill.manaCost) {
+            this.log("Not enough mana.");
+            this.cancelPlacement();
+            return;
+          }
+          if (performance.now() < (this.skillCdUntil[m.skillIdx] ?? 0)) {
+            this.log("Skill on cooldown.");
+            this.cancelPlacement();
+            return;
+          }
+          this.playerMana -= skill.manaCost;
+          this.skillCdUntil[m.skillIdx] = performance.now() + skill.cooldown * 1000;
+          this.playerAnimator?.triggerNamed(skill.anim);
+        }
+      } else if (m.legacyHud) {
+        if (!this.combatFsm.skill(0.55)) {
+          this.cancelPlacement();
+          return;
+        }
+        this.playerAttackCooldown = this.playerMaxAttackCooldown;
+        this.playerAnimator?.triggerNamed(
+          skillAnimCandidates(m.skillIdx, true),
+        );
+      }
+      const ok = this.deployables.deploy(
+        m.deployKind,
+        p,
+        m.color,
+        m.damage,
+        m.radius,
+      );
+      if (ok) {
+        this.particles?.castSkillVfx({
+          element: "fire",
+          shape: "deployable",
+          center: p.clone(),
+          origin: this.playerPos.clone(),
+          dir: this.resolveAimDir(),
+          reach: m.radius,
+        });
+        this.log(`Deployed ${m.deployKind.replace("_", " ")}.`);
+      }
+      this.cancelPlacement();
+      this.notifyState();
+      return;
+    }
+
+    if (mode.kind === "camp") {
+      this.confirmCampBuild(p);
+      return;
+    }
+  }
+
   private castPendingSkillAt(world: THREE.Vector3) {
+    if (this.placeMode) {
+      this.confirmPlacement(world);
+      return;
+    }
     const idx = this.pendingSkillIdx;
     if (idx < 0) return;
     this.pendingSkillIdx = -1;
@@ -1900,6 +3336,7 @@ export class GameEngine {
 
   /** R — character special attack (skill_a / skill_b wave). */
   useSpecial() {
+    if (this.initStats?.skinId === RACALVIN_ID) this.launchRacalvinSwords();
     const now = performance.now();
     if (now < this.specialCdUntil) {
       this.log("Special on cooldown.");
@@ -2014,6 +3451,7 @@ export class GameEngine {
         for (const en of targetsInShape(q, this.enemies, (e) => e.state !== "dead" && e.state !== "death")) {
           this.damageEnemy(en, dmg, false, skillId);
         }
+        this.damageEventPropsInRadius(this.playerPos, (skill.aoeRadius ?? 4) * aoeMul, dmg);
       }
       this.auras?.pulse(skill.element, this.playerPos.clone(), 2.2 * aoeMul, 0.45);
       this.notifyState();
@@ -2029,6 +3467,56 @@ export class GameEngine {
       });
       this.auras?.pulse(skill.element, this.playerPos.clone(), 1.8, 0.35);
       this.log(`${skill.name}!`);
+      this.notifyState();
+      return;
+    }
+
+    // Deployable skills (totem / turret / trap) — place must come from LMB ghost.
+    if (
+      skill.targeting === "deployable" ||
+      skill.shape === "deployable" ||
+      skill.deployable
+    ) {
+      if (!place) {
+        // Re-enter ghost mode if cast without a point
+        const arch = archetypeForSkill(
+          {
+            id: skill.id,
+            name: skill.name,
+            type: skill.element === "physical" ? "physical" : "magical",
+            manaCost: skill.manaCost,
+            cooldown: skill.cooldown,
+            effects: [skill.description],
+          } as import("../data/classSkills").ClassSkill,
+          idx,
+        );
+        // Refund mana/cd since we didn't actually cast
+        this.playerMana = Math.min(this.playerMaxMana, this.playerMana + skill.manaCost);
+        this.skillCdUntil[idx] = 0;
+        this.beginDeployablePlacement({
+          skillIdx: idx,
+          legacyHud: false,
+          deployKind: (skill.deployable ?? arch.deployable ?? "fire_totem") as DeployableKind,
+          maxRange: skill.placeRange ?? arch.range ?? 6,
+          radius: (skill.aoeRadius ?? arch.radius ?? 4) * aoeMul,
+          color,
+          damage: dmg,
+          manaCost: skill.manaCost,
+          cooldown: skill.cooldown,
+        });
+        return;
+      }
+      const dep = (skill.deployable ?? "fire_totem") as DeployableKind;
+      this.deployables.deploy(dep, place, color, dmg, (skill.aoeRadius ?? 4) * aoeMul);
+      this.particles?.castSkillVfx({
+        element: skill.element,
+        shape: "deployable",
+        center: place.clone(),
+        origin: this.playerPos.clone(),
+        dir,
+        reach: skill.aoeRadius ?? 4,
+      });
+      this.log(`${skill.name} deployed.`);
       this.notifyState();
       return;
     }
@@ -2065,6 +3553,7 @@ export class GameEngine {
         const isCrit = Math.random() < this.playerCritChance + mods.critBonus + skillBoost.critBonus + 0.05;
         this.damageEnemy(en, dmg * (isCrit ? 1.75 : 1), isCrit, skillId);
       }
+      this.damageEventPropsInRadius(center, radius, dmg);
       this.log(`${skill.name} detonates!`);
       this.notifyState();
       return;
@@ -2113,6 +3602,11 @@ export class GameEngine {
       const isCrit = Math.random() < this.playerCritChance + mods.critBonus + skillBoost.critBonus + 0.05;
       this.damageEnemy(en, dmg * (isCrit ? 1.75 : 1), isCrit, skillId);
     }
+    this.damageEventPropsInRadius(
+      this.playerPos,
+      Math.max(q.radius ?? 4, (q.length ?? 0) * 0.45),
+      dmg,
+    );
     this.auras?.pulse(skill.element, this.playerPos.clone(), 1.6 * aoeMul, 0.35);
     this.log(`${skill.name}!`);
     this.notifyState();
@@ -2123,21 +3617,46 @@ export class GameEngine {
     dir: THREE.Vector3,
     damage: number,
     color: number,
-    _element: string,
+    element: string,
   ) {
-    this.projectileField?.spawn({
-      origin: this.playerPos.clone(),
-      dir,
-      damage,
-      speed: 22,
-      color,
-      radius: 1.1,
-      homing: 0,
-      life: 1.1,
-      y: 1.2,
-      label: "Skill Bolt",
-      team: "player",
-    });
+    const origin = this.playerPos.clone();
+    origin.y = 1.2;
+    const target = this.playerPos.clone().add(dir.clone().setY(0).normalize().multiplyScalar(18));
+    target.y = 1.0;
+    // Arcane / magic: spline (ballistic) bolts; physical: linear
+    if (/arcane|magic|ice|frost|void|psychic|fire/i.test(element)) {
+      const mid = origin.clone().lerp(target, 0.45);
+      mid.y += 3.2 + Math.random() * 1.5;
+      mid.x += (Math.random() - 0.5) * 2;
+      mid.z += (Math.random() - 0.5) * 2;
+      this.projectileField?.spawnSpline({
+        origin,
+        control: mid,
+        target,
+        damage,
+        speed: 18,
+        color,
+        radius: 0.85,
+        life: 1.4,
+        label: "Skill Arc",
+        team: "player",
+        seekAccel: 3.2,
+      });
+    } else {
+      this.projectileField?.spawn({
+        origin: this.playerPos.clone(),
+        dir,
+        damage,
+        speed: 22,
+        color,
+        radius: 1.1,
+        homing: 0,
+        life: 1.1,
+        y: 1.2,
+        label: "Skill Bolt",
+        team: "player",
+      });
+    }
   }
 
   /**
@@ -2245,24 +3764,47 @@ export class GameEngine {
   }
 
   private fireEnemyProjectile(en: EnemyInstance, dmg: number, magic: boolean) {
-    const dir = this._tmpV3a.set(
-      this.playerPos.x - en.position.x,
-      0,
-      this.playerPos.z - en.position.z,
-    );
-    if (dir.lengthSq() < 1e-4) dir.set(0, 0, 1);
-    dir.normalize();
-    this.projectileField?.spawn({
-      origin: en.position.clone(),
-      dir,
-      damage: dmg,
-      speed: magic ? 10 : 14,
-      color: magic ? 0x8866ff : 0xff6633,
-      radius: 0.9,
-      homing: magic ? 0.15 : 0,
-      y: 1.15,
-      label: en.template.name,
-    });
+    const origin = en.position.clone();
+    origin.y = Math.max(1.2, en.model.height * 0.45);
+    const target = this.playerPos.clone();
+    target.y = 1.0;
+    if (magic) {
+      const mid = origin.clone().lerp(target, 0.4);
+      mid.y += 2.8;
+      mid.x += (Math.random() - 0.5) * 3;
+      mid.z += (Math.random() - 0.5) * 3;
+      this.projectileField?.spawnSpline({
+        origin,
+        control: mid,
+        target,
+        damage: dmg,
+        speed: 11,
+        color: 0x8866ff,
+        radius: 0.7,
+        label: en.template.name,
+        team: "enemy",
+        seekAccel: 4.5,
+      });
+    } else {
+      const dir = this._tmpV3a.set(
+        this.playerPos.x - en.position.x,
+        0,
+        this.playerPos.z - en.position.z,
+      );
+      if (dir.lengthSq() < 1e-4) dir.set(0, 0, 1);
+      dir.normalize();
+      this.projectileField?.spawn({
+        origin: en.position.clone(),
+        dir,
+        damage: dmg,
+        speed: 14,
+        color: 0xff6633,
+        radius: 0.9,
+        homing: 0,
+        y: 1.15,
+        label: en.template.name,
+      });
+    }
   }
 
   attackNearest() {
@@ -2285,7 +3827,45 @@ export class GameEngine {
           this.playerAnimator?.triggerAttack();
           const dmg = Math.max(1, Math.floor(this.playerBaseDamage * (0.9 + Math.random() * 0.3)));
           const killed = damageWisp(w, dmg);
-          this.log(killed ? `${w.palette.name} extinguished!` : `Hit ${w.palette.name} for ${dmg}`);
+          this.particles?.impact(w.position.clone().setY(1.4), w.palette.color, 0.45);
+          this.log(killed ? `${w.palette.name} extinguished!` : `Hit ${w.palette.name} for ${dmg} (${w.hp}/${w.maxHp})`);
+          this.notifyState();
+          return;
+        }
+      }
+    }
+    // Dark-elf event structures (crystal / pylons / barriers)
+    if (this.darkElfEvent?.isActive()) {
+      const s = this.darkElfEvent.nearestStructure(this.playerPos, 4.2);
+      if (s) {
+        const sd = Math.hypot(s.position.x - this.playerPos.x, s.position.z - this.playerPos.z);
+        if (!nearest || sd <= nearestDist) {
+          this.playerAttackCooldown = this.playerMaxAttackCooldown;
+          this.playerFacing = Math.atan2(s.position.x - this.playerPos.x, s.position.z - this.playerPos.z);
+          this.playerAnimator?.triggerAttack();
+          const dmg = Math.max(1, Math.floor(this.playerBaseDamage * (0.95 + Math.random() * 0.25)));
+          const killed = this.darkElfEvent.damageStructure(s, dmg);
+          this.particles?.impact(s.position.clone().setY(1.2), 0xaa55ff, 0.5);
+          if (killed) {
+            this.log(
+              s.kind === "crystal"
+                ? "Void Crystal shattered — dark-elf ritual broken!"
+                : `${s.name} destroyed!`,
+            );
+            if (s.kind === "crystal") {
+              // Bonus: extinguish nearby ritual wisps lightly
+              if (this.wispEvents) {
+                for (const w of this.wispEvents.wisps) {
+                  if (!w.alive) continue;
+                  if (Math.hypot(w.position.x - s.position.x, w.position.z - s.position.z) < 20) {
+                    damageWisp(w, Math.floor(w.maxHp * 0.35));
+                  }
+                }
+              }
+            }
+          } else {
+            this.log(`Hit ${s.name} for ${dmg} (${Math.ceil(s.hp)}/${s.maxHp})`);
+          }
           this.notifyState();
           return;
         }
@@ -2342,6 +3922,7 @@ export class GameEngine {
    */
   private damageEnemy(en: EnemyInstance, amount: number, isCrit: boolean, skillId?: string) {
     if (en.state === "dead" || en.state === "death") return;
+    this.combatUntil = performance.now() / 1000 + 4.5;
     const skillBoost = skillId ? resolveSkillBoost(skillId) : undefined;
     const stones = getStoneCombatMods();
     const spell = 1 + stones.spellDamage;
@@ -2429,12 +4010,32 @@ export class GameEngine {
    *  strike every enemy inside the shape. */
   useSkill(idx: number) {
     if (this.playerAttackCooldown > 0) return;
-    if (!this.combatFsm.skill(0.55)) return;
     const arch = archetypeForSkill(this.hudSkills[idx], idx);
+
+    // Deployables: ghost follows mouse, LMB confirms (no auto-place).
+    if (arch.shape === "deployable") {
+      const dep = (arch.deployable ?? "fire_totem") as DeployableKind;
+      this.beginDeployablePlacement({
+        skillIdx: idx,
+        legacyHud: true,
+        deployKind: dep,
+        maxRange: arch.range ?? 5,
+        radius: arch.radius ?? 4,
+        color: arch.color,
+        damage: this.playerBaseDamage * arch.damageMult,
+        manaCost: 0,
+        cooldown: 0,
+      });
+      this.log(`Place ${dep.replace("_", " ")} — LMB to deploy (Esc cancel).`);
+      this.notifyState();
+      return;
+    }
+
+    if (!this.combatFsm.skill(0.55)) return;
     const dir = this.resolveAimDir();
     this.playerFacing = Math.atan2(dir.x, dir.z);
 
-    const isCast = arch.shape === "circle" || arch.shape === "nova" || arch.shape === "deployable";
+    const isCast = arch.shape === "circle" || arch.shape === "nova";
     const played = this.playerAnimator?.triggerNamed(skillAnimCandidates(idx, isCast)) ?? false;
     if (!played) this.playerAnimator?.triggerAttack();
     // If the model has no locomotion root bone, commit permanent forward travel
@@ -2451,17 +4052,6 @@ export class GameEngine {
     kickCameraShake(this.isoCam, 0.08);
 
     const origin = this.playerPos.clone();
-
-    if (arch.shape === "deployable") {
-      const dep = arch.deployable ?? "fire_totem";
-      const place = origin.clone().add(dir.clone().multiplyScalar(arch.range));
-      this.clampToArena(place);
-      this.deployables.deploy(dep, place, arch.color, this.playerBaseDamage * arch.damageMult, arch.radius ?? 4);
-      this.particles?.castSkillVfx({ element: arch.element, shape: "deployable", center: place.clone(), origin, dir, reach: arch.radius ?? 4 });
-      this.log(`You deploy a ${dep.replace("_", " ")}.`);
-      this.notifyState();
-      return;
-    }
 
     const q: ShapeQuery = {
       kind: arch.shape,
@@ -2516,84 +4106,140 @@ export class GameEngine {
   }
 
   /**
-   * Engage nearby pirate: vendor opens shop, captain re-seeds the generative
-   * island (new trees/stones/enemy layout) and can sail to the boss arena.
+   * Engage nearby pirate / chest / dock prop (E).
+   * Vendor → shop · Captain → sail · Traveler → tutorial · Chests → loot.
    */
   tryEngagePirate() {
     this.refreshNearbyInteractables();
+
+    // Prefer world prop interactables when closer than NPCs
+    if (this.tryOpenNearbyProp()) return;
+
+    // Harbor district shops / training (city on island)
+    if (this.playDomain === "land" && this.harborDistrict) {
+      const st = this.harborDistrict.nearest(this.playerPos.x, this.playerPos.z, 3.8);
+      if (st) {
+        this.log(`${st.layout.label}: ${st.layout.hint}`);
+        // Flexible routing — stations map to existing game pages / systems
+        const routes: Record<string, string> = {
+          stash: "/equipment",
+          weapon_panel: "/equipment",
+          skills: "/skills",
+          stats: "/",
+          quests: "/content",
+          anvil: "/",
+          portal_dungeon: "/game",
+          portal_boss: "/boss",
+        };
+        const href = routes[st.id];
+        if (href && typeof window !== "undefined") {
+          // Soft prompt — UI can also deep-link; avoid hard navigate mid-combat loop
+          this.log(`→ ${st.layout.action} (open ${st.layout.shortLabel} from Systems when docked).`);
+        }
+        return;
+      }
+    }
+
     const np = this.nearbyPirate;
     if (!np) {
-      this.log("No pirate nearby — head to Pirate Cove (east).");
+      this.log("Nothing to engage — head to Pirate Cove (east) or a claim pad.");
       return;
     }
     const pirate = this.pirates.find((p) => p.def.id === np.id);
     pirate?.animator?.wave();
 
     if (np.role === "vendor") {
-      this.log(`${np.name}: "Wood, stone, grog — fair prices for a corsair."`);
+      this.log(`${np.name}: "Wood, stone, grog — fair prices. Sell harvest, buy supplies."`);
       this.onOpenVendor?.();
       return;
     }
+    if (np.role === "traveler" || np.id === "dock_traveler") {
+      this.log(
+        `${np.name}: "Welcome shipwrecked — open the Dock Quest panel (T) and follow every step to your commander."`,
+      );
+      this.onOpenTraveler?.();
+      return;
+    }
     if (np.role === "captain") {
-      this.log(`${np.name}: "The wind shifts — I chart a new island!"`);
-      this.reseedGenerativeMap();
+      if (this.runDirector.canSail()) {
+        this.log(`${np.name}: "The wind shifts — I chart a new island!"`);
+        this.sailToNextIsland();
+        return;
+      }
+      const kills = this.runDirector.run.killsThisRound;
+      const goal = this.runDirector.mission.killGoal;
+      if (this.bossEnemyId || this.runDirector.phase === "boss_fight") {
+        this.log(`${np.name}: "The Colossus still stands — bring me its head, then we sail."`);
+      } else if (kills < goal) {
+        this.log(
+          `${np.name}: "Cull ${goal - kills} more hostiles (${kills}/${goal}) and the Colossus will rise."`,
+        );
+      } else {
+        this.log(`${np.name}: "Hunt the Colossus in the ruins — then we re-sail."`);
+      }
       return;
     }
     this.log(`${np.name}: "${np.prompt}"`);
   }
 
+  /** Open chest / barrel on E — one-shot loot. */
+  private tryOpenNearbyProp(): boolean {
+    let best: THREE.Object3D | null = null;
+    let bestD = 3.2;
+    for (const g of this.coveProps) {
+      if (!g.userData.interact || g.userData.looted) continue;
+      const kind = g.userData.interact as string;
+      if (kind !== "chest" && kind !== "barrel") continue;
+      const r = (g.userData.interactRadius as number) ?? 2.6;
+      const d = Math.hypot(g.position.x - this.playerPos.x, g.position.z - this.playerPos.z);
+      if (d < Math.min(bestD, r)) {
+        bestD = d;
+        best = g;
+      }
+    }
+    if (!best) return false;
+    best.userData.looted = true;
+    const gold = Number(best.userData.lootGold) || 0;
+    const wood = Number(best.userData.lootWood) || 0;
+    const stone = Number(best.userData.lootStone) || 0;
+    const label = String(best.userData.interactLabel ?? "Loot");
+    if (gold > 0) {
+      const w = getWallet();
+      saveWallet({ ...w, gold: w.gold + gold });
+    }
+    if (wood > 0) addResource("wood", wood);
+    if (stone > 0) addResource("stone", stone);
+    this.log(
+      `Opened ${label}: ${gold ? `+${gold}g ` : ""}${wood ? `+${wood} wood ` : ""}${stone ? `+${stone} stone` : ""}`.trim(),
+    );
+    // Dim opened chests
+    best.traverse((c) => {
+      const m = c as THREE.Mesh;
+      if (m.isMesh && m.material) {
+        const mats = Array.isArray(m.material) ? m.material : [m.material];
+        for (const mat of mats) {
+          const sm = mat as THREE.MeshStandardMaterial;
+          if (sm.color) sm.color.multiplyScalar(0.45);
+          if (sm.opacity != null) {
+            sm.transparent = true;
+            sm.opacity = 0.55;
+          }
+        }
+      }
+    });
+    this.notifyState(true);
+    return true;
+  }
+
   /** Captain re-sails: next round — tougher enemies, new seed/layout/boss. */
   reseedGenerativeMap() {
-    this.mapSeed = (Math.random() * 0xffffffff) >>> 0;
-    this.islandRound += 1;
-    // Clear enemies and respawn scaled for the new round.
-    for (const en of [...this.enemies]) {
-      this.scene.remove(en.model.group);
-      en.model.group.userData.disposed = true;
-      if (en.model.kit) disposeKitModel(en.model);
-      else if (en.model.isGLB) disposeMonsterModel(en.model);
+    // Prefer gated sail; allow force reseed only after victory (legacy entry).
+    if (this.runDirector.canSail() || this.runDirector.phase === "victory") {
+      this.sailToNextIsland();
+      return;
     }
-    this.enemies = [];
-    this.enemyBrains.clear();
-    this.bossEnemyId = null;
-    this.bossSpecialCd.clear();
-    this.projectileField?.clear();
-    this.pendingStrikes?.clear();
-    this.auras?.clear();
-    if (this.playerGroup) {
-      this.auras?.attach(this.playerAuraElement, {
-        follow: this.playerGroup,
-        radius: 1.35,
-        yOffset: 0.05,
-      });
-    }
-    // New maze layout for the new island seed (corridors + large rooms).
-    this.buildMaze();
-    this.buildHarvestables();
-    this.spawnInitialEnemies();
-    this.spawnDungeonBoss();
-    this.playerPos.set(0, 0, 0);
-    if (this.maze) {
-      const hub = this.maze.nearestWalkable(0, 0);
-      this.playerPos.set(hub.x, 0, hub.z);
-    }
-    this.playerY = 0;
-    this.jumpVel = 0;
-    this.dodgeCdUntil = 0;
-    this.dodgeIframeUntil = 0;
-    this.combatFsm.reset();
-    if (this.playerGroup) {
-      this.playerGroup.position.set(this.playerPos.x, 0, this.playerPos.z);
-    }
-    // Soft heal between rounds so the loop is fair but still pressured.
-    this.playerHp = Math.min(this.playerMaxHp, this.playerHp + this.playerMaxHp * 0.35);
-    this.playerMana = Math.min(this.playerMaxMana, this.playerMana + this.playerMaxMana * 0.4);
-    const mult = this.difficultyMult();
-    this.log(
-      `Round ${this.islandRound} — island #${this.mapSeed.toString(16)} · enemies ×${mult.toFixed(2)}`,
-    );
-    this.onMapReseed?.(this.mapSeed);
-    this.notifyState();
+    this.log("Defeat the Island Colossus before the captain will re-chart the seas.");
+    this.notifyState(true);
   }
 
   private refreshNearbyInteractables() {
@@ -2601,7 +4247,7 @@ export class GameEngine {
     this.nearbyHarvestLabel = null;
     const now = performance.now() / 1000;
 
-    let bestPirateDist = 3.6;
+    let bestPirateDist = 3.8;
     for (const p of this.pirates) {
       if (!p.ready) continue;
       const d = Math.hypot(p.group.position.x - this.playerPos.x, p.group.position.z - this.playerPos.z);
@@ -2618,7 +4264,23 @@ export class GameEngine {
       }
     }
 
-    if (this.harvestField) {
+    // Chests / barrels override harvest prompt when closer
+    let bestLoot: string | null = null;
+    let bestLootD = 3.0;
+    for (const g of this.coveProps) {
+      if (!g.userData.interact || g.userData.looted) continue;
+      const kind = g.userData.interact as string;
+      if (kind !== "chest" && kind !== "barrel") continue;
+      const d = Math.hypot(g.position.x - this.playerPos.x, g.position.z - this.playerPos.z);
+      const r = (g.userData.interactRadius as number) ?? 2.6;
+      if (d < Math.min(bestLootD, r)) {
+        bestLootD = d;
+        bestLoot = `${g.userData.interactLabel ?? kind} — E open`;
+      }
+    }
+    if (bestLoot) {
+      this.nearbyHarvestLabel = bestLoot;
+    } else if (this.harvestField) {
       const n = nearestHarvestNode(this.harvestField.nodes, this.playerPos, 3.5, now);
       if (n) {
         this.nearbyHarvestLabel =
@@ -2643,6 +4305,9 @@ export class GameEngine {
     }
 
     if (!this.combatFsm.attack(0.42)) return;
+
+    // Racalvin: release mind-swords toward the target
+    if (this.initStats?.skinId === RACALVIN_ID) this.launchRacalvinSwords();
 
     const mods = this.perkMods();
     const stones = getStoneCombatMods();
@@ -2733,6 +4398,14 @@ export class GameEngine {
       this.bossEnemyId = null;
     }
 
+    // Island run director: mission kills, boss phases, random events.
+    try {
+      const runEvents = this.runDirector.onKill(isBoss);
+      this.processRunEvents(runEvents);
+    } catch (e) {
+      console.warn("[island] run director kill failed", e);
+    }
+
     setTimeout(() => {
       enemy.state = "dead";
       this.scene.remove(enemy.model.group);
@@ -2779,19 +4452,229 @@ export class GameEngine {
     }
   }
 
-  /** Plant claim flag at player feet — generates harvest nodes in claim radius. */
-  private tryPlantClaimFlag() {
+  /**
+   * C — start camp placement ghost (fence + tower). LMB places; Esc cancels.
+   * Spends wood/stone only on successful LMB confirm.
+   */
+  private beginCampPlacement() {
     if (this.claimPlaceCd > 0) {
-      this.log("Claim flag on cooldown.");
+      this.log("Camp construction on cooldown.");
       return;
     }
-    if (!this.claimFlags || !this.harvestField) return;
-    this.claimPlaceCd = 8;
-    this.applyClaimNodes(this.playerPos.clone(), {
-      radius: 11,
+    if (!this.claimFlags || !this.harvestField || !this.playerCamps) return;
+
+    if (isInsidePlayerCamp(this.playerCamps, this.playerPos.x, this.playerPos.z)) {
+      this.log("Already inside a built camp. V mans the tower with Grudge6.");
+      return;
+    }
+
+    const bag = getResources();
+    if (bag.wood < CAMP_BUILD_COST.wood || bag.stone < CAMP_BUILD_COST.stone) {
+      this.log(
+        `Need ${CAMP_BUILD_COST.wood} wood + ${CAMP_BUILD_COST.stone} stone to build a camp.`,
+      );
+      return;
+    }
+
+    const pad =
+      this.worldManifest &&
+      nearestClaimableZone(this.worldManifest, this.playerPos.x, this.playerPos.z, 18);
+    if (pad && pad.owner !== "none" && pad.owner !== "wild") {
+      this.log(`${pad.name} is already held by ${pad.owner}.`);
+      return;
+    }
+
+    const radius = pad?.radius ?? 11;
+    this.cancelPlacement();
+    this.placeMode = {
+      kind: "camp",
+      radius: Math.max(9, radius),
+      padId: pad?.id ?? null,
+      padX: pad?.x ?? this.playerPos.x,
+      padZ: pad?.z ?? this.playerPos.z,
+    };
+    this.setPlaceGhost(createCampGhost(Math.max(9, radius)));
+    if (this.skillCursor) this.skillCursor.visible = false;
+    this.log(
+      pad
+        ? `Camp ghost at ${pad.name} — move mouse, LMB to build (Esc cancel).`
+        : `Camp ghost ready — LMB to build fence + tower (Esc cancel).`,
+    );
+    this.notifyState();
+  }
+
+  private confirmCampBuild(at: THREE.Vector3) {
+    if (!this.claimFlags || !this.harvestField || !this.playerCamps) {
+      this.cancelPlacement();
+      return;
+    }
+    if (!this.isCampPlaceValid(at)) {
+      this.log("Invalid camp site — aim at a free claim pad.");
+      return; // keep ghost active
+    }
+    if (!spendResources({ wood: CAMP_BUILD_COST.wood, stone: CAMP_BUILD_COST.stone })) {
+      this.log(
+        `Need ${CAMP_BUILD_COST.wood} wood + ${CAMP_BUILD_COST.stone} stone to build a camp.`,
+      );
+      this.cancelPlacement();
+      return;
+    }
+
+    const mode = this.placeMode;
+    const radius = mode?.kind === "camp" ? mode.radius : 11;
+    const pad =
+      this.worldManifest &&
+      nearestClaimableZone(this.worldManifest, at.x, at.z, 14);
+    if (pad && (pad.owner === "none" || pad.owner === "wild")) {
+      pad.owner = "player";
+      this.worldChunkMap?.markClaimed(pad.id);
+      this.claimsOwned++;
+    } else if (mode?.kind === "camp" && mode.padId && this.worldManifest) {
+      const z = this.worldManifest.zones.find((x) => x.id === mode.padId);
+      if (z && (z.owner === "none" || z.owner === "wild")) {
+        z.owner = "player";
+        this.worldChunkMap?.markClaimed(z.id);
+        this.claimsOwned++;
+      }
+    }
+
+    this.claimPlaceCd = 10;
+    this.applyClaimNodes(at, {
+      radius,
       nodeCount: 7,
-      seed: this.mapSeed ^ hashString(`claim|${this.playerPos.x.toFixed(0)}|${this.playerPos.z.toFixed(0)}`),
+      seed: this.mapSeed ^ hashString(`claim|${at.x.toFixed(0)}|${at.z.toFixed(0)}`),
     });
+    buildPlayerCamp(this.playerCamps, this.loader, {
+      position: at,
+      radius,
+      seed: this.mapSeed ^ hashString(`camp|${at.x.toFixed(0)}|${at.z.toFixed(0)}`),
+    });
+
+    for (const en of this.enemies) {
+      if (en.state === "dead" || en.state === "death") continue;
+      if (pushOutOfCamps(this.playerCamps, en.position, 1.2)) {
+        en.model.group.position.x = en.position.x;
+        en.model.group.position.z = en.position.z;
+        en.spawnPos.copy(en.position);
+      }
+    }
+
+    this.cancelPlacement();
+    this.log(`Camp built — fence + tower. Enemies blocked. V mans tower.`);
+    this.notifyState();
+  }
+
+  /** Map click / external waypoint — click-to-move to world XZ. */
+  setPlayerTarget(x: number, z: number) {
+    const p = this.maze?.nearestWalkable(x, z) ?? new THREE.Vector3(x, 0, z);
+    this.playerTarget = p;
+    this.attackHeld = false;
+    this.targetEnemy = null;
+    if (this.indicatorRing) {
+      this.indicatorRing.visible = true;
+      this.indicatorRing.position.set(p.x, 0.08, p.z);
+    }
+  }
+
+  /**
+   * V — manual deploy / tower man / recall (never auto on claim).
+   * - Empty field → summon party (Grudge6Deploy).
+   * - Holding / manning → recall.
+   * - Near built camp tower → man tower with first free ally.
+   * - Near player claim → post allies to pad.
+   */
+  private tryDeployAllies() {
+    if (!this.allies.length) {
+      if (this.partySummoning) {
+        this.log("Summoning allies…");
+        return;
+      }
+      this.partySummoning = true;
+      void this.spawnPartyAllies().finally(() => {
+        this.partySummoning = false;
+        if (!this.allies.length) {
+          this.log("No allies in the field — pick owned Grudge6 on /party, then press V.");
+        } else {
+          this.log("Allies summoned. V near camp mans tower / posts to pad.");
+        }
+      });
+      return;
+    }
+
+    // Recall if any are holding or manning
+    const anyHeld = this.allies.some((a) => a.deployHold || a.towerManned);
+    if (anyHeld) {
+      for (const a of this.allies) {
+        deployAllyTo(a, null);
+        // Snap mesh back to ground
+        a.instance.group.position.y = 0;
+      }
+      // Clear camp manning slots
+      if (this.playerCamps) {
+        for (const c of this.playerCamps.camps) c.mannedAllyId = null;
+      }
+      this.log("Allies recalled to your formation.");
+      return;
+    }
+
+    // Prefer manning nearest built camp tower
+    const camp = nearestPlayerCamp(
+      this.playerCamps,
+      this.playerPos.x,
+      this.playerPos.z,
+      16,
+    );
+    if (camp) {
+      // First free ally mans tower; rest hold pad at fence line
+      const free = this.allies.filter((a) => !a.dead && a.hp > 0);
+      if (!free.length) {
+        this.log("No living allies to man the tower.");
+        return;
+      }
+      const lookout = free[0]!;
+      manTower(lookout, camp.manSlot);
+      camp.mannedAllyId = lookout.instance.def.id;
+      lookout.instance.group.position.set(camp.manSlot.x, camp.manSlot.y, camp.manSlot.z);
+      for (let i = 1; i < free.length; i++) {
+        const off = (i - free.length / 2) * 1.5;
+        deployAllyTo(
+          free[i]!,
+          new THREE.Vector3(camp.position.x + off, 0, camp.position.z + camp.radius * 0.35),
+        );
+      }
+      this.log(
+        `${lookout.instance.def.displayName} mans the watchtower. V recalls.`,
+      );
+      return;
+    }
+
+    if (!this.worldManifest) {
+      this.log("Build a camp (C) first, then press V to man the tower.");
+      return;
+    }
+    const owned = this.worldManifest.zones.filter((z) => z.owner === "player" && z.claimable);
+    if (!owned.length) {
+      this.log("Build a camp (C: wood+stone), then press V to post / man tower.");
+      return;
+    }
+    let best = owned[0]!;
+    let bestD = Infinity;
+    for (const z of owned) {
+      const d = Math.hypot(z.x - this.playerPos.x, z.z - this.playerPos.z);
+      if (d < bestD) {
+        bestD = d;
+        best = z;
+      }
+    }
+    if (bestD > 18) {
+      this.log("Move closer to a built camp or claim, then press V.");
+      return;
+    }
+    for (let i = 0; i < this.allies.length; i++) {
+      const off = (i - (this.allies.length - 1) / 2) * 1.6;
+      deployAllyTo(this.allies[i]!, new THREE.Vector3(best.x + off, 0, best.z + 1.2));
+    }
+    this.log(`Allies posted at ${best.name ?? "claim"}. V again to recall.`);
   }
 
   /** Chop / quarry: attack nearest harvest node (tree or stone). */
@@ -2850,6 +4733,7 @@ export class GameEngine {
       this.log(`Dodged ${source}!`);
       return;
     }
+    this.combatUntil = performance.now() / 1000 + 4.5;
     const mods = this.perkMods();
     const stones = getStoneCombatMods();
     // Magical vs physical: bosses/magic names use magicDefense
@@ -2887,6 +4771,24 @@ export class GameEngine {
   private log(msg: string) {
     this.combatLog.unshift(msg);
     if (this.combatLog.length > 10) this.combatLog.pop();
+  }
+
+  /** Camera / sun follow while helming the skiff (open water early-exit path). */
+  private updateOpenWaterCamera(delta: number) {
+    this.playerVel.set(
+      Math.sin(this.playerFacing) * (this.openWater?.speed ?? 0),
+      0,
+      Math.cos(this.playerFacing) * (this.openWater?.speed ?? 0),
+    );
+    updateIsoCamera(this.camera, this.isoCam, this.playerPos, this.playerVel, delta, {
+      lead: 0.28,
+      follow: 7,
+    });
+    if (this.sun) {
+      this.sun.position.set(this.playerPos.x + 24, 36, this.playerPos.z + 24);
+      this.sun.target.position.set(this.playerPos.x, 0, this.playerPos.z);
+      this.sun.target.updateMatrixWorld();
+    }
   }
 
   private animate = () => {
@@ -2947,8 +4849,46 @@ export class GameEngine {
     // Advance combat FSM timers (attack/dodge/skill recovery).
     if (this.combatFsm.update(delta)) this.notifyState(false);
 
+    // Open-water helm (boat controls consume WASD; land combat paused lightly)
+    this.openWater?.update(delta, this.keys, { canPilot: this.playDomain === "open_water" });
+    if (this.playDomain === "open_water" && this.openWater) {
+      this.playerPos.copy(this.openWater.boatPos);
+      this.playerFacing = this.openWater.heading;
+      // Party rides deck slots
+      const slots = this.openWater.crewSlots;
+      for (let i = 0; i < this.allies.length; i++) {
+        const a = this.allies[i]!;
+        if (a.dead || a.hp <= 0) continue;
+        const slot = slots[i % slots.length]!;
+        a.pos.set(slot.x, 0, slot.z);
+        a.instance.group.position.set(slot.x, slot.y, slot.z);
+        a.facing = this.openWater.heading;
+        a.instance.group.rotation.y = this.openWater.heading;
+        a.instance.animator?.setMoving?.(false);
+        a.instance.animator?.update(delta);
+      }
+      // Camera follows boat
+      this.playerY = 0;
+      this.fog?.revealAt(this.playerPos.x, this.playerPos.z, 20);
+      this.notifyState(false);
+      // Still render enemies/VFX but skip land locomotion
+      this.updateFogAndRemotes(delta);
+      this.darkElfEvent?.updateVisuals?.(delta, this.camera);
+      // Jump to camera update via shared path below — skip land move block
+      this.updateOpenWaterCamera(delta);
+      return;
+    }
+
     this.updateWorldCollectables(delta, elapsed);
     this.updateAllies(delta);
+    this.updateFogAndRemotes(delta);
+    // Crystal bob + HP bar billboards for dark-elf event structures
+    this.darkElfEvent?.updateVisuals?.(delta, this.camera);
+
+    // Shrine buff regen tick
+    if (this.runDirector.hasShrineBuff()) {
+      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + 6 * delta);
+    }
 
     // Keyboard movement (scratch Vector2 — no per-tick alloc)
     // Gated by annihilate canMove tag (block/attack/hit lock locomotion).
@@ -2975,8 +4915,7 @@ export class GameEngine {
       raw.normalize();
       wantX = raw.x * maxSpd;
       wantZ = raw.y * maxSpd;
-      hasWant = true;
-      this.playerTarget = null;
+      hasWant = true;      this.playerTarget = null;
       this.targetEnemy = null;
       if (this.indicatorRing) this.indicatorRing.visible = false;
       this.playerFacing = Math.atan2(raw.x, raw.y);
@@ -2998,8 +4937,7 @@ export class GameEngine {
           toFoe.normalize();
           wantX = toFoe.x * maxSpd;
           wantZ = toFoe.z * maxSpd;
-          hasWant = true;
-          playerMoving = true;
+          hasWant = true;          playerMoving = true;
         } else if (this.playerAttackCooldown <= 0) {
           this.doAttack(locked);
         }
@@ -3014,8 +4952,7 @@ export class GameEngine {
         toTarget.normalize();
         wantX = toTarget.x * maxSpd;
         wantZ = toTarget.z * maxSpd;
-        hasWant = true;
-        this.playerFacing = Math.atan2(toTarget.x, toTarget.z);
+        hasWant = true;        this.playerFacing = Math.atan2(toTarget.x, toTarget.z);
         playerMoving = true;
       } else {
         this.playerTarget = null;
@@ -3070,12 +5007,20 @@ export class GameEngine {
     if (this.playerAnimator) {
       this.playerAnimator.setMoving(playerMoving && this.playerY <= 0.05);
       this.playerAnimator.update(delta);
-      if (this.playerAnimator.consumeRootMotion(this._rmTmp)) {
-        this.playerPos.x += this._rmTmp.x;
-        this.playerPos.z += this._rmTmp.z;
+      // Skip root-motion travel during dodge i-frames — distance is engine-applied.
+      if (!this.isDodging() && this.playerAnimator.consumeRootMotion(this._rmTmp)) {
+        this.movePlayerHorizontal(this._rmTmp.x, this._rmTmp.z);
+      } else if (this.isDodging()) {
+        this.playerAnimator.consumeRootMotion(this._rmTmp); // drain bank so it doesn't dump later
       }
     } else if (this.playerMixer) {
       this.playerMixer.update(delta);
+    }
+
+    // Brothers' Keeper dual mind-swords (Racalvin only)
+    if (this.playerGroup && this.initStats?.skinId === RACALVIN_ID) {
+      const model = this.playerGroup.children[0] ?? this.playerGroup;
+      updateRacalvinMindSwords(model, delta, this.playerFacing);
     }
 
     // Resolve the freshly-moved player against the real dungeon geometry.
@@ -3143,8 +5088,10 @@ export class GameEngine {
       });
     }
 
-    // Skill cursor follows mouse while ground-AoE is pending.
-    if (this.pendingSkillIdx >= 0 && this.skillCursor && this.pointerGround) {
+    // Ghost + skill cursor follow mouse while placement is active.
+    if (this.placeMode) {
+      this.updatePlaceGhostFollow();
+    } else if (this.pendingSkillIdx >= 0 && this.skillCursor && this.pointerGround) {
       this.skillCursor.visible = true;
       this.skillCursor.position.set(this.pointerGround.x, 0.12, this.pointerGround.z);
       const sk = this.fighterKit.skills[this.pendingSkillIdx];
@@ -3254,15 +5201,41 @@ export class GameEngine {
     }
 
     const mods = this.perkMods();
-    const regen = 6 + mods.regenPerSec;
-    if (this.playerHp < this.playerMaxHp) {
-      this.playerHp = Math.min(this.playerMaxHp, this.playerHp + delta * regen);
+    const inCombat = performance.now() / 1000 < this.combatUntil;
+    const hpR =
+      hpRegenPerSec({
+        level: this.playerLevel,
+        vitality: this.regenVitality,
+        endurance: this.regenEndurance,
+        inCombat,
+        hpRegenBonus: mods.regenPerSec,
+      });
+    const mpR = manaRegenPerSec({
+      level: this.playerLevel,
+      intellect: this.regenIntellect,
+      wisdom: this.regenWisdom,
+      inCombat,
+      manaRegenBonus: 0,
+    });
+    this.playerHp = applyRegen(this.playerHp, this.playerMaxHp, hpR, delta);
+    this.playerMana = applyRegen(this.playerMana, this.playerMaxMana, mpR, delta);
+
+    // Zone tracking for world map HUD
+    if (this.worldManifest) {
+      this.currentZone = zoneAt(this.worldManifest, this.playerPos.x, this.playerPos.z);
+      this.nearbyClaimZone = nearestClaimableZone(
+        this.worldManifest,
+        this.playerPos.x,
+        this.playerPos.z,
+        11,
+      );
     }
 
     this.notifyState(false);
   }
 
   private updateEnemy(en: EnemyInstance, delta: number, elapsed: number) {
+    const now = performance.now() / 1000;
     // Cooldown / hurt timers
     if (en.attackCooldown > 0) en.attackCooldown -= delta;
     if (en.hurtTimer > 0) {
@@ -3343,48 +5316,120 @@ export class GameEngine {
             }
           }
           en.state = "chase";
-          const dir = this._tmpV3a.subVectors(this.playerPos, en.position).normalize();
-          // Assassins add a slight lateral strafe for flanking feel.
-          if (brain === "assassin") {
-            const side = Math.sin(elapsed * 1.7) >= 0 ? 1 : -1;
-            const sx = -dir.z * 0.4 * side;
-            const sz = dir.x * 0.4 * side;
-            dir.x += sx;
-            dir.z += sz;
-            dir.normalize();
+          // Dense zones (D2 packs): slightly longer aggro leash while chasing
+          const zBias = zoneSpawnBias(this.worldManifest, en.position.x, en.position.z);
+          if (zBias.density > 0.65 && distToPlayer < en.aggroRange * 1.35) {
+            en.aggroRange = Math.max(en.aggroRange, 7.5 + en.template.tier * 0.5);
           }
-          en.position.x += dir.x * en.speed * delta;
-          en.position.z += dir.z * en.speed * delta;
-          this.clampToArena(en.position);
-          en.anim.isWalking = true;
+          // Pathfind toward player (repath ~2.5×/sec)
+          if (this.maze && (en.pathRepathAt <= now || en.path.length === 0)) {
+            en.path = findPath(this.maze, {
+              fromX: en.position.x,
+              fromZ: en.position.z,
+              toX: this.playerPos.x,
+              toZ: this.playerPos.z,
+              maxNodes: 500,
+            });
+            en.pathRepathAt = now + 0.4 + Math.random() * 0.25;
+          }
+          if (en.path.length > 0) {
+            const step = advanceAlongPath(en.position, en.path, en.speed, delta);
+            en.path = step.path;
+            if (step.moved) {
+              en.facing = step.facing;
+              en.anim.isWalking = true;
+            }
+            this.maze?.collideHorizontal(en.position, this.PLAYER_RADIUS * 0.85);
+            this.darkElfEvent?.collideHorizontal(en.position, this.PLAYER_RADIUS * 0.85);
+            this.clampToArena(en.position);
+          } else {
+            const dir = this._tmpV3a.subVectors(this.playerPos, en.position).normalize();
+            if (brain === "assassin") {
+              const side = Math.sin(elapsed * 1.7) >= 0 ? 1 : -1;
+              dir.x += -dir.z * 0.4 * side;
+              dir.z += dir.x * 0.4 * side;
+              dir.normalize();
+            }
+            en.position.x += dir.x * en.speed * delta;
+            en.position.z += dir.z * en.speed * delta;
+            this.clampToArena(en.position);
+            en.facing = Math.atan2(dir.x, dir.z);
+            en.anim.isWalking = true;
+          }
         }
       } else {
-        const distToPatrol = en.position.distanceTo(en.patrolTarget);
-        if (distToPatrol < 0.4) {
-          if (this.maze) {
-            const p = this.maze.randomWalkable(() => Math.random());
-            // Keep patrol near spawn so packs don't roam the whole maze.
-            const ox = en.spawnPos.x + (p.x - en.spawnPos.x) * 0.35;
-            const oz = en.spawnPos.z + (p.z - en.spawnPos.z) * 0.35;
-            en.patrolTarget.copy(this.maze.nearestWalkable(ox, oz));
-          } else {
-            en.patrolTarget.set(
-              en.spawnPos.x + (Math.random() * 2 - 1) * 4,
-              0,
-              en.spawnPos.z + (Math.random() * 2 - 1) * 4
-            );
-          }
-          en.state = "idle";
+        // Idle pause then wander via pathfind
+        if (en.state === "idle" && now < en.idleUntil) {
+          en.anim.isWalking = false;
         } else {
-          const dir = this._tmpV3a.subVectors(en.patrolTarget, en.position).normalize();
-          en.position.x += dir.x * en.speed * 0.5 * delta;
-          en.position.z += dir.z * en.speed * 0.5 * delta;
-          this.clampToArena(en.position);
-          en.facing = Math.atan2(dir.x, dir.z);
-          en.anim.isWalking = true;
-          en.state = "patrol";
+          const distToPatrol = en.position.distanceTo(en.patrolTarget);
+          if (distToPatrol < 0.55 || en.path.length === 0) {
+            if (this.maze) {
+              // Biased wander: sometimes toward zone centers for pack feel
+              let tx = en.spawnPos.x;
+              let tz = en.spawnPos.z;
+              if (Math.random() < 0.55) {
+                const p = this.maze.randomWalkable(() => Math.random());
+                tx = en.spawnPos.x + (p.x - en.spawnPos.x) * 0.45;
+                tz = en.spawnPos.z + (p.z - en.spawnPos.z) * 0.45;
+              } else if (this.worldManifest && Math.random() < 0.4) {
+                const z =
+                  this.worldManifest.zones[
+                    Math.floor(Math.random() * this.worldManifest.zones.length)
+                  ]!;
+                tx = z.x + (Math.random() - 0.5) * z.radius * 0.6;
+                tz = z.z + (Math.random() - 0.5) * z.radius * 0.6;
+              } else {
+                tx = en.spawnPos.x + (Math.random() * 2 - 1) * 8;
+                tz = en.spawnPos.z + (Math.random() * 2 - 1) * 8;
+              }
+              const w = this.maze.nearestWalkable(tx, tz);
+              en.patrolTarget.copy(w);
+              en.path = findPath(this.maze, {
+                fromX: en.position.x,
+                fromZ: en.position.z,
+                toX: w.x,
+                toZ: w.z,
+                maxNodes: 350,
+              });
+              en.pathRepathAt = now + 2;
+            } else {
+              en.patrolTarget.set(
+                en.spawnPos.x + (Math.random() * 2 - 1) * 6,
+                0,
+                en.spawnPos.z + (Math.random() * 2 - 1) * 6,
+              );
+              en.path = [en.patrolTarget.clone()];
+            }
+            en.idleUntil = now + 0.6 + Math.random() * 1.8;
+            en.state = "patrol";
+          }
+          if (en.path.length > 0) {
+            const step = advanceAlongPath(en.position, en.path, en.speed * 0.55, delta);
+            en.path = step.path;
+            if (step.moved) {
+              en.facing = step.facing;
+              en.anim.isWalking = true;
+              en.state = "patrol";
+            }
+            this.maze?.collideHorizontal(en.position, this.PLAYER_RADIUS * 0.7);
+            this.darkElfEvent?.collideHorizontal(en.position, this.PLAYER_RADIUS * 0.7);
+            this.clampToArena(en.position);
+          } else {
+            en.anim.isWalking = false;
+            en.state = "idle";
+          }
         }
       }
+    }
+
+    // Player camps: enemies cannot enter (push to fence line)
+    if (pushOutOfCamps(this.playerCamps, en.position, 0.8)) {
+      // Redirect spawn home outside camps so they don't path back in forever
+      if (isInsidePlayerCamp(this.playerCamps, en.spawnPos.x, en.spawnPos.z)) {
+        en.spawnPos.copy(en.position);
+      }
+      en.anim.isWalking = true;
     }
 
     // Sync mesh position + rotation; follow the real dungeon floor height
@@ -3401,38 +5446,37 @@ export class GameEngine {
     updateEnemyAnimation(en.model, en.anim, delta, elapsed);
   }
 
-  /** Load up to 2 Grudge6 allies from party selection. */
+  /**
+   * Load Grudge6 allies from party selection only (no auto-fill / no camp auto-post).
+   * Pipeline: resolveDeployIds → createGrudge6Character (SkeletonUtils + atlas + mesh allow-list
+   * + baked anims) → createAllyAgent (brain + goal/objective AI).
+   */
   private async spawnPartyAllies() {
-    const ids = getPartyAllyIds().slice(0, MAX_PARTY_ALLIES);
-    if (!ids.length) {
-      this.log("No party allies selected — visit Party.");
+    if (this.allies.length) return; // already in field — use V to post/recall
+    this.partySpawned = true;
+    this.partyLoadErrors = [];
+    const { deployPartyAllies } = await import("./grudge6/Grudge6Deploy");
+    const result = await deployPartyAllies({
+      factory: this.grudge6Factory,
+      loader: this.loader,
+      playerPos: this.playerPos,
+      scene: this.scene,
+      isDisposed: () => this.disposed,
+      onProgress: (name, ok, err) => {
+        if (ok) this.log(`${name} joins the field.`);
+        else this.log(`Could not summon ${name}${err ? `: ${err}` : ""}`);
+      },
+    });
+    if (this.disposed) {
+      for (const a of result.agents) a.instance.dispose();
       return;
     }
-    let slot = 0;
-    for (const id of ids) {
-      const def = getGrudge6Hero(id);
-      if (!def) continue;
-      try {
-        const inst = await this.grudge6Factory.create(def, 1.85);
-        if (this.disposed) {
-          inst.dispose();
-          return;
-        }
-        const agent = createAllyAgent(inst, slot);
-        agent.pos.set(
-          this.playerPos.x + (slot === 0 ? -2.2 : 2.2),
-          0,
-          this.playerPos.z + 1.8,
-        );
-        inst.group.position.copy(agent.pos);
-        this.scene.add(inst.group);
-        this.allies.push(agent);
-        this.log(`${def.displayName} joins the party (${def.brain}).`);
-        slot++;
-      } catch (e) {
-        console.warn("[party] failed to load ally", id, e);
-        this.log(`Could not summon ${def.displayName}.`);
-      }
+    for (const a of result.agents) this.allies.push(a);
+    this.partyLoadErrors = [...result.errors];
+    if (!result.loaded.length && !result.errors.length) {
+      this.log("No party allies selected — visit /party to deploy Grudge6 units, then press V.");
+    } else if (result.loaded.length) {
+      this.log(`Party in field: ${result.loaded.join(", ")}. C claim · V post/recall at pad.`);
     }
   }
 
@@ -3465,6 +5509,40 @@ export class GameEngine {
           ? this.nearestEnemy(14)
           : null;
 
+    const pz = this.worldManifest
+      ? zoneAt(this.worldManifest, this.playerPos.x, this.playerPos.z)
+      : null;
+    const playerZone = pz
+      ? {
+          id: pz.id,
+          kind: pz.kind,
+          x: pz.x,
+          z: pz.z,
+          radius: pz.radius,
+          areaLevel: pz.areaLevel,
+          density: pz.density,
+          owner: pz.owner,
+        }
+      : null;
+    // Mission objective zone = last waypoint (boss approach) or densest hostile
+    let objectiveZone = playerZone;
+    if (this.worldManifest?.waypointPath?.length) {
+      const lastId = this.worldManifest.waypointPath[this.worldManifest.waypointPath.length - 1]!;
+      const oz = this.worldManifest.zones.find((z) => z.id === lastId);
+      if (oz) {
+        objectiveZone = {
+          id: oz.id,
+          kind: oz.kind,
+          x: oz.x,
+          z: oz.z,
+          radius: oz.radius,
+          areaLevel: oz.areaLevel,
+          density: oz.density,
+          owner: oz.owner,
+        };
+      }
+    }
+
     const world = {
       playerPos: this.playerPos.clone(),
       playerHp: this.playerHp,
@@ -3473,6 +5551,8 @@ export class GameEngine {
       focusEnemyId: focusEnemy?.id ?? null,
       enemies,
       harvest,
+      playerZone,
+      objectiveZone,
       dt: delta,
       now,
     };
@@ -3481,8 +5561,32 @@ export class GameEngine {
       if (agent.hp <= 0) continue;
       const brain = agent.instance.def.brain;
       const action = thinkAlly(agent, brain, world, this.playerFacing);
+      // Pathfind long moves so allies navigate maze corridors
+      if (
+        action.type === "move" &&
+        action.targetPos &&
+        this.maze &&
+        agent.pathRepathAt <= now
+      ) {
+        const d = agent.pos.distanceTo(action.targetPos);
+        if (d > 3.5) {
+          agent.path = findPath(this.maze, {
+            fromX: agent.pos.x,
+            fromZ: agent.pos.z,
+            toX: action.targetPos.x,
+            toZ: action.targetPos.z,
+            maxNodes: 400,
+          });
+          agent.pathRepathAt = now + 0.55;
+        } else {
+          agent.path = [];
+        }
+      }
       const speed = 5.2 + (brain === "skirmish" || brain === "assassin" ? 0.8 : 0);
-      stepAllyMovement(agent, action, speed, delta, (p) => this.clampToArena(p));
+      stepAllyMovement(agent, action, speed, delta, (p) => {
+        this.maze?.collideHorizontal(p, this.PLAYER_RADIUS * 0.7);
+        this.clampToArena(p);
+      });
 
       // Apply action results
       if (action.type === "attack" && action.enemyId) {
@@ -3519,9 +5623,20 @@ export class GameEngine {
         }
       }
 
-      // Sync mesh
-      agent.instance.group.position.x = agent.pos.x;
-      agent.instance.group.position.z = agent.pos.z;
+      // Sync mesh — tower lookouts stay elevated on the platform
+      if (agent.towerManned) {
+        agent.pos.x = agent.towerManned.x;
+        agent.pos.z = agent.towerManned.z;
+        agent.instance.group.position.set(
+          agent.towerManned.x,
+          agent.towerManned.y,
+          agent.towerManned.z,
+        );
+      } else {
+        agent.instance.group.position.x = agent.pos.x;
+        agent.instance.group.position.y = 0;
+        agent.instance.group.position.z = agent.pos.z;
+      }
       let dy = agent.facing - agent.instance.group.rotation.y;
       while (dy > Math.PI) dy -= Math.PI * 2;
       while (dy < -Math.PI) dy += Math.PI * 2;
@@ -3536,6 +5651,36 @@ export class GameEngine {
     const w = this.container.clientWidth;
     const h = this.container.clientHeight;
     return { x: (pos.x * 0.5 + 0.5) * w, y: (-pos.y * 0.5 + 0.5) * h };
+  }
+
+  /** Fog vision + remote avatar lerp + persist explored cells. */
+  private updateFogAndRemotes(delta: number) {
+    if (this.fog) {
+      const sources: { x: number; z: number; radius: number }[] = [
+        { x: this.playerPos.x, z: this.playerPos.z, radius: 16 },
+      ];
+      for (const a of this.allies) {
+        if (a.hp <= 0) continue;
+        sources.push({ x: a.pos.x, z: a.pos.z, radius: 10 });
+      }
+      // Ash storm: tighter vision
+      if (this.runDirector.run.activeEventId === "evt_storm") {
+        for (const s of sources) s.radius *= 0.55;
+      }
+      this.fog.update(sources);
+      this.fogSaveAccum += delta;
+      if (this.fogSaveAccum >= 2.5) {
+        this.fogSaveAccum = 0;
+        this.runDirector.setExploredCells(this.fog.exportExplored());
+      }
+    }
+
+    const lerp = 1 - Math.exp(-10 * delta);
+    for (const rem of this.remoteAvatars.values()) {
+      rem.group.position.x += (rem.target.x - rem.group.position.x) * lerp;
+      rem.group.position.z += (rem.target.z - rem.group.position.z) * lerp;
+      rem.group.rotation.y += (rem.yaw - rem.group.rotation.y) * lerp;
+    }
   }
 
   /**
@@ -3593,6 +5738,34 @@ export class GameEngine {
 
     const boss = this.enemies.find((e) => e.id === this.bossEnemyId && e.state !== "dead" && e.state !== "death");
     const w = getWallet();
+    const allyHud: AllyHudSnapshot[] = this.allies.map((a) => ({
+      id: a.instance.def.id,
+      name: a.instance.def.displayName,
+      role: a.instance.def.role,
+      race: a.instance.def.race,
+      hp: Math.round(a.hp),
+      maxHp: a.maxHp,
+      state: a.state,
+      brain: a.instance.def.brain,
+      goal: a.currentGoal?.label ?? a.state,
+      loadOk: true,
+      dead: a.dead || a.hp <= 0,
+      respawnSec: a.respawnAt > 0 ? Math.max(0, a.respawnAt - performance.now() / 1000) : 0,
+      gait: a.instance.animator?.getGait?.() ?? null,
+      debug: a.instance.debug ?? null,
+    }));
+    const exploredN = this.fog?.exploredCount() ?? 0;
+    const gridN = this.fog ? this.fog.gridW * this.fog.gridH : 1;
+    const fogSnap =
+      this.fog?.getMinimap(
+        this.playerPos.x,
+        this.playerPos.z,
+        this.coveCenter.x,
+        this.coveCenter.z,
+      ) ?? null;
+    const dx = this.coveCenter.x - this.playerPos.x;
+    const dz = this.coveCenter.z - this.playerPos.z;
+    const coveBearing = (Math.atan2(dx, dz) * 180) / Math.PI;
     this.onStateUpdate({
       playerHp: Math.round(this.playerHp),
       playerMaxHp: this.playerMaxHp,
@@ -3604,7 +5777,7 @@ export class GameEngine {
       enemies: enemyUI,
       damageNumbers: dmgUI,
       combatLog: this.combatLog.slice(0, 10),
-      zone: `Round ${this.islandRound} · Pirate Island · seed ${this.mapSeed.toString(16)}`,
+      zone: zoneLabel(this.runDirector.run),
       loaded: this.loaded,
       mapReady: this.mapReady,
       resources: getResources(),
@@ -3626,6 +5799,71 @@ export class GameEngine {
       combatLabel: this.combatFsm.label,
       invulnerable: this.isDodging() || this.combatFsm.invulnerable,
       aliveEnemies: enemyUI.length,
+      fogMinimap: fogSnap,
+      exploredPct: Math.min(100, Math.round((exploredN / gridN) * 100)),
+      allies: allyHud,
+      partyLoadErrors: this.partyLoadErrors,
+      beat: this.currentBeat,
+      canSail: this.runDirector.canSail(),
+      islandPhase: this.runDirector.phase,
+      missionTitle: this.runDirector.mission.title,
+      missionKills: this.runDirector.run.killsThisRound,
+      missionGoal: this.runDirector.mission.killGoal,
+      remotePlayerCount: this.remoteAvatars.size,
+      mpRoom: this.mpRoom,
+      playerDead: this.playerHp <= 0,
+      coveBearing,
+      currentZone: this.currentZone?.name ?? null,
+      nearbyClaimZone: this.nearbyClaimZone
+        ? `${this.nearbyClaimZone.name} · C ghost · LMB build (${CAMP_BUILD_COST.wood}w/${CAMP_BUILD_COST.stone}s)`
+        : null,
+      claimsOwned: this.claimsOwned,
+      worldZones: (this.worldManifest?.zones ?? []).map((z) => ({
+        id: z.id,
+        name: z.name,
+        kind: z.kind,
+        x: z.x,
+        z: z.z,
+        radius: z.radius,
+        color: z.color,
+        claimable: z.claimable,
+        owner: z.owner,
+        chunkX: z.chunkX,
+        chunkZ: z.chunkZ,
+        areaLevel: z.areaLevel,
+        density: z.density,
+      })),
+      playerMapX: this.playerPos.x,
+      playerMapZ: this.playerPos.z,
+      playDomain: this.playDomain,
+      boatHeading: this.openWater?.heading,
+      boatSpeed: this.openWater?.speed,
+      nearbyIslandName:
+        this.playDomain === "open_water"
+          ? this.openWater?.nearestIsland(36)?.name ?? null
+          : null,
+      nearbyHarborStation:
+        this.playDomain === "land" && this.harborDistrict
+          ? (() => {
+              const s = this.harborDistrict!.nearest(
+                this.playerPos.x,
+                this.playerPos.z,
+                3.8,
+              );
+              return s
+                ? `${s.layout.shortLabel} · E ${s.layout.action}`
+                : null;
+            })()
+          : null,
+      canEmbark:
+        this.playDomain === "land" &&
+        Math.hypot(
+          this.playerPos.x - (this.coveCenter.x + 6),
+          this.playerPos.z - (this.coveCenter.z - 3),
+        ) < 10,
+      canLand:
+        this.playDomain === "open_water" &&
+        !!this.openWater?.nearestIsland(32),
     });
   }
 
@@ -3657,6 +5895,49 @@ export class GameEngine {
       }
     }
     this.clearHover();
+    if (this.fog) {
+      try {
+        this.runDirector.setExploredCells(this.fog.exportExplored());
+      } catch {
+        /* ignore */
+      }
+      this.fog.dispose();
+      this.fog = null;
+    }
+    this.worldChunkMap?.dispose();
+    this.worldChunkMap = null;
+    this.worldManifest = null;
+    this.modularField?.dispose();
+    this.modularField = null;
+    this.farmField?.dispose();
+    this.farmField = null;
+    this.zoneDebris?.dispose();
+    this.zoneDebris = null;
+    this.openWater?.dispose();
+    this.openWater = null;
+    this.harborDistrict?.dispose();
+    this.harborDistrict = null;
+    this.playerCamps?.dispose();
+    this.playerCamps = null;
+    this.clearPlaceGhost();
+    this.placeMode = null;
+    disposeDracoLoader();
+    if (this.pathVisual) {
+      this.scene.remove(this.pathVisual);
+      this.pathVisual = null;
+    }
+    this.pathMap = null;
+    for (const rem of this.remoteAvatars.values()) {
+      this.scene.remove(rem.group);
+      rem.group.traverse((c) => {
+        const m = c as THREE.Mesh;
+        if (m.isMesh) {
+          m.geometry?.dispose();
+          (m.material as THREE.Material)?.dispose();
+        }
+      });
+    }
+    this.remoteAvatars.clear();
     this.maze?.dispose();
     this.maze = null;
     this.projectileField?.dispose();
@@ -3704,6 +5985,8 @@ export class GameEngine {
     this.camps = [];
     this.darkElfCamp?.dispose();
     this.darkElfCamp = null;
+    this.darkElfEvent?.dispose();
+    this.darkElfEvent = null;
     this.claimFlags?.dispose();
     this.claimFlags = null;
     this.wispEvents?.dispose();

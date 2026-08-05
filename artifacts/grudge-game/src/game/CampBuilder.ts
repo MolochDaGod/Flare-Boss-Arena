@@ -188,7 +188,8 @@ export function buildOrcCamp(
         const size = new THREE.Vector3();
         new THREE.Box3().setFromObject(probe).getSize(size);
         const w = Math.max(size.x, size.z);
-        if (w > 0.001) unit = 7 / w;
+        // Cabin target ~5.5u wide (player ~2m) — avoid oversized war-camp blobs.
+        if (w > 0.001) unit = Math.min(1.2, 5.5 / w);
       }
 
       for (const p of LAYOUT) {

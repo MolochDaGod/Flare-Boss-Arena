@@ -85,13 +85,15 @@ export function buildDarkElfCampPrefab(
       }
       prefabRoot = gltf.scene;
       applyDarkElfTint(prefabRoot);
-      // Normalize footprint ~28u wide
+      // Normalize footprint ~16u wide (player-scale war camp, not a fortress)
       const box = new THREE.Box3().setFromObject(prefabRoot);
       const size = new THREE.Vector3();
       box.getSize(size);
       const span = Math.max(size.x, size.z, 1);
-      prefabRoot.scale.setScalar(28 / span);
-      prefabRoot.position.y -= box.min.y * (28 / span);
+      const target = 16;
+      const s = Math.min(2.5, target / span);
+      prefabRoot.scale.setScalar(s);
+      prefabRoot.position.y -= box.min.y * s;
       group.add(prefabRoot);
     },
     undefined,
@@ -108,34 +110,8 @@ export function buildDarkElfCampPrefab(
     },
   );
 
-  // Floating crystal / altar marker at camp heart (shader-ish additive).
-  const crystalMat = new THREE.MeshStandardMaterial({
-    color: 0xaa44ff,
-    emissive: 0x6611aa,
-    emissiveIntensity: 1.2,
-    metalness: 0.4,
-    roughness: 0.2,
-    transparent: true,
-    opacity: 0.92,
-  });
-  const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(1.1, 0), crystalMat);
-  crystal.position.y = 2.2;
-  crystal.name = "dark_elf_crystal";
-  group.add(crystal);
-
-  const beam = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.12, 0.35, 14, 10, 1, true),
-    new THREE.MeshBasicMaterial({
-      color: 0xaa66ff,
-      transparent: true,
-      opacity: 0.22,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-    }),
-  );
-  beam.position.y = 8;
-  group.add(beam);
+  // Ritual crystal + combat HP live on `buildDarkElfCrystalEvent` (GameEngine).
+  // Camp prefab is backdrop structures only so the event crystal is unique.
 
   // Sentry placeholders (dark_elf.glb instances)
   for (const spot of sentrySpots) {

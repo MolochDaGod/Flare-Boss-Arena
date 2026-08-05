@@ -11,6 +11,8 @@ import {
   type FighterSpecialDef,
 } from "./fighterSkills";
 import { getStoneCombatMods } from "./stones";
+import { getEquipmentCombatMods } from "./equipmentLoadout";
+import { getAttributeAllocations } from "./attributePoints";
 import { onslaughtAttackSpeedMult } from "./procs";
 
 export type WeaponStyle =
@@ -340,9 +342,10 @@ export interface GameLoadout {
 
 function effectiveAttrs(fighter: FighterDef): Record<AttrKey, number> {
   const stones = getStoneCombatMods();
+  const spent = getAttributeAllocations(fighter.id);
   const out = { ...fighter.stats };
   for (const k of ATTR_ORDER) {
-    out[k] = (out[k] ?? 0) + (stones.attrBonus[k] ?? 0);
+    out[k] = (out[k] ?? 0) + (stones.attrBonus[k] ?? 0) + (spent[k] ?? 0);
   }
   return out;
 }
@@ -350,33 +353,38 @@ function effectiveAttrs(fighter: FighterDef): Record<AttrKey, number> {
 function combatFrom(fighter: FighterDef, weapon: GameWeapon) {
   const s = effectiveAttrs(fighter);
   const st = getStoneCombatMods();
+  // Weapons + armor from MainPanel / equipment loadout
+  const eq = getEquipmentCombatMods(fighter.id);
 
   // Strength → physical damage, Intellect → skill mult, Tactics → hybrid skill edge
+  // Equipped mainhand/armor stats stack on top of the signature weapon bonus.
   let baseDamage =
     16 +
     s.strength * 3.2 +
     s.dexterity * 1.2 +
     s.tactics * 0.8 +
     weapon.damageBonus +
-    st.damage;
-  const spellDamageMult = 1 + s.intellect * 0.04 + s.tactics * 0.015 + st.spellDamage;
+    st.damage +
+    eq.damage;
+  const spellDamageMult =
+    1 + s.intellect * 0.04 + s.tactics * 0.015 + st.spellDamage + eq.magicDamage * 0.01;
 
   const critChance = Math.min(
     0.6,
-    0.06 + s.dexterity * 0.018 + s.agility * 0.008 + weapon.critBonus + st.crit,
+    0.06 + s.dexterity * 0.018 + s.agility * 0.008 + weapon.critBonus + st.crit + eq.crit,
   );
 
-  // Vitality / Endurance → life
-  const maxHp = 260 + s.vitality * 48 + s.endurance * 22 + st.health;
+  // Vitality / Endurance → life (+ armor HP)
+  const maxHp = 260 + s.vitality * 48 + s.endurance * 22 + st.health + eq.health;
   // Wisdom / Intellect → mana
-  const maxMana = 85 + s.wisdom * 16 + s.intellect * 12 + st.mana;
+  const maxMana = 85 + s.wisdom * 16 + s.intellect * 12 + st.mana + eq.mana;
 
   let attackInterval =
     weapon.style === "gun" ? 0.95 : weapon.style === "fist" || weapon.style === "kick" ? 0.62 : 0.78;
   attackInterval *= Math.max(0.48, 1 - s.agility * 0.012 - st.attackSpeed) * onslaughtAttackSpeedMult();
 
-  const moveSpeedMult = 1 + s.agility * 0.015 + st.speed;
-  const defense = Math.min(0.5, s.endurance * 0.02 + st.defense);
+  const moveSpeedMult = 1 + s.agility * 0.015 + st.speed + eq.speed;
+  const defense = Math.min(0.55, s.endurance * 0.02 + st.defense + eq.defense + eq.block * 0.5);
   const magicDefense = Math.min(0.5, s.wisdom * 0.022 + st.magicDefense);
   const aoeMult = 1 + st.aoe + s.intellect * 0.01;
 

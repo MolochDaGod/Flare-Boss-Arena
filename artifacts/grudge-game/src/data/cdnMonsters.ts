@@ -1,62 +1,174 @@
 /**
- * CDN / D1 monster pack — lightweight Quaternius-style GLBs on assets.grudge-studio.com.
- * Loaded at runtime (not bundled) so the SPA stays small.
+ * CDN monster pack — Quaternius-style GLBs on assets.grudge-studio.com.
+ *
+ * Naming rule (hard): `name` always matches the asset file stem
+ * (e.g. Yeti.glb → "Yeti", Orc_Skull.glb → "Orc Skull"). Never rebadge a mesh
+ * as a different creature (no "Storm Drake" on Yeti, no "Sky Horror" on Demon).
+ *
+ * Prefer `.glb` when present (binary multi-clip); fall back to `.gltf`.
+ * Loaded at runtime so the SPA stays small. Clips are driven by GlbClipBank +
+ * enemyAnimLibrary classification.
  */
 
 import type { Archetype } from "../game/EnemyFactory";
+import {
+  cdnIdFromStem,
+  displayNameFromAssetPath,
+} from "./enemyAnimLibrary";
 
 const CDN = "https://assets.grudge-studio.com";
 
 export interface CdnMonsterDef {
   id: string;
+  /** Must match asset stem (see displayNameFromAssetPath). */
   name: string;
   type: string;
   tier: number;
   hp: number;
   damage: number;
-  /** Full URL to GLB/GLTF. */
+  /** Full URL to GLB/GLTF on Cloudflare R2. */
   url: string;
+  /** File stem as stored on CDN (source of truth for the name). */
+  assetStem: string;
   archetype: Archetype;
   height: number;
-  /** Prefer first matching clip name fragment; null = procedural sway. */
+  /**
+   * Prefer this clip name fragment for attack when classifying multi-clip packs.
+   * null = let enemyAnimLibrary / GlbClipBank auto-classify.
+   */
   clipHint: string | null;
+  /** True when the pack is known to ship idle/walk/attack tracks. */
+  hasAuthoredAnims: boolean;
 }
 
-/** Curated game-ready set from D1 asset_registry (monster category). */
-export const CDN_MONSTER_DEFS: CdnMonsterDef[] = [
-  { id: "cdn_demon", name: "Pit Demon", type: "beast", tier: 4, hp: 480, damage: 28, url: `${CDN}/models/monsters/big/Demon.glb`, archetype: "golem", height: 2.8, clipHint: null },
-  { id: "cdn_yeti", name: "Frost Yeti", type: "beast", tier: 3, hp: 380, damage: 24, url: `${CDN}/models/monsters/big/Yeti.glb`, archetype: "quadruped", height: 2.6, clipHint: null },
-  { id: "cdn_mushroom", name: "Mushroom King", type: "plant", tier: 3, hp: 340, damage: 20, url: `${CDN}/models/monsters/big/MushroomKing.glb`, archetype: "golem", height: 2.4, clipHint: null },
-  { id: "cdn_orc", name: "Warband Orc", type: "humanoid", tier: 2, hp: 260, damage: 18, url: `${CDN}/models/monsters/big/Orc.glb`, archetype: "humanoid", height: 2.1, clipHint: null },
-  { id: "cdn_orc_skull", name: "Skull Orc", type: "undead", tier: 3, hp: 300, damage: 22, url: `${CDN}/models/monsters/big/Orc_Skull.glb`, archetype: "humanoid", height: 2.15, clipHint: null },
-  { id: "cdn_ninja", name: "Shadow Ninja", type: "humanoid", tier: 2, hp: 220, damage: 20, url: `${CDN}/models/monsters/big/Ninja.glb`, archetype: "humanoid", height: 1.95, clipHint: null },
-  { id: "cdn_alien", name: "Void Alien", type: "aberration", tier: 3, hp: 310, damage: 23, url: `${CDN}/models/monsters/big/Alien.glb`, archetype: "humanoid", height: 2.2, clipHint: null },
-  { id: "cdn_cactoro", name: "Cactoro", type: "plant", tier: 2, hp: 240, damage: 16, url: `${CDN}/models/monsters/big/Cactoro.glb`, archetype: "golem", height: 2.0, clipHint: null },
-  { id: "cdn_monkroose", name: "Monkroose", type: "beast", tier: 2, hp: 230, damage: 17, url: `${CDN}/models/monsters/big/Monkroose.glb`, archetype: "quadruped", height: 2.0, clipHint: null },
-  { id: "cdn_ghost", name: "Wailing Ghost", type: "undead", tier: 2, hp: 180, damage: 15, url: `${CDN}/models/monsters/flying/Ghost.gltf`, archetype: "flying", height: 1.8, clipHint: null },
-  { id: "cdn_ghost_skull", name: "Skull Ghost", type: "undead", tier: 3, hp: 210, damage: 19, url: `${CDN}/models/monsters/flying/Ghost_Skull.gltf`, archetype: "flying", height: 1.9, clipHint: null },
-  // Flying elite / boss-adjacent flyers (Mixamo retarget when clipHint null)
-  { id: "cdn_sky_horror", name: "Sky Horror", type: "dragon", tier: 5, hp: 720, damage: 36, url: `${CDN}/models/monsters/big/Demon.glb`, archetype: "flying", height: 3.2, clipHint: null },
-  { id: "cdn_storm_drake", name: "Storm Drake", type: "dragon", tier: 4, hp: 560, damage: 30, url: `${CDN}/models/monsters/big/Yeti.glb`, archetype: "flying", height: 2.9, clipHint: null },
-  // Extra undead / void bodies when CDN paths resolve (local kit skeletons still preferred for skeleton fights).
-  { id: "cdn_undead_brute", name: "Undead Brute", type: "undead", tier: 3, hp: 340, damage: 22, url: `${CDN}/models/monsters/big/Orc_Skull.glb`, archetype: "humanoid", height: 2.2, clipHint: null },
-  { id: "cdn_void_shade", name: "Void Shade", type: "aberration", tier: 3, hp: 250, damage: 21, url: `${CDN}/models/monsters/flying/Ghost_Skull.gltf`, archetype: "flying", height: 1.95, clipHint: null },
+function def(
+  folder: "big" | "flying" | "root" | "creatures",
+  stem: string,
+  ext: "glb" | "gltf",
+  opts: {
+    type: string;
+    tier: number;
+    hp: number;
+    damage: number;
+    archetype: Archetype;
+    height: number;
+    clipHint?: string | null;
+    hasAuthoredAnims?: boolean;
+  },
+): CdnMonsterDef {
+  const path =
+    folder === "root"
+      ? `models/monsters/${stem}.${ext}`
+      : folder === "creatures"
+        ? `models/creatures/${stem}.${ext}`
+        : `models/monsters/${folder}/${stem}.${ext}`;
+  const name = displayNameFromAssetPath(`${stem}.${ext}`);
+  return {
+    id: cdnIdFromStem(stem),
+    name,
+    type: opts.type,
+    tier: opts.tier,
+    hp: opts.hp,
+    damage: opts.damage,
+    url: `${CDN}/${path}`,
+    assetStem: stem,
+    archetype: opts.archetype,
+    height: opts.height,
+    clipHint: opts.clipHint ?? null,
+    // Quaternius Ultimate Monsters / creatures typically embed multi-clip banks
+    hasAuthoredAnims: opts.hasAuthoredAnims ?? true,
+  };
+}
 
-  // ── WC3-style neutrals (threejs-games mirrored to R2) — FBX ──────────────
-  // Fleet SSOT: objectstore.grudge-studio.com/api/v1/neutral-creeps.json
-  { id: "tjg_goblin", name: "Goblin", type: "creep", tier: 1, hp: 35, damage: 6, url: `${CDN}/models/creeps/threejs-games/goblin/model.fbx`, archetype: "humanoid", height: 1.35, clipHint: "idle" },
-  { id: "tjg_orc", name: "Orc", type: "creep", tier: 2, hp: 55, damage: 10, url: `${CDN}/models/creeps/threejs-games/orc/model.fbx`, archetype: "humanoid", height: 1.85, clipHint: "idle" },
-  { id: "tjg_skeleton", name: "Skeleton", type: "creep", tier: 1, hp: 40, damage: 8, url: `${CDN}/models/creeps/threejs-games/skeleton/model.fbx`, archetype: "humanoid", height: 1.8, clipHint: "idle" },
-  { id: "tjg_troll", name: "Troll", type: "creep", tier: 3, hp: 110, damage: 13, url: `${CDN}/models/creeps/threejs-games/troll/model.fbx`, archetype: "humanoid", height: 2.3, clipHint: "idle" },
-  { id: "tjg_golem", name: "Golem", type: "creep", tier: 4, hp: 140, damage: 16, url: `${CDN}/models/creeps/threejs-games/golem/model.fbx`, archetype: "golem", height: 2.4, clipHint: "idle" },
-  { id: "tjg_demon", name: "Demon", type: "creep", tier: 3, hp: 90, damage: 14, url: `${CDN}/models/creeps/threejs-games/demon/model.fbx`, archetype: "humanoid", height: 2.2, clipHint: "idle" },
-  { id: "tjg_witch", name: "Witch", type: "creep", tier: 2, hp: 48, damage: 11, url: `${CDN}/models/creeps/threejs-games/witch/model.fbx`, archetype: "humanoid", height: 1.7, clipHint: "idle" },
-  { id: "tjg_sorceress", name: "Sorceress", type: "creep", tier: 2, hp: 45, damage: 12, url: `${CDN}/models/creeps/threejs-games/sorceress/model.fbx`, archetype: "humanoid", height: 1.75, clipHint: "idle" },
-  { id: "tjg_orc_ogre", name: "Orc Ogre", type: "creep", tier: 3, hp: 120, damage: 18, url: `${CDN}/models/creeps/threejs-games/orc-ogre/model.fbx`, archetype: "golem", height: 2.5, clipHint: "idle" },
-  { id: "tjg_zombie", name: "Zombie", type: "creep", tier: 1, hp: 50, damage: 9, url: `${CDN}/models/creeps/threejs-games/zombie/zombie-barefoot.fbx`, archetype: "humanoid", height: 1.75, clipHint: "idle" },
-  { id: "tjg_zombie_guard", name: "Zombie Guard", type: "creep", tier: 2, hp: 70, damage: 11, url: `${CDN}/models/creeps/threejs-games/zombie/zombie-guard.fbx`, archetype: "humanoid", height: 1.85, clipHint: "idle" },
-  { id: "tjg_zombie_cop", name: "Zombie Cop", type: "creep", tier: 2, hp: 60, damage: 10, url: `${CDN}/models/creeps/threejs-games/zombie/zombie-cop.fbx`, archetype: "humanoid", height: 1.8, clipHint: "idle" },
+/**
+ * Curated set — every entry verified present on assets.grudge-studio.com.
+ * Names = asset stems only.
+ */
+export const CDN_MONSTER_DEFS: CdnMonsterDef[] = [
+  // ── Ground (big/) ────────────────────────────────────────────────────────
+  def("big", "Demon", "glb", { type: "demon", tier: 4, hp: 480, damage: 28, archetype: "golem", height: 2.8 }),
+  def("big", "Yeti", "glb", { type: "beast", tier: 3, hp: 380, damage: 24, archetype: "quadruped", height: 2.6 }),
+  def("big", "MushroomKing", "glb", { type: "plant", tier: 3, hp: 340, damage: 20, archetype: "golem", height: 2.4 }),
+  def("big", "Orc", "glb", { type: "humanoid", tier: 2, hp: 260, damage: 18, archetype: "humanoid", height: 2.1 }),
+  def("big", "Orc_Skull", "glb", { type: "undead", tier: 3, hp: 300, damage: 22, archetype: "humanoid", height: 2.15 }),
+  def("big", "Ninja", "glb", { type: "humanoid", tier: 2, hp: 220, damage: 20, archetype: "humanoid", height: 1.95 }),
+  def("big", "Alien", "glb", { type: "aberration", tier: 3, hp: 310, damage: 23, archetype: "humanoid", height: 2.2 }),
+  def("big", "Cactoro", "glb", { type: "plant", tier: 2, hp: 240, damage: 16, archetype: "golem", height: 2.0 }),
+  def("big", "Monkroose", "glb", { type: "beast", tier: 2, hp: 230, damage: 17, archetype: "quadruped", height: 2.0 }),
+  def("big", "Bunny", "glb", { type: "beast", tier: 1, hp: 120, damage: 10, archetype: "quadruped", height: 1.4 }),
+  def("big", "Fish", "glb", { type: "beast", tier: 1, hp: 100, damage: 9, archetype: "quadruped", height: 1.2 }),
+  def("big", "Dino", "glb", { type: "beast", tier: 3, hp: 400, damage: 26, archetype: "quadruped", height: 2.5 }),
+  def("big", "Frog", "glb", { type: "beast", tier: 1, hp: 110, damage: 11, archetype: "quadruped", height: 1.3 }),
+
+  // ── Flying ───────────────────────────────────────────────────────────────
+  def("flying", "Ghost", "glb", { type: "undead", tier: 2, hp: 180, damage: 15, archetype: "flying", height: 1.8 }),
+  def("flying", "Ghost_Skull", "glb", { type: "undead", tier: 3, hp: 210, damage: 19, archetype: "flying", height: 1.9 }),
+  def("flying", "Armabee", "glb", { type: "insect", tier: 2, hp: 160, damage: 14, archetype: "flying", height: 1.5 }),
+  def("flying", "Armabee_Evolved", "glb", { type: "insect", tier: 3, hp: 260, damage: 20, archetype: "flying", height: 1.85 }),
+  def("flying", "Demon", "glb", { type: "demon", tier: 4, hp: 440, damage: 27, archetype: "flying", height: 2.6 }),
+  def("flying", "Dragon", "gltf", { type: "dragon", tier: 5, hp: 720, damage: 36, archetype: "flying", height: 3.2 }),
+  def("flying", "Pigeon", "gltf", { type: "beast", tier: 1, hp: 90, damage: 8, archetype: "flying", height: 1.1 }),
+
+  // ── Root monsters/ (gltf pack) ───────────────────────────────────────────
+  def("root", "Bat", "gltf", { type: "beast", tier: 1, hp: 95, damage: 9, archetype: "flying", height: 1.0 }),
+  def("root", "Cyclops", "gltf", { type: "giant", tier: 4, hp: 520, damage: 30, archetype: "golem", height: 3.0 }),
+  def("root", "Cthulhu", "gltf", { type: "aberration", tier: 5, hp: 680, damage: 34, archetype: "golem", height: 2.9 }),
+  def("root", "Crab", "gltf", { type: "beast", tier: 2, hp: 200, damage: 16, archetype: "arachnid", height: 1.4 }),
+  def("root", "Chicken", "gltf", { type: "beast", tier: 1, hp: 80, damage: 7, archetype: "quadruped", height: 1.0 }),
+  def("root", "Pig", "gltf", { type: "beast", tier: 1, hp: 110, damage: 9, archetype: "quadruped", height: 1.15 }),
+  def("root", "Deer", "gltf", { type: "beast", tier: 1, hp: 130, damage: 10, archetype: "quadruped", height: 1.6 }),
+  def("root", "Mushroom", "gltf", { type: "plant", tier: 2, hp: 200, damage: 14, archetype: "golem", height: 1.7 }),
+
+  // ── Creatures pack ───────────────────────────────────────────────────────
+  def("creatures", "wolf", "glb", { type: "beast", tier: 2, hp: 210, damage: 17, archetype: "quadruped", height: 1.5 }),
+  def("creatures", "bear", "glb", { type: "beast", tier: 3, hp: 360, damage: 24, archetype: "quadruped", height: 2.2 }),
+
+  // ── threejs-games R2 neutrals (FBX) ──────────────────────────────────────
+  ...([
+    ["tjg_goblin", "Goblin", "goblin/model.fbx", "creep", 1, 35, 6, "humanoid", 1.35],
+    ["tjg_orc", "Orc", "orc/model.fbx", "creep", 2, 55, 10, "humanoid", 1.85],
+    ["tjg_skeleton", "Skeleton", "skeleton/model.fbx", "creep", 1, 40, 8, "humanoid", 1.8],
+    ["tjg_troll", "Troll", "troll/model.fbx", "creep", 3, 110, 13, "humanoid", 2.3],
+    ["tjg_golem", "Golem", "golem/model.fbx", "creep", 4, 140, 16, "golem", 2.4],
+    ["tjg_demon", "Demon", "demon/model.fbx", "creep", 3, 90, 14, "humanoid", 2.2],
+    ["tjg_witch", "Witch", "witch/model.fbx", "creep", 2, 48, 11, "humanoid", 1.7],
+    ["tjg_sorceress", "Sorceress", "sorceress/model.fbx", "creep", 2, 45, 12, "humanoid", 1.75],
+    ["tjg_orc_ogre", "Orc Ogre", "orc-ogre/model.fbx", "creep", 3, 120, 18, "golem", 2.5],
+    ["tjg_zombie", "Zombie", "zombie/zombie-barefoot.fbx", "creep", 1, 50, 9, "humanoid", 1.75],
+    ["tjg_zombie_guard", "Zombie Guard", "zombie/zombie-guard.fbx", "creep", 2, 70, 11, "humanoid", 1.85],
+    ["tjg_zombie_cop", "Zombie Cop", "zombie/zombie-cop.fbx", "creep", 2, 60, 10, "humanoid", 1.8],
+  ] as const).map(
+    ([id, name, rel, type, tier, hp, damage, archetype, height]) =>
+      ({
+        id,
+        name,
+        type,
+        tier,
+        hp,
+        damage,
+        url: `${CDN}/models/creeps/threejs-games/${rel}`,
+        assetStem: name.replace(/\s+/g, "_"),
+        archetype: archetype as Archetype,
+        height,
+        clipHint: "idle",
+        hasAuthoredAnims: true,
+      }) satisfies CdnMonsterDef,
+  ),
 ];
+
+// Deduplicate by id (flying Demon vs big Demon → keep both with unique stems)
+// big Demon = cdn_demon, flying Demon would collide — fix flying to stem path prefix
+// Rebuild flying Demon id to be unique:
+{
+  const flyingDemon = CDN_MONSTER_DEFS.find(
+    (d) => d.assetStem === "Demon" && d.url.includes("/flying/"),
+  );
+  if (flyingDemon) {
+    flyingDemon.id = "cdn_flying_demon";
+    // Name still matches asset: "Demon" — distinguish in name with folder? User wants asset name.
+    // Keep name "Demon"; id unique for lookups.
+  }
+}
 
 export const CDN_MONSTER_BY_ID = new Map(CDN_MONSTER_DEFS.map((d) => [d.id, d]));
 
@@ -64,6 +176,7 @@ export function isCdnMonsterId(id: string): boolean {
   return CDN_MONSTER_BY_ID.has(id);
 }
 
+/** Templates for spawn pools — id + name always track the CDN asset. */
 export const CDN_MONSTER_TEMPLATES = CDN_MONSTER_DEFS.map((d) => ({
   id: d.id,
   name: d.name,
@@ -72,3 +185,15 @@ export const CDN_MONSTER_TEMPLATES = CDN_MONSTER_DEFS.map((d) => ({
   hp: d.hp,
   damage: d.damage,
 }));
+
+/** Prefer entries known to ship multi-clip packs for combat showcases. */
+export const CDN_ANIMATED_TEMPLATES = CDN_MONSTER_DEFS.filter((d) => d.hasAuthoredAnims).map(
+  (d) => ({
+    id: d.id,
+    name: d.name,
+    type: d.type,
+    tier: d.tier,
+    hp: d.hp,
+    damage: d.damage,
+  }),
+);

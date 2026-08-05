@@ -1,13 +1,20 @@
 /**
  * Canonical Grudge6 D1 asset URLs for flare-boss-arena (no /cdn proxy).
- * Meshes + atlases on R2; baked Bip001 clips on grudge-arena API.
+ * Meshes + atlases on R2; baked Bip001 clips on assets.grudge-studio.com
+ * (manifest: anims/baked/manifest.json). Paths below are verified 200s.
  */
 
 import type { RaceId } from "./characterMeshes";
 import type { AllyRole } from "./grudge6Roster";
 
 const ARENA_CDN = "https://assets.grudge-studio.com/arena/assets/characters";
-const BAKED_ANIM_BASE = "https://grudge-arena.grudge-studio.com/api/assets/anims/baked";
+/** Primary: assets CDN mirror (reliable). Fallback: grudge-arena API. */
+export const BAKED_ANIM_BASES = [
+  "https://assets.grudge-studio.com/anims/baked",
+  "https://grudge-arena.grudge-studio.com/api/assets/anims/baked",
+] as const;
+/** @deprecated use BAKED_ANIM_BASES — kept for callers that import a single base. */
+const BAKED_ANIM_BASE = BAKED_ANIM_BASES[0];
 
 export const RACE_GLB_FILES: Record<RaceId, string> = {
   human: "WK_Characters.glb",
@@ -33,19 +40,24 @@ export type BakedAnimPack =
   | "sword_shield"
   | "longbow"
   | "rifle"
-  | "pistol";
+  | "pistol"
+  | "greatsword_samurai";
 
-/** Ally role → baked locomotion/combat pack. */
+/** Ally role → baked locomotion/combat pack (paths that exist on CDN). */
 export const ROLE_TO_BAKED_PACK: Record<AllyRole, BakedAnimPack> = {
   unarmed: "unarmed",
   healer: "magic",
-  tank: "sword_shield",
-  ranger: "longbow",
-  bruiser: "sword_shield",
-  fighter: "sword_shield",
-  skirmisher: "sword_shield",
+  tank: "greatsword_samurai",
+  ranger: "rifle",
+  bruiser: "greatsword_samurai",
+  fighter: "greatsword_samurai",
+  skirmisher: "unarmed",
 };
 
+/**
+ * Clip rels without `.json` — only paths confirmed on assets.grudge-studio.com.
+ * Missing specialty clips fall back in bakedAnimLoader to locomotion/unarmed.
+ */
 export const ANIM_PACK_CLIPS: Record<
   BakedAnimPack,
   { idle: string; walk: string; run: string; attack: string }
@@ -53,149 +65,164 @@ export const ANIM_PACK_CLIPS: Record<
   unarmed: {
     idle: "unarmed/fight_idle",
     walk: "locomotion/walking",
-    run: "uploads_2026_06/locomotion/torch run forward",
+    run: "locomotion/running",
     attack: "unarmed/punching",
   },
   magic: {
-    idle: "magic/standing idle",
+    idle: "locomotion/idle",
     walk: "locomotion/walking",
-    run: "magic/Standing Run Forward",
-    attack: "magic/standing 1h cast spell 01",
+    run: "locomotion/running",
+    attack: "unarmed/lead_jab",
   },
   sword_shield: {
-    idle: "sword_shield/sword and shield idle",
-    walk: "locomotion/walking",
-    run: "sword_shield/sword and shield run",
-    attack: "sword_shield/sword and shield attack",
+    idle: "greatsword_samurai/gs_samurai_idle_sword",
+    walk: "greatsword_samurai/gs_samurai_walk_sword",
+    run: "greatsword_samurai/gs_samurai_run_sword",
+    attack: "greatsword_samurai/gs_samurai_combo_a",
   },
   longbow: {
-    idle: "longbow/standing idle 01",
+    idle: "locomotion/idle",
     walk: "locomotion/walking",
-    run: "longbow/standing run forward",
-    attack: "longbow/standing aim recoil",
+    run: "locomotion/running",
+    attack: "rifle/firing",
   },
   rifle: {
     idle: "rifle/idle",
-    walk: "rifle/walk forward",
-    run: "rifle/run forward",
+    walk: "locomotion/walking",
+    run: "locomotion/running",
     attack: "rifle/firing",
   },
   pistol: {
-    idle: "pistol/pistol idle",
-    walk: "pistol/pistol walk",
-    run: "pistol/pistol run",
+    idle: "locomotion/idle",
+    walk: "locomotion/walking",
+    run: "locomotion/running",
     attack: "pistol/gunplay",
+  },
+  greatsword_samurai: {
+    idle: "greatsword_samurai/gs_samurai_idle_sword",
+    walk: "greatsword_samurai/gs_samurai_walk_sword",
+    run: "greatsword_samurai/gs_samurai_run_sword",
+    attack: "greatsword_samurai/gs_samurai_combo_a",
   },
 };
 
-/** Cardinal locomotion fallbacks per baked pack (4-way). */
+/** Universal locomotion fallbacks (always present on CDN). */
+export const LOCO_FALLBACK = {
+  idle: "locomotion/idle",
+  walk: "locomotion/walking",
+  run: "locomotion/running",
+  attack: "unarmed/punching",
+  dodge: "locomotion/dodging",
+  jump: "locomotion/jump",
+} as const;
+
+/** Cardinal locomotion fallbacks — use working locomotion paths only. */
 export const BAKED_DIR_RELS: Record<
   BakedAnimPack,
   { walkBack: string; runBack: string; strafeLeft: string; strafeRight: string }
 > = {
   unarmed: {
-    walkBack: "longbow/standing walk back",
-    runBack: "longbow/standing aim walk back",
-    strafeLeft: "locomotion/left strafe walking",
-    strafeRight: "locomotion/right strafe walking",
+    walkBack: "locomotion/walking",
+    runBack: "locomotion/running",
+    strafeLeft: "locomotion/walking",
+    strafeRight: "locomotion/walking",
   },
   magic: {
-    walkBack: "longbow/standing walk back",
-    runBack: "longbow/standing aim walk back",
-    strafeLeft: "locomotion/left strafe walking",
-    strafeRight: "locomotion/right strafe walking",
+    walkBack: "locomotion/walking",
+    runBack: "locomotion/running",
+    strafeLeft: "locomotion/walking",
+    strafeRight: "locomotion/walking",
   },
   sword_shield: {
-    walkBack: "longbow/standing walk back",
-    runBack: "longbow/standing aim walk back",
-    strafeLeft: "locomotion/left strafe walking",
-    strafeRight: "locomotion/right strafe walking",
+    walkBack: "greatsword_samurai/gs_samurai_walk_sword",
+    runBack: "greatsword_samurai/gs_samurai_run_sword",
+    strafeLeft: "locomotion/walking",
+    strafeRight: "locomotion/walking",
   },
   longbow: {
-    walkBack: "longbow/standing walk back",
-    runBack: "longbow/standing run back",
-    strafeLeft: "longbow/standing walk left",
-    strafeRight: "longbow/standing walk right",
+    walkBack: "locomotion/walking",
+    runBack: "locomotion/running",
+    strafeLeft: "locomotion/walking",
+    strafeRight: "locomotion/walking",
   },
   rifle: {
-    walkBack: "rifle/walk backward",
-    runBack: "rifle/run backward",
-    strafeLeft: "rifle/walk forward",
-    strafeRight: "rifle/walk forward",
+    walkBack: "locomotion/walking",
+    runBack: "locomotion/running",
+    strafeLeft: "locomotion/walking",
+    strafeRight: "locomotion/walking",
   },
   pistol: {
-    walkBack: "pistol/pistol walk backward",
-    runBack: "pistol/pistol run backward",
-    strafeLeft: "pistol/pistol strafe",
-    strafeRight: "pistol/pistol strafe",
+    walkBack: "locomotion/walking",
+    runBack: "locomotion/running",
+    strafeLeft: "locomotion/walking",
+    strafeRight: "locomotion/walking",
+  },
+  greatsword_samurai: {
+    walkBack: "greatsword_samurai/gs_samurai_walk_sword",
+    runBack: "greatsword_samurai/gs_samurai_run_sword",
+    strafeLeft: "locomotion/walking",
+    strafeRight: "locomotion/walking",
   },
 };
 
 /**
- * Extra one-shot clips keyed for triggerNamed().
- * Expanded for uMMORPG weapon skills (sword/axe/bow/staff/gun) + Warlords T0 kits.
- * Paths: warlord-genesis + boxanimations baked on grudge-arena CDN.
+ * Extra one-shot clips for triggerNamed() — only CDN-verified paths.
+ * Unknown names fall back to attack/punch in the loader.
  */
 export const BAKED_SKILL_CLIPS: Record<string, string> = {
-  // Magic
-  cast: "magic/standing 1h cast spell 01",
-  cast2H: "magic/standing 2h cast spell 01",
-  cast2h: "magic/standing 2h cast spell 01",
-  fireball: "magic/standing 2h cast spell 01",
-  ice_spike: "magic/standing 2h magic attack 01",
-  chain: "magic/standing 2h magic attack 03",
-  nova: "magic/standing 2h magic area attack 01",
-  aoe: "magic/Standing 2H Magic Area Attack 02",
-  barrier: "magic/spell casting",
-  bolt: "magic/standing 1h cast spell 01",
-  charged: "magic/Standing 1H Magic Attack 01",
-  // Sword / shield melee
-  slash: "sword_shield/sword and shield slash",
-  slash2: "sword_shield/sword and shield slash 1",
-  thrust: "sword_shield/sword and shield attack (1)",
-  power_strike: "sword_shield/sword and shield attack (2)",
-  cleave: "sword_shield/sword and shield attack (3)",
-  block: "sword_shield/sword and shield block",
-  block_idle: "sword_shield/sword and shield block idle",
-  power_up: "sword_shield/sword and shield power up",
-  draw: "sword_shield/draw sword 1",
-  sheath: "sword_shield/sheath sword 1",
-  // 1H/2H sword + dual
-  combo: "sword/one hand sword combo",
-  combo2h: "sword/two hand sword combo",
-  great_slash: "sword/great sword slash",
-  dual_combo: "dual/dual weapon combo",
-  // Club / axe / mace / hammer proxies
-  chop: "club/one hand club combo",
-  hack: "club/two hand club combo",
-  wild_swing: "club/two hand club combo",
-  whirlwind: "sword/two hand sword combo",
-  smash: "club/one hand club combo",
-  slam: "club/two hand club combo",
-  // Bow
-  aimed: "longbow/standing aim recoil",
-  quick_shot: "longbow/standing aim recoil",
-  volley: "longbow/standing aim recoil",
-  aim_idle: "boxanimations/longbow/Standing Aim Idle 02 Looking",
-  draw_arrow: "boxanimations/longbow/Standing Draw Arrow (1)",
-  dodge_left: "longbow/standing dodge left",
-  dodge_right: "longbow/standing dodge right",
-  dodge_back: "longbow/standing dodge backward",
-  // Gun
+  cast: "unarmed/lead_jab",
+  cast2H: "unarmed/punching",
+  cast2h: "unarmed/punching",
+  fireball: "unarmed/lead_jab",
+  ice_spike: "unarmed/lead_jab",
+  chain: "unarmed/punching",
+  nova: "unarmed/punching",
+  aoe: "unarmed/punching",
+  barrier: "locomotion/idle",
+  bolt: "unarmed/lead_jab",
+  charged: "unarmed/punching",
+  slash: "greatsword_samurai/gs_samurai_combo_a",
+  slash2: "greatsword_samurai/gs_samurai_combo_b",
+  thrust: "greatsword_samurai/gs_samurai_combo_a",
+  power_strike: "greatsword_samurai/gs_samurai_combo_b",
+  cleave: "greatsword_samurai/gs_samurai_combo_a",
+  block: "locomotion/idle",
+  block_idle: "locomotion/idle",
+  power_up: "greatsword_samurai/gs_samurai_idle_sword",
+  draw: "greatsword_samurai/gs_samurai_idle_sword",
+  sheath: "greatsword_samurai/gs_samurai_idle",
+  combo: "greatsword_samurai/gs_samurai_combo_a",
+  combo2h: "greatsword_samurai/gs_samurai_combo_b",
+  great_slash: "greatsword_samurai/gs_samurai_combo_a",
+  dual_combo: "greatsword_samurai/gs_samurai_combo_b",
+  chop: "unarmed/punching",
+  hack: "greatsword_samurai/gs_samurai_combo_a",
+  wild_swing: "greatsword_samurai/gs_samurai_combo_b",
+  whirlwind: "greatsword_samurai/gs_samurai_combo_a",
+  smash: "unarmed/punching",
+  slam: "greatsword_samurai/gs_samurai_combo_b",
+  aimed: "rifle/firing",
+  quick_shot: "rifle/firing",
+  volley: "rifle/firing",
+  aim_idle: "rifle/idle",
+  draw_arrow: "rifle/idle",
+  dodge_left: "locomotion/dodging",
+  dodge_right: "locomotion/dodging",
+  dodge_back: "locomotion/dodging",
   fire: "pistol/gunplay",
   burst: "rifle/firing",
-  sniper: "rifle/firing 2",
+  sniper: "rifle/firing",
   reload: "rifle/reloading",
-  // Mobility / reaction
   dodge: "locomotion/dodging",
-  combat_roll: "boxanimations/locomotion/Quick Roll To Run (1)",
-  hit: "boxanimations/reactions/Hit Reaction",
-  death: "boxanimations/reactions/Dying",
+  combat_roll: "locomotion/dodging",
+  hit: "locomotion/idle",
+  death: "locomotion/idle",
   jump: "locomotion/jump",
-  // Unarmed / worge
   jab: "unarmed/lead_jab",
   punch: "unarmed/punching",
   claw: "unarmed/punching",
+  dash: "greatsword_samurai/gs_samurai_dash_opener",
+  teleport: "greatsword_samurai/gs_samurai_dash_opener",
 };
 
 export function raceGlbUrl(race: RaceId): string {
@@ -206,9 +233,20 @@ export function raceAtlasUrl(race: RaceId): string {
   return `${ARENA_CDN}/${race}/textures/${RACE_ATLAS_FILES[race]}`;
 }
 
-export function bakedAnimUrl(rel: string): string {
-  const p = rel.startsWith("/") ? rel.slice(1) : rel;
-  return `${BAKED_ANIM_BASE}/${p}.json`;
+/** Encode each path segment for spaces in clip names. */
+export function bakedAnimUrl(rel: string, baseIndex = 0): string {
+  const p = rel.replace(/\.json$/i, "").replace(/^\//, "");
+  const base = BAKED_ANIM_BASES[baseIndex] ?? BAKED_ANIM_BASES[0];
+  const enc = p
+    .split("/")
+    .map((s) => encodeURIComponent(s))
+    .join("/");
+  return `${base}/${enc}.json`;
+}
+
+/** All candidate URLs for a clip (primary + mirrors). */
+export function bakedAnimUrls(rel: string): string[] {
+  return BAKED_ANIM_BASES.map((_, i) => bakedAnimUrl(rel, i));
 }
 
 export function animPackForRole(role: AllyRole): BakedAnimPack {

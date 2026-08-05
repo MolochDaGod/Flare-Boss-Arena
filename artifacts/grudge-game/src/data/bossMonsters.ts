@@ -4,6 +4,7 @@
  * dungeon island boss + boss arena resolve them by id / assetPack keyword.
  */
 import type { Archetype } from "../game/EnemyFactory";
+import { pickDungeonBossDef } from "./bossRoster";
 
 export interface BossMonsterDef {
   id: string;
@@ -28,7 +29,7 @@ export const BOSS_MONSTER_DEFS: BossMonsterDef[] = [
     id: "boss_fireworm",
     name: "Cinder Wyrmling",
     type: "dragon",
-    tier: 4,
+    tier: 3,
     hp: 520,
     damage: 30,
     file: "fireworm.glb",
@@ -95,7 +96,7 @@ export const BOSS_MONSTER_DEFS: BossMonsterDef[] = [
     id: "boss_sun_monkey_king",
     name: "Sun Monkey King",
     type: "beast",
-    tier: 5,
+    tier: 4,
     hp: 980,
     damage: 50,
     file: "sun_monkey_king.glb",
@@ -124,8 +125,8 @@ export function isBossMonsterId(id: string): boolean {
   return BOSS_MONSTER_BY_ID.has(id);
 }
 
+/** Prefer roster model id (may be mon_* / boss_* / cdn_*). */
 export function pickDungeonBossId(seed: number, round: number): string {
-  const pool = BOSS_MONSTER_DEFS.map((d) => d.id);
-  const idx = (seed ^ round * 7919) % pool.length;
-  return pool[idx] ?? "boss_noble_dragon";
+  const def = pickDungeonBossDef(seed, round);
+  return def.modelId;
 }

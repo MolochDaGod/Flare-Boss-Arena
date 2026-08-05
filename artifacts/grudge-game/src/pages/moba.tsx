@@ -3,9 +3,9 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
-import { ArrowLeft, Swords, Castle } from "lucide-react";
+import { ArrowLeft, Swords } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getActiveFighter, FIGHTERS } from "@/data/fighters";
+import { getActiveFighter } from "@/data/fighters";
 import { ANNIHILATE_FIGHTERS } from "@/data/annihilateHeroes";
 import { getFighterKit } from "@/data/fighterSkills";
 import {
@@ -13,6 +13,8 @@ import {
   updateMobaMatch,
   type MobaMatchState,
 } from "@/game/MobaMode";
+import { UnifiedCombatHud } from "@/components/UnifiedCombatHud";
+import { fromMobaHud } from "@/data/combatHudAdapters";
 
 export default function MobaPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -195,24 +197,19 @@ export default function MobaPage() {
         </div>
       </div>
 
-      <div className="absolute top-3 right-3 z-20 space-y-1 text-right">
-        <div className="rounded border border-[#c5a059]/30 bg-black/70 px-3 py-1 font-mono text-xs text-[#e8d5a3]">
-          Wave {hud.wave} · Gold {hud.gold} · HP {hud.hp} · Kills {hud.kills}
-        </div>
-        <div className="max-w-xs rounded border border-border/40 bg-black/60 px-3 py-1 text-[10px] text-muted-foreground">
-          {hud.message}
-        </div>
-      </div>
-
-      <div className="absolute bottom-4 left-4 z-20 rounded border border-[#c5a059]/25 bg-black/75 px-4 py-3 text-[11px] text-muted-foreground">
-        <div className="mb-1 font-serif text-xs uppercase tracking-widest text-[#c5a059]">
-          <Castle className="mr-1 inline h-3.5 w-3.5" /> MOBA Controls
-        </div>
-        <div>WASD — move · F / Space — attack minions & towers</div>
-        <div className="mt-1 text-[10px] opacity-80">
-          24 Annihilate heroes available on /select · skill kits on /skills
-        </div>
-      </div>
+      <UnifiedCombatHud
+        state={fromMobaHud(hud, { charName: fighter.name, maxHp: 600 })}
+        rightRail={
+          <div className="w-48 max-h-40 overflow-y-auto rounded border border-border/40 bg-black/70 p-2 text-[10px] text-muted-foreground pointer-events-auto">
+            <div className="mb-1 font-serif text-[10px] uppercase tracking-wider text-[#c5a059]">
+              Annihilate roster ({ANNIHILATE_FIGHTERS.length})
+            </div>
+            {ANNIHILATE_FIGHTERS.slice(0, 8).map((f) => (
+              <div key={f.id}>{f.name}</div>
+            ))}
+          </div>
+        }
+      />
 
       {winner && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70">
@@ -241,16 +238,6 @@ export default function MobaPage() {
         </div>
       )}
 
-      <div className="absolute bottom-4 right-4 z-20 max-h-40 w-48 overflow-y-auto rounded border border-border/40 bg-black/70 p-2 text-[10px] text-muted-foreground">
-        <div className="mb-1 font-serif text-[10px] uppercase tracking-wider text-[#c5a059]">
-          Annihilate roster ({ANNIHILATE_FIGHTERS.length})
-        </div>
-        {ANNIHILATE_FIGHTERS.slice(0, 8).map((f) => (
-          <div key={f.id}>{f.name}</div>
-        ))}
-        <div className="opacity-60">+{Math.max(0, ANNIHILATE_FIGHTERS.length - 8)} more on Select…</div>
-        <div className="mt-1 opacity-50">Total fighters: {FIGHTERS.length}</div>
-      </div>
     </div>
   );
 }

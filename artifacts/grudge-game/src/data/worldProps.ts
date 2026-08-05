@@ -51,7 +51,8 @@ export const WORLD_PROPS: WorldPropDef[] = [
     kind: "machine",
     folder: "perks",
     file: "perk_machines.glb",
-    scaleTarget: 6,
+    // Was 6 — often loaded as a giant slab; keep machine-row human-scale.
+    scaleTarget: 3.2,
     scaleMode: "footprint",
   },
   {
@@ -60,7 +61,7 @@ export const WORLD_PROPS: WorldPropDef[] = [
     kind: "machine",
     folder: "perks",
     file: "animation_gum_ball_machine.glb",
-    scaleTarget: 2.4,
+    scaleTarget: 1.85,
     scaleMode: "height",
     clip: null,
   },
@@ -120,7 +121,8 @@ export const WORLD_PROPS: WorldPropDef[] = [
     kind: "environment",
     folder: "props",
     file: "grass_trenches.glb",
-    scaleTarget: 14,
+    // Decorative ground strip — was 14u and dwarfed the yard.
+    scaleTarget: 6.5,
     scaleMode: "footprint",
   },
   {
@@ -129,7 +131,7 @@ export const WORLD_PROPS: WorldPropDef[] = [
     kind: "ui_panel",
     folder: "ui",
     file: "weapo_panel_ui.glb",
-    scaleTarget: 3.2,
+    scaleTarget: 2.2,
     scaleMode: "height",
   },
 ];

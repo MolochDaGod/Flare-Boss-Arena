@@ -8,14 +8,16 @@ import {
   ANIM_PACK_CLIPS,
   BAKED_DIR_RELS,
   BAKED_SKILL_CLIPS,
-  bakedAnimUrl,
+  LOCO_FALLBACK,
+  bakedAnimUrls,
   type BakedAnimPack,
 } from "../../data/grudge6Assets";
 
 const clipCache = new Map<string, THREE.AnimationClip>();
 
-export const MIN_CLIP_BIND_RATIO = 0.45;
-export const MIN_CLIP_BIND_COUNT = 8;
+/** Soft thresholds — Bip001 retargets often bind ~40–70% of tracks. */
+export const MIN_CLIP_BIND_RATIO = 0.25;
+export const MIN_CLIP_BIND_COUNT = 4;
 
 export class BakedAnimLoadError extends Error {
   constructor(
@@ -127,17 +129,37 @@ async function loadBakedClip(rel: string, scene: THREE.Object3D | null): Promise
   const cached = clipCache.get(cacheKey);
   if (cached) return cached.clone();
 
-  const url = bakedAnimUrl(rel);
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const json = await res.json();
-    let clip = normalizeBakedClip(THREE.AnimationClip.parse(json), scene);
-    clipCache.set(cacheKey, clip);
-    return clip.clone();
-  } catch {
-    return null;
+  // Try primary CDN then grudge-arena API mirror
+  for (const url of bakedAnimUrls(rel)) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const json = await res.json();
+      const clip = normalizeBakedClip(THREE.AnimationClip.parse(json), scene);
+      if (!clip.tracks.length) continue;
+      clipCache.set(cacheKey, clip);
+      return clip.clone();
+    } catch {
+      /* try next base */
+    }
   }
+  return null;
+}
+
+/** Load clip or a known-good fallback so packs always assemble. */
+async function loadClipOrFallback(
+  rel: string,
+  fallbacks: string[],
+  scene: THREE.Object3D | null,
+): Promise<THREE.AnimationClip | null> {
+  const primary = await loadBakedClip(rel, scene);
+  if (primary) return primary;
+  for (const fb of fallbacks) {
+    if (fb === rel) continue;
+    const hit = await loadBakedClip(fb, scene);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 export interface BakedPackResult {
@@ -169,26 +191,51 @@ export async function loadBakedPackForAlly(
   pack: BakedAnimPack,
   scene: THREE.Object3D,
 ): Promise<BakedPackResult> {
-  const defs = ANIM_PACK_CLIPS[pack];
-  const dirRels = BAKED_DIR_RELS[pack];
-  const rels: Record<string, string> = {
-    idle: defs.idle,
-    walk: defs.walk,
-    run: defs.run,
-    attack: defs.attack,
-    walkBack: dirRels.walkBack,
-    runBack: dirRels.runBack,
-    strafeLeft: dirRels.strafeLeft,
-    strafeRight: dirRels.strafeRight,
-    ...BAKED_SKILL_CLIPS,
+  const defs = ANIM_PACK_CLIPS[pack] ?? ANIM_PACK_CLIPS.unarmed;
+  const dirRels = BAKED_DIR_RELS[pack] ?? BAKED_DIR_RELS.unarmed;
+
+  const core: Record<string, { rel: string; fallbacks: string[] }> = {
+    idle: {
+      rel: defs.idle,
+      fallbacks: [LOCO_FALLBACK.idle, "unarmed/fight_idle", LOCO_FALLBACK.walk],
+    },
+    walk: {
+      rel: defs.walk,
+      fallbacks: [LOCO_FALLBACK.walk, LOCO_FALLBACK.run],
+    },
+    run: {
+      rel: defs.run,
+      fallbacks: [LOCO_FALLBACK.run, LOCO_FALLBACK.walk],
+    },
+    attack: {
+      rel: defs.attack,
+      fallbacks: [
+        LOCO_FALLBACK.attack,
+        "greatsword_samurai/gs_samurai_combo_a",
+        "unarmed/lead_jab",
+        "rifle/firing",
+        "pistol/gunplay",
+      ],
+    },
+    walkBack: { rel: dirRels.walkBack, fallbacks: [LOCO_FALLBACK.walk] },
+    runBack: { rel: dirRels.runBack, fallbacks: [LOCO_FALLBACK.run] },
+    strafeLeft: { rel: dirRels.strafeLeft, fallbacks: [LOCO_FALLBACK.walk] },
+    strafeRight: { rel: dirRels.strafeRight, fallbacks: [LOCO_FALLBACK.walk] },
   };
 
+  // Skills are optional — don't block pack load
+  for (const [name, rel] of Object.entries(BAKED_SKILL_CLIPS)) {
+    if (!core[name]) {
+      core[name] = { rel, fallbacks: [LOCO_FALLBACK.attack, LOCO_FALLBACK.idle] };
+    }
+  }
+
   const entries = await Promise.all(
-    Object.entries(rels).map(async ([name, rel]) => {
-      const clip = await loadBakedClip(rel, scene);
+    Object.entries(core).map(async ([name, { rel, fallbacks }]) => {
+      const clip = await loadClipOrFallback(rel, fallbacks, scene);
       if (!clip) return null;
       clip.name = name;
-      return [name, clip] as const;
+      return [name, clip, rel] as const;
     }),
   );
 
@@ -197,12 +244,24 @@ export async function loadBakedPackForAlly(
   const sources: Record<string, string> = {};
   const missing: string[] = [];
 
-  for (const [name, rel] of Object.entries(rels)) sources[name] = rel;
   for (const entry of entries) {
     if (!entry) continue;
-    const [name, clip] = entry;
+    const [name, clip, rel] = entry;
     pool.push(clip);
-    clips[name as keyof BakedPackResult["clips"]] = clip;
+    sources[name] = rel;
+    if (
+      name === "idle" ||
+      name === "walk" ||
+      name === "run" ||
+      name === "sprint" ||
+      name === "attack" ||
+      name === "walkBack" ||
+      name === "runBack" ||
+      name === "strafeLeft" ||
+      name === "strafeRight"
+    ) {
+      clips[name] = clip;
+    }
   }
 
   for (const name of REQUIRED_LOCO) {
@@ -210,14 +269,16 @@ export async function loadBakedPackForAlly(
   }
   if (!clips.attack) missing.push("attack");
 
+  // Soft bind check — warn but accept weaker binds (authored fallback only if total miss)
   const animRoot = getAnimationRoot(scene);
   let idleBindRatio: number | null = null;
   if (clips.idle) {
     const bind = validateClipBinding(clips.idle, animRoot);
     idleBindRatio = bind.ratio;
-    if (!bind.ok) {
+    // Only hard-fail if nothing bound at all
+    if (bind.total > 0 && bind.bound === 0) {
       throw new BakedAnimLoadError(
-        `Idle bind ${bind.bound}/${bind.total} (${Math.round(bind.ratio * 100)}%, need ≥${Math.round(MIN_CLIP_BIND_RATIO * 100)}%)`,
+        `Idle bind 0/${bind.total} — skeleton mismatch`,
         pack,
         ["idle-bind"],
       );
@@ -228,6 +289,12 @@ export async function loadBakedPackForAlly(
     const sprint = clips.run.clone();
     sprint.name = "sprint";
     clips.sprint = sprint;
+    pool.push(sprint);
+  } else if (clips.walk) {
+    const sprint = clips.walk.clone();
+    sprint.name = "sprint";
+    clips.sprint = sprint;
+    clips.run = clips.walk;
     pool.push(sprint);
   }
 

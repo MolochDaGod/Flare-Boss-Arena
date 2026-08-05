@@ -10,35 +10,39 @@ import {
 } from "react";
 import { useLocation } from "wouter";
 import {
-  useGenerateBoss,
   useGetClasses,
   useGetWeapons,
-  type BossEncounter,
 } from "@workspace/api-client-react";
 import {
   ArenaScene,
   type ArenaStateUpdate,
   type ArenaBossInput,
 } from "@/game/ArenaScene";
-import { generateLocalBoss } from "@/data/localBoss";
 import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { getPlayableCharacter } from "@/data/playableIdentity";
+import { getGameLoadout } from "@/data/gameCombat";
 import { useResolvedSkills } from "@/data/skillsResolver";
 import { skillIconSrc } from "@/data/skillIcons";
-import { getActiveFighterId } from "@/data/fighters";
-import { recordBossKill, grantFighterXp, BOSSES_PER_TOKEN } from "@/data/flareEconomy";
-import { recordScoreEvent } from "@/data/flareLeaderboards";
 import {
   Loader2,
   Skull,
   Swords,
   ArrowLeft,
-  Sword,
-  Crosshair,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BarGauge, OrbGauge, Separator, ParchmentPanel, WarningBanner } from "@/components/CraftpixUI";
+import { ParchmentPanel, WarningBanner } from "@/components/CraftpixUI";
 import { toast } from "sonner";
+import { MultiplayerPanel } from "@/components/MultiplayerPanel";
+import type { MultiplayerClient } from "@/net/MultiplayerClient";
+import {
+  bossQueryFromSearch,
+  ALL_BOSSES,
+} from "@/data/localBoss";
+import { generateRosterBoss } from "@/data/bossRoster";
+import { UnifiedCombatHud } from "@/components/UnifiedCombatHud";
+import { fromArenaState } from "@/data/combatHudAdapters";
 
 // ─── Error boundary (WebGL may be unavailable in headless/screenshot) ───────────
 class ArenaErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -108,64 +112,21 @@ interface ArenaPlayerStats {
 
 function computeArenaStats(
   char: Record<string, unknown>,
-  classesData: unknown,
-  weaponsData: unknown,
+  _classesData: unknown,
+  _weaponsData: unknown,
 ): ArenaPlayerStats {
-  const attrs = (char.attributes as Record<string, number>) ?? {};
+  // Single path with fighter loadout + stones + equipped weapons/armor boosts.
+  const id = String(char.id ?? "");
+  const loadout = getGameLoadout(id || null);
   const level = Number(char.level ?? 1);
-  const charClass = String(char.class ?? "warrior").toLowerCase();
-  const charRace = String(char.race ?? "human");
-
-  const classes = (classesData as Record<string, unknown>)?.classes as
-    | Record<string, Record<string, unknown>>
-    | undefined;
-  const classData = classes?.[charClass] ?? classes?.["warrior"];
-  const classStart = (classData?.startingAttributes as Record<string, number>) ?? {};
-
-  const str = (classStart.Strength ?? 5) + (attrs.Strength ?? 0);
-  const vit = (classStart.Vitality ?? 3) + (attrs.Vitality ?? 0);
-  const end_ = (classStart.Endurance ?? 2) + (attrs.Endurance ?? 0);
-  const dex = (classStart.Dexterity ?? 1) + (attrs.Dexterity ?? 0);
-  const agi = (classStart.Agility ?? 1) + (attrs.Agility ?? 0);
-  const int_ = (classStart.Intellect ?? 0) + (attrs.Intellect ?? 0);
-  const wis = (classStart.Wisdom ?? 0) + (attrs.Wisdom ?? 0);
-
-  const maxHp = 200 + vit * 50 + end_ * 20 + level * 20;
-  const maxMana = 100 + int_ * 20 + wis * 10 + level * 10;
-  let baseDamage = 15 + str * 4 + dex * 2 + agi * 1 + level * 3;
-  let critChance = 0.1 + dex * 0.01 + agi * 0.005;
-
-  const equipment = (char.equipment as Record<string, string>) ?? {};
-  const mainHandId = equipment.mainHand;
-  if (mainHandId && weaponsData && typeof weaponsData === "object") {
-    const cats = (weaponsData as Record<string, unknown>).categories as
-      | Record<string, { items?: unknown[] }>
-      | undefined;
-    if (cats) {
-      outer: for (const cat of Object.values(cats)) {
-        for (const raw of cat.items ?? []) {
-          const w = raw as Record<string, unknown>;
-          if (w.id === mainHandId) {
-            const ws = w.stats as Record<string, number> | undefined;
-            if (ws) {
-              baseDamage += ws.damageBase ?? 0;
-              critChance += (ws.critBase ?? 0) / 100;
-            }
-            break outer;
-          }
-        }
-      }
-    }
-  }
-
   return {
     level,
-    maxHp: Math.round(maxHp),
-    maxMana: Math.round(maxMana),
-    baseDamage: Math.round(baseDamage),
-    critChance: Math.min(0.6, critChance),
-    className: charClass,
-    raceKey: charRace,
+    maxHp: loadout.combat.maxHp,
+    maxMana: loadout.combat.maxMana,
+    baseDamage: loadout.combat.baseDamage,
+    critChance: loadout.combat.critChance,
+    className: String(char.class ?? loadout.fighter.role).toLowerCase(),
+    raceKey: "human",
   };
 }
 
@@ -184,8 +145,8 @@ function BossArena() {
   const [hud, setHud] = useState<ArenaStateUpdate | null>(null);
   const [tier, setTier] = useState(1);
   const [reward, setReward] = useState<string | null>(null);
-
-  const generateBoss = useGenerateBoss();
+  const [rosterIndex, setRosterIndex] = useState(0);
+  const [bossStyleLabel, setBossStyleLabel] = useState<string>("");
 
   const stats = useMemo(() => {
     return computeArenaStats(
@@ -220,19 +181,8 @@ function BossArena() {
   const handleState = useCallback((s: ArenaStateUpdate) => setHud(s), []);
 
   // Spin up the arena once a boss is generated + stats are ready.
-  // Depend on primitive stats fields (not the stats object) so async class/weapon
-  // catalog loads don't tear down WebGL and spawn a new context every render.
   useEffect(() => {
     if (!mountRef.current || !boss || !stats) return;
-    // Drop any prior scene immediately (Strict Mode / remount safety).
-    sceneRef.current?.dispose();
-    sceneRef.current = null;
-    // Clear leftover canvases if a prior dispose missed them.
-    while (mountRef.current.firstChild) {
-      mountRef.current.removeChild(mountRef.current.firstChild);
-    }
-
-    const bossSnapshot = boss;
     const scene = new ArenaScene({
       className: stats.className,
       raceKey: stats.raceKey,
@@ -241,27 +191,12 @@ function BossArena() {
       maxMana: stats.maxMana,
       baseDamage: stats.baseDamage,
       critChance: stats.critChance,
-      boss: bossSnapshot,
+      boss,
       onStateUpdate: handleState,
       onVictory: () => {
-        const bossId = bossSnapshot.id;
+        const bossId = boss.id;
         if (bossId != null) {
-          // Production economy: boss kills → Flare Grudge Tokens; XP only if owned.
-          const kill = recordBossKill();
-          void recordScoreEvent({ type: "boss_kill" });
-          const fighterId = getActiveFighterId();
-          let xpNote = "";
-          if (fighterId) {
-            const xp = grantFighterXp(fighterId, 50);
-            xpNote = xp.saved
-              ? ` · Level ${xp.level} saved (owned)`
-              : " · Level not saved (unlock with token to keep progress)";
-          }
-          const tokenNote =
-            kill.tokensEarned > 0
-              ? ` · +${kill.tokensEarned} Flare Grudge Token!`
-              : ` · Boss progress ${kill.progress}/${BOSSES_PER_TOKEN} toward next token`;
-          setReward(`Victory — spoils added.${tokenNote}${xpNote}`);
+          setReward("Victory — spoils added to your session wallet.");
         }
       },
     });
@@ -270,89 +205,57 @@ function BossArena() {
     sceneRef.current = scene;
     return () => {
       scene.dispose();
-      if (sceneRef.current === scene) sceneRef.current = null;
+      sceneRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- boss.id + primitive stats only
-  }, [
-    boss?.id,
-    boss?.name,
-    boss?.maxHp,
-    boss?.assetPack,
-    boss?.phases,
-    boss?.tier,
-    stats.level,
-    stats.maxHp,
-    stats.maxMana,
-    stats.baseDamage,
-    stats.critChance,
-    stats.className,
-    stats.raceKey,
-    handleState,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boss, stats]);
 
   // Keep the scene's archetype mapping in sync with resolved class skills.
   useEffect(() => {
     sceneRef.current?.setHudSkills(hudClassSkills?.skills.slice(0, 5) ?? []);
   }, [hudClassSkills]);
 
-  /** Instant local boss with curated GLBs (works on static Vercel with no API). */
-  const summonLocal = useCallback(() => {
-    const local = generateLocalBoss({
-      tier,
-      playerClass: String((char as unknown as Record<string, unknown>).class ?? "warrior"),
-      playerLevel: Number((char as unknown as Record<string, unknown>).level ?? 1),
-    });
-    setBoss(local);
-  }, [tier, char]);
+  const summonLocal = useCallback(
+    (opts?: { bossIndex?: number; bossId?: string }) => {
+      setReward(null);
+      const level = Number((char as unknown as Record<string, unknown>).level ?? 1);
+      const full = generateRosterBoss({
+        tier,
+        playerLevel: level,
+        playerClass: String((char as unknown as Record<string, unknown>).class ?? "warrior"),
+        bossIndex: opts?.bossIndex ?? rosterIndex,
+        bossId: opts?.bossId,
+      });
+      setBossStyleLabel(full.style);
+      setBoss({
+        id: full.id,
+        name: full.name,
+        title: full.title,
+        maxHp: full.maxHp,
+        phases: full.phases,
+        tier: full.tier,
+        assetPack: full.modelId,
+        abilities: full.abilities,
+        style: full.style,
+        modelId: full.modelId,
+        flying: full.flying,
+        bossScale: full.bossScale,
+      });
+      toast.message(`${full.name} enters`, {
+        description: `${full.style} · ${full.abilities.length} abilities · ${full.maxHp} HP`,
+      });
+    },
+    [char, tier, rosterIndex],
+  );
 
   const handleSummon = () => {
-    setReward(null);
-    // Production Vercel is static — always have a playable curated boss ready.
-    // Try AI generate when the API is up; fall back to local boss GLBs instantly.
-    generateBoss.mutate(
-      {
-        data: {
-          tier,
-          playerClass: (char as unknown as Record<string, unknown>).class as string,
-          playerLevel: Number((char as unknown as Record<string, unknown>).level ?? 1),
-        },
-      },
-      {
-        onSuccess: (b: BossEncounter) => {
-          const raw = b as unknown as Record<string, unknown>;
-          const abilitiesRaw = (raw.abilities as Record<string, unknown>[]) ?? [];
-          // Prefer local pack if AI assetPack is generic — keeps dragon/boss GLBs in play.
-          let assetPack = raw.assetPack ? String(raw.assetPack) : undefined;
-          if (!assetPack || /boss_character_default|boss_character_/i.test(assetPack)) {
-            assetPack = generateLocalBoss({ tier }).assetPack;
-          }
-          setBoss({
-            id: Number(raw.id),
-            name: String(raw.name ?? "Adversary"),
-            title: String(raw.title ?? ""),
-            maxHp: Number(raw.maxHp ?? 1000),
-            phases: Math.max(2, Number(raw.phases ?? 3)),
-            tier: Number(raw.tier ?? tier),
-            assetPack,
-            abilities: abilitiesRaw.map((a) => ({
-              id: String(a.id),
-              name: String(a.name),
-              damage: Number(a.damage ?? 30),
-              type: String(a.type ?? "melee"),
-              cooldown: Number(a.cooldown ?? 4),
-              description: a.description ? String(a.description) : undefined,
-            })),
-          });
-        },
-        onError: () => {
-          // Static deploy / no AI API — curated local boss with real GLB assets.
-          summonLocal();
-          toast.message("Local boss conjured", {
-            description: "Arena uses offline ritual with full boss models & stages.",
-          });
-        },
-      },
-    );
+    // Prefer URL ?boss= override, else current roster picker
+    const q = bossQueryFromSearch(typeof window !== "undefined" ? window.location.search : "");
+    if (q.bossId || q.bossIndex != null) {
+      summonLocal(q);
+      return;
+    }
+    summonLocal({ bossIndex: rosterIndex });
   };
 
   const handleRematch = () => {
@@ -362,16 +265,48 @@ function BossArena() {
     autoSummonRef.current = false;
   };
 
-  // Auto-conjure on entry with curated boss GLBs (static Vercel has no AI API).
+  // QA / deep-link: ?boss=framis or ?boss=3 auto-starts that fight once stats ready.
   useEffect(() => {
     if (!stats) return;
     if (boss) return;
     if (autoSummonRef.current) return;
+    const q = bossQueryFromSearch(typeof window !== "undefined" ? window.location.search : "");
+    if (!q.bossId && q.bossIndex == null) return;
     autoSummonRef.current = true;
-    summonLocal();
-  }, [stats, boss, summonLocal]);
+    if (q.bossId) {
+      const idx = ALL_BOSSES.findIndex((b) => b.id === q.bossId);
+      if (idx >= 0) setRosterIndex(idx);
+      summonLocal({ bossId: q.bossId });
+    } else if (q.bossIndex != null) {
+      setRosterIndex(q.bossIndex);
+      summonLocal({ bossIndex: q.bossIndex });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [char, stats, boss]);
 
   const charName = char.name;
+  const mpClientRef = useRef<MultiplayerClient | null>(null);
+
+  // Stream local pose into PvP room when connected.
+  useEffect(() => {
+    let last = 0;
+    let raf = 0;
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      const client = mpClientRef.current;
+      const scene = sceneRef.current;
+      if (!client || !scene || now - last < 50) return;
+      last = now;
+      const pose = scene.getLocalNetPose();
+      client.sendInput({
+        ax: pose.ax,
+        az: pose.az,
+        yaw: pose.yaw,
+      });
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   return (
     <div className="fixed inset-0 bg-black overflow-hidden select-none">
@@ -388,22 +323,56 @@ function BossArena() {
         <ArrowLeft className="w-4 h-4" /> War Panel
       </button>
 
-      {/* ── Conjuring failed: manual retry screen (no mandatory gate on entry) ── */}
-      {!boss && generateBoss.isError && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center p-6">
-          <ParchmentPanel className="max-w-md w-full p-8 text-center space-y-6">
+      {/* ── Loading / pick boss before fight starts ── */}
+      {!boss && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center p-6 bg-black/70">
+          <ParchmentPanel className="max-w-lg w-full p-8 text-center space-y-5">
             <Rivets />
-            <div className="w-20 h-20 mx-auto rounded-full flex items-center justify-center border" style={{ borderColor: GOLD }}>
-              <Skull className="w-10 h-10" style={{ color: GOLD }} />
+            <div className="w-16 h-16 mx-auto rounded-full flex items-center justify-center border" style={{ borderColor: GOLD }}>
+              <Skull className="w-8 h-8" style={{ color: GOLD }} />
             </div>
             <div>
               <h1 className="font-serif text-3xl uppercase tracking-widest mb-2" style={{ color: GOLD }}>
                 Arena of Blood
               </h1>
               <p className="text-muted-foreground text-sm leading-relaxed">
-                The ritual faltered — no adversary answered the call. Choose a tier and conjure again to enter the fight.
+                {ALL_BOSSES.length} curated bosses · distinct fight styles · offline-ready
               </p>
             </div>
+
+            {/* Boss carousel */}
+            <div className="flex items-center justify-center gap-2">
+              <button
+                type="button"
+                className="p-2 rounded border border-white/15 hover:border-primary/50"
+                onClick={() => setRosterIndex((i) => (i - 1 + ALL_BOSSES.length) % ALL_BOSSES.length)}
+              >
+                <ChevronLeft className="w-4 h-4" style={{ color: GOLD }} />
+              </button>
+              <div className="min-w-[200px]">
+                <p className="font-serif text-lg uppercase tracking-widest text-foreground">
+                  {ALL_BOSSES[rosterIndex % ALL_BOSSES.length]?.name}
+                </p>
+                <p className="text-[10px] font-mono uppercase text-muted-foreground">
+                  {ALL_BOSSES[rosterIndex % ALL_BOSSES.length]?.title}
+                </p>
+                <p className="text-[10px] mt-1" style={{ color: GOLD }}>
+                  {ALL_BOSSES[rosterIndex % ALL_BOSSES.length]?.style} · T
+                  {ALL_BOSSES[rosterIndex % ALL_BOSSES.length]?.tier}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="p-2 rounded border border-white/15 hover:border-primary/50"
+                onClick={() => setRosterIndex((i) => (i + 1) % ALL_BOSSES.length)}
+              >
+                <ChevronRight className="w-4 h-4" style={{ color: GOLD }} />
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground font-serif px-2">
+              {ALL_BOSSES[rosterIndex % ALL_BOSSES.length]?.blurb}
+            </p>
+
             <div className="flex items-center justify-center gap-2">
               <span className="font-serif text-xs tracking-widest uppercase text-muted-foreground">Tier</span>
               {[1, 2, 3, 4, 5].map((t) => (
@@ -426,176 +395,58 @@ function BossArena() {
               className="w-full h-14 font-serif text-lg tracking-widest uppercase rounded transition-colors"
               style={{ background: GOLD, color: "#1a1208" }}
             >
-              Conjure Adversary
+              Enter Fight
             </button>
+            {!stats && (
+              <p className="text-[10px] text-muted-foreground flex items-center justify-center gap-2">
+                <Loader2 className="w-3 h-3 animate-spin" /> Loading fighter stats…
+              </p>
+            )}
           </ParchmentPanel>
         </div>
       )}
 
-      {/* ── Auto-conjuring on entry (covers the brief pre-request window too) ── */}
-      {!boss && !generateBoss.isError && (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-4 bg-black/60">
-          <Loader2 className="w-12 h-12 animate-spin" style={{ color: GOLD }} />
-          <p className="font-serif tracking-widest uppercase animate-pulse" style={{ color: GOLD }}>
-            Forging Adversary...
-          </p>
-        </div>
-      )}
-
-      {/* ── Active fight HUD ── */}
+      {/* ── Unified combat HUD ── */}
       {boss && hud && (
         <>
-          {/* Boss banner — top center */}
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 w-[min(560px,80vw)] px-4 py-2.5" style={stonePanel}>
-            <Rivets />
-            <div className="flex justify-between items-end font-serif tracking-widest mb-1">
-              <span className="uppercase text-sm text-destructive flex items-center gap-2">
-                <Skull className="w-4 h-4" /> {boss.name}
-              </span>
-              <span className="text-[10px] uppercase" style={{ color: GOLD }}>
-                Phase {hud.bossPhase}/{hud.bossMaxPhases}
-              </span>
-            </div>
-            <BarGauge pct={(hud.bossHp / hud.bossMaxHp) * 100} color="#e23b3b" frame="cast" height={16} />
-            {boss.title && (
-              <div className="text-center text-[10px] tracking-widest uppercase text-muted-foreground mt-1">{boss.title}</div>
-            )}
-          </div>
-
-          {/* Floating boss telegraph warning */}
-          <AnimatePresence>
-            {hud.bossTelegraph && hud.bossAlive && (
-              <motion.div
-                initial={{ opacity: 0, y: -6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                className="absolute left-1/2 -translate-x-1/2 z-10 font-serif text-sm tracking-widest uppercase px-3 py-1 rounded"
-                style={{ top: 92, color: "#ffb84d", background: "rgba(120,40,0,0.6)", border: "1px solid #ff8800" }}
-              >
-                ⚠ {hud.bossTelegraph}
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Player vitals — bottom left */}
-          <div className="absolute bottom-4 left-4 z-10 w-60 px-3.5 py-3" style={stonePanel}>
-            <Rivets />
-            <div className="flex justify-between items-center mb-1.5">
-              <span className="font-serif text-sm tracking-widest uppercase" style={{ color: GOLD }}>
-                {charName}
-              </span>
-              <span className="text-[10px] text-muted-foreground">Lv {hud.playerLevel}</span>
-            </div>
-            <Separator className="mb-2.5 opacity-80" />
-            <div className="flex items-stretch gap-3">
-              <OrbGauge pct={(hud.playerHp / hud.playerMaxHp) * 100} color="#e23b3b" size={58} className="self-center shrink-0" />
-              <div className="flex-1 min-w-0 space-y-1.5">
-                <div className="flex justify-between text-[10px] text-muted-foreground">
-                  <span>HP</span>
-                  <span>{Math.round(hud.playerHp)}/{hud.playerMaxHp}</span>
-                </div>
-                <BarGauge pct={(hud.playerHp / hud.playerMaxHp) * 100} color="#e23b3b" height={15} />
-                <div className="flex justify-between text-[10px] text-muted-foreground">
-                  <span>MP</span>
-                  <span>{Math.round(hud.playerMana)}/{hud.playerMaxMana}</span>
-                </div>
-                <BarGauge pct={(hud.playerMana / hud.playerMaxMana) * 100} color="#3b82f6" height={12} />
-              </div>
-            </div>
-          </div>
-
-          {/* Combat log — bottom right */}
-          <div className="absolute bottom-4 right-4 z-10 w-72 max-h-40 overflow-hidden px-3 py-2" style={stonePanel}>
-            <Rivets />
-            <div className="space-y-0.5">
-              {hud.combatLog.slice(0, 6).map((line, i) => (
-                <div key={i} className="text-[11px] font-serif tracking-wide" style={{ opacity: 1 - i * 0.14, color: i === 0 ? GOLD : "#bbb" }}>
-                  {line}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Bottom control cluster — centered, wraps on narrow viewports */}
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-end justify-center gap-2 flex-wrap max-w-[calc(100%-2rem)]">
-          {/* Skill bar */}
-          <div className="relative flex gap-2 px-3 py-2" style={stonePanel}>
-            <Rivets />
-            {skillSlots.map((s, i) => {
-              const cd = hud.skillCooldownPct[i] ?? 1;
-              const ready = cd >= 1;
-              return (
-                <button
-                  key={i}
-                  onClick={() => sceneRef.current?.useSkill(i)}
-                  className="relative w-12 h-12 rounded flex items-center justify-center text-lg border transition-colors overflow-hidden"
-                  style={{ borderColor: ready ? GOLD : "#444", background: "rgba(0,0,0,0.5)" }}
-                  title={s.name}
-                >
-                  {s.icon ? (
-                    <img
-                      src={s.icon}
-                      alt={s.name}
-                      className="w-full h-full object-cover rounded"
-                    />
-                  ) : (
-                    <span>{s.glyph ?? "✦"}</span>
-                  )}
-                  {!ready && (
-                    <div
-                      className="absolute inset-0 bg-black/70"
-                      style={{ clipPath: `inset(${cd * 100}% 0 0 0)` }}
-                    />
-                  )}
-                  <span className="absolute bottom-0.5 right-1 text-[8px] text-muted-foreground">{i + 1}</span>
-                </button>
-              );
+          <UnifiedCombatHud
+            state={fromArenaState(hud, {
+              charName: String(charName ?? "Fighter"),
+              raceClass: `${String(char.race ?? "")} ${String(char.class ?? "")}`.trim(),
+              skills: skillSlots.map((s, i) => ({
+                id: `slot_${i}`,
+                name: s.name,
+                key: String(i + 1),
+                icon: s.icon,
+                glyph: s.glyph,
+                readyPct: hud.skillCooldownPct[i] ?? 1,
+              })),
+              bossStyle: bossStyleLabel || boss.style || null,
+              zone: "Arena of Blood",
             })}
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => sceneRef.current?.attackNearest()}
-              className="w-12 h-12 rounded flex flex-col items-center justify-center border"
-              style={{ borderColor: GOLD, background: "rgba(0,0,0,0.5)", color: GOLD }}
-              title="Attack [F]"
-            >
-              <Sword className="w-5 h-5" />
-              <span className="text-[7px]">F</span>
-            </button>
-            <button
-              onClick={() => sceneRef.current?.doDodge()}
-              className="w-12 h-12 rounded flex flex-col items-center justify-center border"
-              style={{ borderColor: GOLD, background: "rgba(0,0,0,0.5)", color: GOLD }}
-              title="Dodge [Space/Q]"
-            >
-              <Crosshair className="w-5 h-5" />
-              <span className="text-[7px]">SPC</span>
-            </button>
-          </div>
-          </div>
-
-          {/* Floating damage numbers */}
-          <div className="absolute inset-0 z-10 pointer-events-none overflow-hidden">
-            {hud.damageNumbers.map((d) => (
-              <span
-                key={d.id}
-                className="absolute font-serif font-bold"
-                style={{
-                  left: d.x,
-                  top: d.y - d.age * 36,
-                  transform: "translate(-50%, -50%)",
-                  opacity: Math.max(0, 1 - d.age / 1.4),
-                  fontSize: d.isCrit ? 26 : 18,
-                  color: d.isPlayer ? (d.isCrit ? "#ffd060" : "#ffe9b0") : "#ff5a5a",
-                  textShadow: "0 0 4px #000, 0 2px 3px #000",
-                }}
-              >
-                {d.isCrit ? "✦" : ""}{d.value}
-              </span>
-            ))}
-          </div>
+            onSkill={(idx) => sceneRef.current?.useSkill(idx)}
+            onAttack={() => sceneRef.current?.attackNearest()}
+            onDodge={() => sceneRef.current?.doDodge()}
+            rightRail={
+              <div className="w-[210px]">
+                <MultiplayerPanel
+                  mode="arena"
+                  roomKey="quick"
+                  compact
+                  onClient={(c) => {
+                    mpClientRef.current = c;
+                    sceneRef.current?.setMpRoom(c?.room ?? null);
+                  }}
+                  onSnapshots={(_t, snaps, localId) => {
+                    sceneRef.current?.syncRemotePlayers(snaps, localId);
+                  }}
+                  onKill={(killer, victim) => {
+                    toast.message(`PvP: ${killer} downed ${victim}`);
+                  }}
+                />
+              </div>
+            }
+          />
 
           {/* Loading overlay until models stream in */}
           {!hud.loaded && (

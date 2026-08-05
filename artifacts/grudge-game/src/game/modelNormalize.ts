@@ -132,7 +132,8 @@ export function normalizeCharacterRoot(
 
 /**
  * Classify animation clips by name into idle / walk / attack / hit / death.
- * Used for multi-clip GLB banks when models ship more than one track.
+ * Patterns shared with `data/enemyAnimLibrary` so Quaternius packs
+ * (Idle / Walk / Bite_Front / HitReact / Death) and Mixamo names all resolve.
  */
 export function classifyClips(clips: THREE.AnimationClip[]): {
   idle?: THREE.AnimationClip;
@@ -142,15 +143,25 @@ export function classifyClips(clips: THREE.AnimationClip[]): {
   death?: THREE.AnimationClip;
   all: THREE.AnimationClip[];
 } {
-  const by = (re: RegExp) => clips.find((c) => re.test(c.name));
+  const by = (patterns: RegExp[]) => {
+    for (const re of patterns) {
+      const hit = clips.find((c) => re.test(c.name));
+      if (hit) return hit;
+    }
+    return undefined;
+  };
   return {
     idle:
-      by(/idle|stand|breath|wait|rest/i) ??
+      by([/^idle$/i, /idle|stand|standing|breath|wait|rest|fight_idle|combat_idle/i]) ??
       clips[0],
-    walk: by(/walk|run|locom|move|trot|jog/i),
-    attack: by(/attack|strike|slash|punch|swing|bite|cast|shoot|combo|melee|combat/i),
-    hit: by(/hit|hurt|damage|react|flinch/i),
-    death: by(/death|die|dead|collapse/i),
+    // Prefer walk over run for locomotion; run is still a valid walk fallback.
+    walk:
+      by([/walk|walking|trot|locom/i, /run|running|sprint|jog|gallop|fly/i, /move(?!ment)/i]),
+    attack: by([
+      /attack|strike|slash|punch|swing|bite|cast|shoot|combo|melee|combat|headbutt|slap|claw|sting|spit/i,
+    ]),
+    hit: by([/hit|hurt|damage|react|flinch|impact|gethit|get_hit/i]),
+    death: by([/death|die|dead|collapse|defeat/i]),
     all: clips,
   };
 }

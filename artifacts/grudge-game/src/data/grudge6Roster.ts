@@ -120,19 +120,19 @@ export const MAX_PARTY_ALLIES = 2;
 
 const PARTY_KEY = "flare:party:allies";
 
+/**
+ * Selected party for field deploy. Empty until the player picks units on /party —
+ * no auto-fill / auto-deploy of starter allies.
+ */
 export function getPartyAllyIds(): string[] {
-  if (typeof localStorage === "undefined") return suggestParty(2).map((h) => h.id);
+  if (typeof localStorage === "undefined") return [];
   try {
     const raw = localStorage.getItem(PARTY_KEY);
-    if (!raw) {
-      const def = suggestParty(2).map((h) => h.id);
-      localStorage.setItem(PARTY_KEY, JSON.stringify(def));
-      return def;
-    }
+    if (!raw) return [];
     const ids = (JSON.parse(raw) as string[]).filter((id) => GRUDGE6_BY_ID.has(id));
     return ids.slice(0, MAX_PARTY_ALLIES);
   } catch {
-    return suggestParty(2).map((h) => h.id);
+    return [];
   }
 }
 
@@ -149,6 +149,18 @@ export function togglePartyAlly(id: string): { ok: boolean; message: string; ids
     ids = ids.filter((x) => x !== id);
     setPartyAllyIds(ids);
     return { ok: true, message: "Removed from party.", ids };
+  }
+  // Only deploy owned units (rosterOwnership owns the key; starter pack always ok).
+  try {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem("flare:roster:owned_g6.v1") : null;
+    const starter = suggestParty(2).map((h) => h.id);
+    const owned = raw ? (JSON.parse(raw) as string[]) : starter;
+    const okSet = new Set([...owned, ...starter]);
+    if (!okSet.has(id)) {
+      return { ok: false, message: "Hire this unit first (Barracks / Party shop).", ids };
+    }
+  } catch {
+    /* allow if storage broken */
   }
   if (ids.length >= MAX_PARTY_ALLIES) {
     return { ok: false, message: `Max ${MAX_PARTY_ALLIES} allies.`, ids };

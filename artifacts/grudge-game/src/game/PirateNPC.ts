@@ -21,7 +21,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 const PIRATE_BASE = `${import.meta.env.BASE_URL}models/pirates`;
 
 /** Interaction role at Pirate Cove (neutral NPCs). */
-export type PirateRole = "vendor" | "captain" | "crew";
+export type PirateRole = "vendor" | "captain" | "crew" | "traveler";
 
 export interface PirateDef {
   id: string;

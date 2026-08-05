@@ -357,27 +357,37 @@ export class MazeArena {
   /**
    * Slide a foot-position capsule out of solid wall cells. Matches the spirit of
    * annihilate Box colliders + DungeonMap.collideHorizontal: only XZ is mutated.
+   *
+   * Hardened against mesh-through:
+   *  • collision half slightly larger than visual box
+   *  • 3×3 → 5×5 neighbour scan near corners
+   *  • more resolve iterations
+   *  • if still inside a wall cell after slides, snap to nearest walkable
    */
   collideHorizontal(pos: THREE.Vector3, radius: number) {
     if (this.disposed) return;
     const origin = -this.cols * this.cellSize * 0.5;
-    const half = this.cellSize * 0.46; // match visual boxW/2
+    // Slightly fatter than visual (boxW/2 = 0.46*cell) so feet never sit in mesh.
+    const half = this.cellSize * 0.49;
+    // Skin gap keeps the capsule from resting exactly on the surface (jitter/tunnel).
+    const skin = 0.04;
 
-    // Iterative resolve against neighbouring cells (covers corners).
-    for (let iter = 0; iter < 4; iter++) {
+    // Iterative resolve against neighbouring cells (covers corners + thin corridors).
+    for (let iter = 0; iter < 8; iter++) {
       const { gx, gz } = this.worldToCell(pos.x, pos.z);
       let moved = false;
-      for (let dz = -1; dz <= 1; dz++) {
-        for (let dx = -1; dx <= 1; dx++) {
+      // 5×5 neighbourhood so fast dashes still hit diagonal walls.
+      for (let dz = -2; dz <= 2; dz++) {
+        for (let dx = -2; dx <= 2; dx++) {
           const cx = gx + dx;
           const cz = gz + dz;
           if (!this.isWallCell(cx, cz)) continue;
           const c = this.cellCenter(cx, cz);
-          // AABB expand by radius.
-          const minX = c.x - half - radius;
-          const maxX = c.x + half + radius;
-          const minZ = c.z - half - radius;
-          const maxZ = c.z + half + radius;
+          // AABB expand by radius + skin.
+          const minX = c.x - half - radius - skin;
+          const maxX = c.x + half + radius + skin;
+          const minZ = c.z - half - radius - skin;
+          const maxZ = c.z + half + radius + skin;
           if (pos.x <= minX || pos.x >= maxX || pos.z <= minZ || pos.z >= maxZ) continue;
 
           // Push out along shallowest axis (classic AABB resolve).
@@ -394,7 +404,7 @@ export class MazeArena {
         }
       }
       // Also clamp to maze outer bounds.
-      const pad = radius + 0.2;
+      const pad = radius + 0.35;
       const min = origin + this.cellSize + pad;
       const max = origin + this.cols * this.cellSize - this.cellSize - pad;
       if (pos.x < min) { pos.x = min; moved = true; }
@@ -402,6 +412,35 @@ export class MazeArena {
       if (pos.z < min) { pos.z = min; moved = true; }
       if (pos.z > max) { pos.z = max; moved = true; }
       if (!moved) break;
+    }
+
+    // Hard reject: if still inside a solid cell (tunnel / high-speed frame), eject.
+    if (this.isWallCell(this.worldToCell(pos.x, pos.z).gx, this.worldToCell(pos.x, pos.z).gz)) {
+      const safe = this.nearestWalkable(pos.x, pos.z, 12);
+      pos.x = safe.x;
+      pos.z = safe.z;
+    }
+  }
+
+  /**
+   * Continuous horizontal move: subdivide long steps so high-speed dashes
+   * (dodge, sprint) cannot tunnel through a single wall cell in one frame.
+   * Mutates `pos` from its current value toward `pos + (dx,dz)`.
+   */
+  moveAndCollide(pos: THREE.Vector3, dx: number, dz: number, radius: number) {
+    const dist = Math.hypot(dx, dz);
+    if (dist < 1e-8) {
+      this.collideHorizontal(pos, radius);
+      return;
+    }
+    // Cap each substep to ~35% of a cell so we always sample walls.
+    const maxStep = this.cellSize * 0.35;
+    const steps = Math.max(1, Math.ceil(dist / maxStep));
+    const inv = 1 / steps;
+    for (let i = 0; i < steps; i++) {
+      pos.x += dx * inv;
+      pos.z += dz * inv;
+      this.collideHorizontal(pos, radius);
     }
   }
 

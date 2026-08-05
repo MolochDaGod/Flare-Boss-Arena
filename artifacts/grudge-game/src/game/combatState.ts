@@ -136,9 +136,11 @@ export class CombatStateMachine {
     }
   }
 
-  /** Shift dodge i-frame window. */
-  dodge(duration = 0.38) {
-    if (this.phase === "dead" || this.phase === "hit") return false;
+  /** Shift dodge i-frame window. Can cancel attack/skill recovery. */
+  dodge(duration = 0.4) {
+    if (this.phase === "dead") return false;
+    // Hit-stun blocks dodge; everything else can be cancelled into a roll.
+    if (this.phase === "hit") return false;
     this.enter("dodge", duration, "idle");
     return true;
   }

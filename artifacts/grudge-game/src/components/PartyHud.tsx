@@ -61,8 +61,12 @@ export function PartyHud({ allies, loadErrors }: PartyHudProps) {
               </div>
               <div className="flex items-center justify-between text-[7px] font-mono text-muted-foreground">
                 <span>{a.dead ? "—" : `${Math.round(a.hp)}/${a.maxHp}`}</span>
-                <span className="uppercase tracking-wider">
-                  {a.dead ? (a.respawnSec > 0 ? `down · ${a.respawnSec}s` : "down") : a.state}
+                <span className="uppercase tracking-wider truncate max-w-[90px]" title={a.goal ?? a.state}>
+                  {a.dead
+                    ? a.respawnSec > 0
+                      ? `down · ${a.respawnSec}s`
+                      : "down"
+                    : a.goal ?? a.state}
                 </span>
               </div>
               {!a.loadOk && (

@@ -238,6 +238,129 @@ class Trap extends Deployable {
   }
 }
 
+/** Ghost preview materials — transparent, non-interactive. */
+function ghostMat(color: number, opacity = 0.45): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 0.35,
+    transparent: true,
+    opacity,
+    depthWrite: false,
+    roughness: 0.55,
+    metalness: 0.15,
+  });
+}
+
+/**
+ * Build a translucent ghost of a deployable for mouse placement preview.
+ * Not added to the manager items list — caller owns scene attach + dispose.
+ */
+export function createDeployableGhost(
+  kind: DeployableKind,
+  color: number,
+  radius: number,
+): THREE.Group {
+  const g = new THREE.Group();
+  g.name = `ghost_${kind}`;
+  g.renderOrder = 8;
+  const mat = ghostMat(color, 0.5);
+  const ringMat = ghostMat(color, 0.35);
+
+  if (kind === "fire_totem") {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.26, 1.4, 8), mat);
+    pole.position.y = 0.7;
+    const flame = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 12), ghostMat(color, 0.55));
+    flame.position.y = 1.5;
+    g.add(pole, flame);
+  } else if (kind === "turret") {
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 0.5, 10), mat);
+    base.position.y = 0.25;
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 1.1), mat);
+    barrel.position.set(0, 0.6, 0.35);
+    g.add(base, barrel);
+  } else {
+    // trap
+    const disc = new THREE.Mesh(
+      new THREE.RingGeometry(radius * 0.4, radius * 0.55, 28),
+      ringMat,
+    );
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = 0.05;
+    g.add(disc);
+  }
+
+  // Footprint ring
+  const foot = new THREE.Mesh(
+    new THREE.RingGeometry(Math.max(0.8, radius * 0.35), Math.max(1.0, radius * 0.45), 36),
+    ringMat,
+  );
+  foot.rotation.x = -Math.PI / 2;
+  foot.position.y = 0.04;
+  g.add(foot);
+
+  g.traverse((o) => {
+    o.userData.ghost = true;
+    const m = o as THREE.Mesh;
+    if (m.isMesh) m.raycast = () => {};
+  });
+  return g;
+}
+
+/**
+ * Lightweight camp ghost — fence ring posts + tower stub (real GLBs load on confirm).
+ */
+export function createCampGhost(radius: number): THREE.Group {
+  const g = new THREE.Group();
+  g.name = "ghost_camp";
+  g.renderOrder = 8;
+  const wood = ghostMat(0xc5a059, 0.42);
+  const postMat = ghostMat(0x8a7050, 0.5);
+
+  // Ground disc
+  const ground = new THREE.Mesh(
+    new THREE.CircleGeometry(radius * 0.92, 40),
+    ghostMat(0x3a3428, 0.22),
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = 0.03;
+  g.add(ground);
+
+  // Fence posts + rails
+  const count = Math.max(10, Math.round((Math.PI * 2 * radius) / 2.1));
+  for (let i = 0; i < count; i++) {
+    const ang = (i / count) * Math.PI * 2;
+    const x = Math.sin(ang) * radius;
+    const z = Math.cos(ang) * radius;
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.0, 0.18), postMat);
+    post.position.set(x, 1.0, z);
+    g.add(post);
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 2.0), wood);
+    rail.position.set(x, 1.15, z);
+    rail.rotation.y = ang;
+    g.add(rail);
+  }
+
+  // Watchtower stub
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.35, 1.6), wood);
+  base.position.set(0.3, 0.18, -0.4);
+  const shaft = new THREE.Mesh(new THREE.BoxGeometry(1.1, 3.2, 1.1), postMat);
+  shaft.position.set(0.3, 1.9, -0.4);
+  const platform = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.2, 2.0), wood);
+  platform.position.set(0.3, 3.6, -0.4);
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(1.4, 0.9, 4), wood);
+  roof.position.set(0.3, 4.2, -0.4);
+  roof.rotation.y = Math.PI / 4;
+  g.add(base, shaft, platform, roof);
+
+  g.traverse((o) => {
+    o.userData.ghost = true;
+    const m = o as THREE.Mesh;
+    if (m.isMesh) m.raycast = () => {};
+  });
+  return g;
+}
+
 export class DeployableManager {
   private scene: THREE.Scene;
   private items: Deployable[] = [];
@@ -247,8 +370,9 @@ export class DeployableManager {
     this.scene = scene;
   }
 
-  deploy(kind: DeployableKind, pos: THREE.Vector3, color: number, baseDamage: number, radius: number) {
-    if (this.disposed) return;
+  /** Place a live deployable at world XZ. Returns true if spawned. */
+  deploy(kind: DeployableKind, pos: THREE.Vector3, color: number, baseDamage: number, radius: number): boolean {
+    if (this.disposed) return false;
     let d: Deployable;
     if (kind === "fire_totem") d = new FireTotem(color, baseDamage, radius);
     else if (kind === "turret") d = new Turret(color, baseDamage, radius);
@@ -257,6 +381,7 @@ export class DeployableManager {
     d.group.position.set(pos.x, 0, pos.z);
     this.scene.add(d.group);
     this.items.push(d);
+    return true;
   }
 
   update(delta: number, ctx: DeployContext): boolean {

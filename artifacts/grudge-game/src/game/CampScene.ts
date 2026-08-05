@@ -33,6 +33,11 @@ import { CAMP_PROP_PLACEMENTS } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
 import { canDodge } from "./combatInput";
 import {
+  resolveDodge,
+  dodgeClipCandidates,
+  DODGE_IFRAME_S,
+} from "./dodgeMath";
+import {
   CAMP_STATION_BY_ID,
   campSceneCoord,
   CAMP_YARD_BOUNDS,
@@ -186,6 +191,8 @@ export class CampScene {
   private playerFacing = 0;
   private playerSpeed = 6;
   private lastDodgeAt = 0;
+  /** ms timestamp — unused for camp damage but drains root-motion double-dash. */
+  private dodgeIframeUntil = 0;
 
   private stations: CampStation[] = [];
   private campfireLight!: THREE.PointLight;
@@ -361,9 +368,9 @@ export class CampScene {
 
     // Rocks ring the yard edge / hills (one InstancedMesh).
     const rocks = makeRockField(200, yard * 0.72, yard + 28);
-    rocks.name = "camp_rock_field";
-    this.scene.add(rocks);
-    this.rockField = rocks;
+    rocks.mesh.name = "camp_rock_field";
+    this.scene.add(rocks.mesh);
+    this.rockField = rocks.mesh;
 
     // Edge marker stones along the walkable square (reads as a real yard).
     const edgeGeom = new THREE.DodecahedronGeometry(0.85, 0);
@@ -816,7 +823,7 @@ export class CampScene {
    * at y=0, and wrap it in a holder placed at + facing the camp centre.
    */
   private placeBuilding(src: THREE.Object3D, x: number, z: number): THREE.Group {
-    const TARGET = 5.5; // world-unit footprint (max of width/depth)
+    const TARGET = 4.2; // world-unit footprint — buildings readable, not stadium-sized
     src.updateWorldMatrix(true, false);
 
     const clone = src.clone(true);
@@ -1012,19 +1019,40 @@ export class CampScene {
     requestAnimationFrame(step);
   }
 
-  /** Dodge roll — quick dash in the facing direction + animation. */
+  /**
+   * Dodge roll — WASD+Shift directional, Shift alone away from nearest dummy.
+   * Distance is engine-controlled (see dodgeMath); anim is visual only.
+   */
   doDodge() {
     const now = performance.now();
     if (!canDodge(this.lastDodgeAt, now)) return;
     this.lastDodgeAt = now;
     this.playerTarget = null;
-    // Dodge clips carry their own forward lunge via root motion; only dash
-    // manually when the active model has no dodge clip (e.g. fighter skins).
-    if (this.heroAnim?.trigger("dodge")) return;
-    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    this.attackTarget = null;
+
+    const threats = this.dummies
+      .filter((d) => d.alive)
+      .map((d) => ({ x: d.pos.x, z: d.pos.z }));
+
+    const dash = resolveDodge({
+      keys: this.keys,
+      facingYaw: this.playerFacing,
+      playerX: this.playerPos.x,
+      playerZ: this.playerPos.z,
+      threats,
+      threatRange: 18,
+    });
+
+    this.playerFacing = Math.atan2(dash.dirX, dash.dirZ);
     const B = this.BOUNDS - 1;
-    this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + forward.x * 2.4));
-    this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + forward.z * 2.4));
+    this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + dash.dirX * dash.distance));
+    this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + dash.dirZ * dash.distance));
+
+    const clips = dodgeClipCandidates(dash.relative);
+    if (!this.heroAnim?.triggerNamed(clips)) {
+      this.heroAnim?.trigger("dodge");
+    }
+    this.dodgeIframeUntil = now + DODGE_IFRAME_S * 1000;
   }
 
   /** Provide resolved HUD skills so archetypes map to real skill flavor. */
@@ -1267,12 +1295,15 @@ export class CampScene {
       }
     }
 
-    // Root motion: let lunging/dodge/jump clips carry the logical position so
-    // the mesh moves WITH the character instead of sliding and snapping back.
-    if (this.heroAnim && this.heroAnim.consumeRootMotion(this._rmTmp)) {
-      const B = this.BOUNDS - 1;
-      this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + this._rmTmp.x));
-      this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + this._rmTmp.z));
+    // Dodge distance is engine-applied; drain RM during i-frames so clips
+    // cannot double-travel. Other one-shots still contribute root motion.
+    if (this.heroAnim) {
+      const dodging = performance.now() < this.dodgeIframeUntil;
+      if (this.heroAnim.consumeRootMotion(this._rmTmp) && !dodging) {
+        const B = this.BOUNDS - 1;
+        this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + this._rmTmp.x));
+        this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + this._rmTmp.z));
+      }
     }
 
     if (this.playerGroup) {
@@ -1300,7 +1331,8 @@ export class CampScene {
     }
 
     // Resource regen.
-    this.playerMana = Math.min(this.playerMaxMana, this.playerMana + 14 * delta);
+    // Out-of-combat style mana regen (camp is a training hub)
+    this.playerMana = Math.min(this.playerMaxMana, this.playerMana + (8 + this.playerLevel * 0.4) * delta);
     this.playerHp = Math.min(this.playerMaxHp, this.playerHp + 6 * delta);
 
     // Animator state.

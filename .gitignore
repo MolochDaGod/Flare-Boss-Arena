@@ -48,6 +48,8 @@ Thumbs.db
 .cache/
 .local/
 
-# Grudge6 30-pack is 262MB — keep local; system uses CDN race GLBs + roster
+# Grudge6 30-pack is 262MB ï¿½ keep local; system uses CDN race GLBs + roster
 artifacts/grudge-game/public/models/grudge6/30characters.glb
 
+.vercel
+.env*

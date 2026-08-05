@@ -2,7 +2,11 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { EnemyModel, Archetype } from "./EnemyFactory";
 import { CDN_MONSTER_BY_ID, isCdnMonsterId } from "../data/cdnMonsters";
-import { BOSS_MONSTER_BY_ID, isBossMonsterId } from "../data/bossMonsters";
+import {
+  BOSS_MONSTER_BY_ID,
+  isBossMonsterId,
+  type BossMonsterDef,
+} from "../data/bossMonsters";
 import { normalizeCharacterRoot, GlbClipBank } from "./modelNormalize";
 import { buildMixamoBankForMonster, createMixamoClipBank } from "./mixamoRetarget";
 
@@ -34,24 +38,29 @@ export interface MonsterDef {
   clip: string | null;
 }
 
+/**
+ * Local public/models/monsters — `name` tracks the file stem (or the embedded
+ * clip brand when the file is already a named creature, e.g. medusa / pincher).
+ * Never assign a fantasy label to a different mesh.
+ */
 export const MONSTER_DEFS: MonsterDef[] = [
   {
-    id: "mon_pincher", name: "Chitin Pincher", type: "arachnid", tier: 2,
+    id: "mon_pincher", name: "Pincher", type: "arachnid", tier: 2,
     hp: 190, damage: 14, file: "pincher.glb", archetype: "arachnid",
     height: 1.7, clip: "pincheranim",
   },
   {
-    id: "mon_cultist", name: "Armed Cultist", type: "undead", tier: 2,
+    id: "mon_cultist", name: "Cultist Armed", type: "undead", tier: 2,
     hp: 220, damage: 16, file: "cultist_armed.glb", archetype: "humanoid",
     height: 2.0, clip: "idle",
   },
   {
-    id: "mon_big_scary_t2", name: "Gloomhulk", type: "beast", tier: 3,
+    id: "mon_big_scary_t2", name: "Big Scary T2", type: "beast", tier: 3,
     hp: 360, damage: 22, file: "big_scary_t2.glb", archetype: "quadruped",
     height: 2.6, clip: null, // Mixamo retarget when no authored clips
   },
   {
-    id: "mon_dante_beast", name: "Dante's Beast", type: "beast", tier: 4,
+    id: "mon_dante_beast", name: "Dante Beast", type: "beast", tier: 4,
     hp: 520, damage: 30, file: "dante_beast.glb", archetype: "quadruped",
     height: 2.8, clip: "dante2anim",
   },
@@ -61,28 +70,28 @@ export const MONSTER_DEFS: MonsterDef[] = [
     height: 2.6, clip: "medusa2anim",
   },
   {
-    id: "mon_big_scary_t3", name: "Dread Colossus", type: "titan", tier: 5,
+    id: "mon_big_scary_t3", name: "Big Scary T3", type: "titan", tier: 5,
     hp: 850, damage: 42, file: "big_scary_t3.glb", archetype: "golem",
     height: 4.2, clip: null, // Mixamo retarget when no authored clips
   },
+  // ── Real GLBs (uMMORPG / three-port) — names match files ─
   {
-    id: "mon_sky_wraith", name: "Sky Wraith", type: "undead", tier: 4,
-    hp: 420, damage: 26, file: "pincher.glb", archetype: "flying",
-    height: 2.2, clip: "pincheranim", // flying AI + elevated combat
-  },
-  // ── Discovered real GLBs (grudge-three-port / prim-sandbox / uMMORPG path) ─
-  {
-    id: "mon_dark_elf", name: "Dark Elf Warband", type: "humanoid", tier: 3,
+    id: "mon_dark_elf", name: "Dark Elf", type: "humanoid", tier: 3,
     hp: 280, damage: 22, file: "dark_elf.glb", archetype: "humanoid",
-    height: 2.05, clip: null, // Mixamo retarget when no authored clips
+    height: 2.05, clip: null,
   },
   {
-    id: "mon_skeleton_ummo", name: "uMMORPG Skeleton", type: "undead", tier: 2,
+    id: "mon_skeleton", name: "Skeleton", type: "undead", tier: 2,
     hp: 200, damage: 16, file: "skeleton.glb", archetype: "humanoid",
     height: 1.95, clip: null,
   },
   {
-    id: "mon_skeleton_warrior_ummo", name: "Bone Legionnaire", type: "undead", tier: 2,
+    id: "mon_skeleton_ummo", name: "Skeleton", type: "undead", tier: 2,
+    hp: 200, damage: 16, file: "skeleton.glb", archetype: "humanoid",
+    height: 1.95, clip: null,
+  },
+  {
+    id: "mon_skeleton_warrior_ummo", name: "Skeleton Warrior", type: "undead", tier: 2,
     hp: 210, damage: 18, file: "skeleton_warrior_ummo.glb", archetype: "humanoid",
     height: 1.9, clip: null,
   },
@@ -121,8 +130,7 @@ function resolveMonsterLoad(id: string): {
   spawnRotY?: number;
   bossScale?: number;
 } | null {
-  // Curated arena / dungeon bosses under public/models/bosses/
-  const boss = BOSS_MONSTER_BY_ID.get(id);
+  const boss = BOSS_MONSTER_BY_ID.get(id) as BossMonsterDef | undefined;
   if (boss) {
     return {
       url: `${BOSSES_BASE}/${boss.file}`,
@@ -292,37 +300,23 @@ export function loadMonsterModel(
       group.userData.baseY = 0;
       group.userData.rootBone = norm.rootBone;
 
-      // Boss defs may bake an extra yaw (horizontal dragons) + scale.
-      if (def.spawnRotY) inner.rotation.y += def.spawnRotY;
+      if (def.spawnRotY) {
+        inner.rotation.y += def.spawnRotY;
+        group.userData.baseRotY = def.spawnRotY;
+      }
       if (def.bossScale && def.bossScale !== 1) {
-        inner.scale.multiplyScalar(def.bossScale);
+        group.scale.multiplyScalar(def.bossScale);
+        model.height *= def.bossScale;
       }
 
       group.add(inner);
 
-      // Multi-clip bank when the GLB ships several tracks; else single idle loop.
-      // def.clip is the preferred *idle* for boss packs (e.g. F_idle, fight_idle).
-      if (gltf.animations.length > 1) {
+      // Prefer multi-role GlbClipBank whenever the asset ships tracks.
+      if (gltf.animations.length > 0) {
         model.clipBank = new GlbClipBank(inner, gltf.animations, null, def.clip);
         onReady?.(model);
-      } else if (gltf.animations.length === 1) {
-        const clip =
-          (def.clip
-            ? gltf.animations.find((a) => a.name === def.clip) ??
-              gltf.animations.find((a) =>
-                a.name.toLowerCase().includes((def.clip ?? "").toLowerCase()),
-              )
-            : undefined) ?? gltf.animations[0];
-        if (clip) {
-          const mixer = new THREE.AnimationMixer(inner);
-          const action = mixer.clipAction(clip);
-          action.setLoop(THREE.LoopRepeat, Infinity);
-          action.play();
-          model.mixer = mixer;
-        }
-        onReady?.(model);
       } else {
-        // No authored clips — try Mixamo rotation-only retarget onto this skeleton.
+        // No authored clips — Mixamo rotation-only retarget (enemyAnimLibrary).
         void buildMixamoBankForMonster(inner).then((bank) => {
           if (group.userData.disposed) return;
           const clipBank = createMixamoClipBank(inner, bank);

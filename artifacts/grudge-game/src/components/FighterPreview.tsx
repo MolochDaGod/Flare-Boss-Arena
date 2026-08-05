@@ -129,10 +129,16 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
       if (!rig) return;
       if (mode === "pistol") {
         rig.setMode("pistol");
+        refreshRacalvinWeaponMounts(sceneRef.current.model!);
         return;
       }
       rig.setMode("sword");
-      rig.setSwordPose(mode === "swordHeld" ? "held" : "rest");
+      // rest = dual blades sheathed on back in X; held = hands + mind-strike demo
+      if (mode === "swordHeld") {
+        rig.beginStrike(null, 0);
+      } else {
+        rig.setSwordPose("rest");
+      }
       refreshRacalvinWeaponMounts(sceneRef.current.model!);
     },
     freezeToBindPose: snapBindPose,
@@ -262,8 +268,36 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     sceneRef.current = { model: null, mixer: null, clips: [], activeAction: null };
 
     const def = getSkin(skinId);
+    const isG6 = /^g6_(human|barbarian|elf|dwarf|orc|undead)_(warrior|mage|ranger|worge)$/.test(
+      skinId,
+    );
     const url = skinId === RACALVIN_ID ? RACALVIN_BASE_URL() : def ? skinUrl(def) : null;
-    if (url) {
+
+    // ── Grudge Warlords 24 (g6_*) — CDN Toon-RTS + baked packs ─────────────
+    if (isG6) {
+      void import("@/game/grudge6/loadGrudge6Hero").then(({ loadGrudge6PlayableHero }) => {
+        void loadGrudge6PlayableHero(skinId, loader, { height: 2.05 }).then((res) => {
+          if (disposed || !res) {
+            res?.animator.dispose();
+            return;
+          }
+          const m = res.wrapper;
+          scene.add(m);
+          model = m;
+          sceneRef.current.model = m;
+          onMeshesReady?.(collectMeshNames(res.model));
+          onClipsReady?.(res.clipNames.length ? res.clipNames : []);
+          // Drive baked/authored animator each frame via a thin mixer shim
+          const anim = res.animator;
+          sceneRef.current.mixer = {
+            update: (d: number) => anim.update(d),
+            stopAllAction: () => anim.dispose(),
+          } as unknown as THREE.AnimationMixer;
+          mixer = sceneRef.current.mixer;
+          if (!freezePoseRef.current) anim.setMoving(false);
+        });
+      });
+    } else if (url) {
       loader.load(
         url,
         (gltf) => {

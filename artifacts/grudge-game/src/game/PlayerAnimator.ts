@@ -108,6 +108,8 @@ export class PlayerAnimator {
 
   /**
    * Best-practice locomotion blend: `crossFadeTo` so idle↔walk never pops.
+   * Fade duration scales slightly with gait change so stop/start feels soft
+   * without lagging the run cycle.
    * Skipped while a one-shot owns the mixer.
    */
   setMoving(moving: boolean) {
@@ -118,13 +120,16 @@ export class PlayerAnimator {
     this.current = next;
     if (this.attacking) return; // resume happens on attack finish
     if (!nextA) return;
+    // Idle→walk: snappier (0.14). Walk→idle: softer settle (0.22).
+    const fade = next === "walk" ? 0.14 : 0.22;
     nextA.enabled = true;
     nextA.setEffectiveWeight(1);
     nextA.reset().play();
     if (prevA && prevA !== nextA) {
-      prevA.crossFadeTo(nextA, 0.22, false);
+      // warp=false keeps time independent so walk doesn't inherit idle phase.
+      prevA.crossFadeTo(nextA, fade, false);
     } else {
-      nextA.fadeIn(0.16);
+      nextA.fadeIn(fade * 0.75);
     }
     this.syncMeshVisibility(nextA.getClip().name);
   }
@@ -147,19 +152,38 @@ export class PlayerAnimator {
     return !!this.actions.attack || this.attackBlend.length > 0;
   }
 
-  /** Play a one-shot role clip (dodge / jump / hit / attack). Returns false if missing. */
-  triggerRole(role: Exclude<PAction, "idle" | "walk">): boolean {
-    if (this.attacking) return role === "attack" || role === "dodge";
+  /**
+   * Play a one-shot role clip (dodge / jump / hit / attack).
+   * `rootMotion: false` skips travel extraction when the engine owns dash distance.
+   */
+  triggerRole(
+    role: Exclude<PAction, "idle" | "walk">,
+    opts?: { rootMotion?: boolean },
+  ): boolean {
+    // Dodge can interrupt attack recovery; other roles wait.
+    if (this.attacking && role !== "dodge" && role !== "attack") return false;
+    if (this.attacking && role === "attack") return true;
     if (role === "attack") {
       this.triggerAttack();
       return this.canAttack;
+    }
+    // Allow dodge to cut an in-progress attack one-shot.
+    if (this.attacking && role === "dodge") {
+      this.oneShot?.fadeOut(0.06);
+      for (const a of this.oneShotBlend) a.fadeOut(0.06);
+      this.oneShotBlend = [];
+      this.rm.end();
+      this.attacking = false;
+      this.oneShot = null;
     }
     const a = this.actions[role];
     if (!a) return false;
     this.attacking = true;
     this.oneShot = a;
-    this.playOneShot(a, 0.08);
-    this.rm.begin();
+    // Dodge/hit snap in faster so i-frames match the first frames of the clip.
+    const fade = role === "dodge" || role === "hit" ? 0.05 : 0.08;
+    this.playOneShot(a, fade);
+    if (opts?.rootMotion !== false) this.rm.begin();
     return true;
   }
 
@@ -190,13 +214,30 @@ export class PlayerAnimator {
     this.rm.begin();
   }
 
-  /** Play the first pool clip whose name includes one of `candidates` as a
-   *  one-shot. Falls back to the attack clip. Returns false if nothing plays. */
-  triggerNamed(candidates: string[]): boolean {
-    if (this.attacking) return true;
+  /**
+   * Play the first pool clip whose name includes one of `candidates` as a
+   * one-shot. Falls back to the attack clip only when `allowAttackFallback`
+   * is true (default) — dodge callers pass false so a missing roll never
+   * becomes a slash.
+   */
+  triggerNamed(
+    candidates: string[],
+    opts?: { rootMotion?: boolean; allowAttackFallback?: boolean },
+  ): boolean {
+    const sorted = [...candidates].sort((a, b) => b.length - a.length);
+    const isEvade = sorted.some((c) => /dodge|roll|evade/.test(c.toLowerCase()));
+    // Evasion may cancel an in-flight attack; other one-shots still block.
+    if (this.attacking) {
+      if (!isEvade) return true;
+      this.oneShot?.fadeOut(0.05);
+      for (const a of this.oneShotBlend) a.fadeOut(0.05);
+      this.oneShotBlend = [];
+      this.rm.end();
+      this.attacking = false;
+      this.oneShot = null;
+    }
     let clip: THREE.AnimationClip | undefined;
     // Prefer longer / more specific candidate matches first.
-    const sorted = [...candidates].sort((a, b) => b.length - a.length);
     for (const cand of sorted) {
       const lc = cand.toLowerCase();
       for (const [name, c] of this.pool) {
@@ -208,7 +249,7 @@ export class PlayerAnimator {
       if (clip) break;
     }
     if (!clip) {
-      if (this.canAttack) {
+      if (opts?.allowAttackFallback !== false && this.canAttack) {
         this.triggerAttack();
         return true;
       }
@@ -217,8 +258,9 @@ export class PlayerAnimator {
     const action = this.mixer.clipAction(clip);
     this.attacking = true;
     this.oneShot = action;
-    this.playOneShot(action, 0.1);
-    this.rm.begin();
+    // Snappy entry for evasion clips; skills keep a slightly longer blend.
+    this.playOneShot(action, isEvade ? 0.05 : 0.1);
+    if (opts?.rootMotion !== false) this.rm.begin();
     return true;
   }
 
@@ -437,6 +479,26 @@ export function buildAuthoredClips(root: THREE.Object3D): Partial<Record<PAction
     if (rFore) tracks.push(track(rFore, RIGHT, t, (x) => -0.5 - 0.4 * Math.sin((x / dur) * Math.PI)));
     if (spine) tracks.push(track(spine, UP, t, (x) => -0.25 * Math.sin((x / dur) * Math.PI)));
     if (tracks.length) out.attack = new THREE.AnimationClip("authored_attack", dur, tracks);
+  }
+
+  // ── Dodge: 0.38s crouch-roll pose (engine owns world travel) ──
+  {
+    const dur = 0.38;
+    const t = linspace(dur, 9);
+    const tracks: THREE.QuaternionKeyframeTrack[] = [];
+    const crouch = (x: number) => {
+      const p = x / dur;
+      // Dip into roll then spring up.
+      if (p < 0.35) return -0.55 * (p / 0.35);
+      if (p < 0.7) return -0.55;
+      return -0.55 * (1 - (p - 0.7) / 0.3);
+    };
+    if (spine) tracks.push(track(spine, RIGHT, t, crouch));
+    if (lThigh) tracks.push(track(lThigh, RIGHT, t, (x) => 0.7 * Math.sin((x / dur) * Math.PI)));
+    if (rThigh) tracks.push(track(rThigh, RIGHT, t, (x) => 0.55 * Math.sin((x / dur) * Math.PI + 0.4)));
+    if (lArm) tracks.push(track(lArm, RIGHT, t, (x) => 0.4 * Math.sin((x / dur) * Math.PI)));
+    if (rArm) tracks.push(track(rArm, RIGHT, t, (x) => 0.35 * Math.sin((x / dur) * Math.PI + 0.3)));
+    if (tracks.length) out.dodge = new THREE.AnimationClip("authored_dodge", dur, tracks);
   }
 
   return out;

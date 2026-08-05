@@ -9,6 +9,34 @@ import {
 import { starterLoadout } from "@/data/starterGear";
 import { useResolvedSkills } from "@/data/skillsResolver";
 import { SkillIcon } from "@/components/SkillIcon";
+import {
+  getEquipmentLoadout,
+  setEquipmentLoadout,
+  snapEquippedItem,
+  computeEquipmentCombatMods,
+} from "@/data/equipmentLoadout";
+import { getActiveFighterId, ATTR_ORDER } from "@/data/fighters";
+import {
+  getSpendableAttributePoints,
+  getAttributeAllocations,
+  spendAttributePoint,
+} from "@/data/attributePoints";
+import {
+  getSkillState,
+  upgradeSkill,
+  levelCost,
+} from "@/data/abilityUpgrades";
+import {
+  RTS_BUILDINGS,
+  CRAFT_RECIPES,
+  getBuildingTiers,
+  upgradeBuilding,
+  craftRecipe,
+  canCraft,
+  getBuildingTier,
+} from "@/data/rtsCrafting";
+import { getResources } from "@/data/resources";
+import { getWallet } from "@/data/wallet";
 
 // ─── Spec-driven design tokens ─────────────────────────────────────────────────
 // Mirrors https://info.grudge-studio.com/main-panel.html theme (grudge-theme.css).
@@ -168,12 +196,13 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
   const active = activeTab ?? activeLocal;
   const setActive = (k: PanelKey) => { onActiveTabChange?.(k); setActiveLocal(k); };
 
-  const initialRace = useMemo<RaceId>(() => {
+  // Portrait race is fixed from the active fighter sheet — no race picker UI.
+  const portraitRaceId = useMemo<RaceId>(() => {
     const r = (character.race ?? "human").toLowerCase();
     return (RACE_IDS as readonly string[]).includes(r) ? (r as RaceId) : "human";
   }, [character.race]);
-  const [selectedRace, setSelectedRace] = useState<RaceId>(initialRace);
-  useEffect(() => { setSelectedRace(initialRace); }, [initialRace]);
+
+  const fighterId = getActiveFighterId() ?? character.name;
 
   const [data, setData] = useState<{ items: AnyItem[]; armor: AnyItem[] } | null>(null);
   useEffect(() => {
@@ -183,19 +212,63 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
   }, []);
 
   // Inventory: fighter signature weapon + harvest tools + potions (independent game kit).
-  const [equipped, setEquipped] = useState<Partial<Record<SlotName, AnyItem>>>({});
+  // Equipped slots hydrate from persistent equipment loadout (combat boosts).
+  const [equipped, setEquipped] = useState<Partial<Record<SlotName, AnyItem>>>(() => {
+    const saved = getEquipmentLoadout(fighterId);
+    const out: Partial<Record<SlotName, AnyItem>> = {};
+    for (const [slot, snap] of Object.entries(saved)) {
+      if (!snap) continue;
+      if ((ALL_SLOTS as readonly string[]).includes(slot)) {
+        out[slot as SlotName] = {
+          id: snap.id,
+          uuid: snap.id,
+          name: snap.name,
+          type: snap.type,
+          category: snap.category,
+          tier: snap.tier,
+          stats: snap.stats,
+          slotType: snap.slot,
+        };
+      }
+    }
+    return out;
+  });
   const loadoutKey = character.name;
   const [inventory, setInventory] = useState<AnyItem[]>(() => starterLoadout(loadoutKey));
 
-  // If the fighter changes, reset bag to that fighter's kit.
-  const characterKey = `${character.name}::${character.class}`;
+  // If the fighter changes, reset bag to that fighter's kit and reload gear.
+  const characterKey = `${character.name}::${fighterId}`;
   const seededKeyRef = useRef<string>(characterKey);
   useEffect(() => {
     if (seededKeyRef.current === characterKey) return;
     seededKeyRef.current = characterKey;
     setInventory(starterLoadout(character.name));
-    setEquipped({});
-  }, [characterKey, character.name]);
+    const saved = getEquipmentLoadout(fighterId);
+    const out: Partial<Record<SlotName, AnyItem>> = {};
+    for (const [slot, snap] of Object.entries(saved)) {
+      if (!snap || !(ALL_SLOTS as readonly string[]).includes(slot)) continue;
+      out[slot as SlotName] = {
+        id: snap.id,
+        uuid: snap.id,
+        name: snap.name,
+        type: snap.type,
+        category: snap.category,
+        tier: snap.tier,
+        stats: snap.stats,
+        slotType: snap.slot,
+      };
+    }
+    setEquipped(out);
+  }, [characterKey, character.name, fighterId]);
+
+  // Persist equipped gear so combat loadout receives weapon/armor boosts.
+  useEffect(() => {
+    const map: Parameters<typeof setEquipmentLoadout>[1] = {};
+    for (const [slot, item] of Object.entries(equipped)) {
+      if (item) map[slot] = snapEquippedItem(slot, item);
+    }
+    setEquipmentLoadout(fighterId, map);
+  }, [equipped, fighterId]);
 
   useEffect(() => {
     if (!data) return;
@@ -228,22 +301,20 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
     });
   }, [data, characterKey]);
 
-  // ─── Derived stats (spec's computeStats, simplified) ─────────────────────────
+  // ─── Derived stats from equipped weapons / armor (same math as combat) ────
   const stats = useMemo(() => {
-    const s = { health: 250, mana: 100, stamina: 100, damage: 0, defense: 0, speed: 1.0, crit: 0, block: 0 };
-    for (const it of Object.values(equipped)) {
-      if (!it?.stats) continue;
-      for (const [k, v] of Object.entries(it.stats)) {
-        if (k.startsWith("damage")) s.damage += v;
-        else if (k.startsWith("defense") || k === "armor") s.defense += v;
-        else if (k === "crit") s.crit += v;
-        else if (k === "block") s.block += v;
-        else if (k === "speed") s.speed += v / 100;
-        else if (k === "hp" || k === "health" || k === "healthBase") s.health += v;
-        else if (k === "mana" || k === "manaBase") s.mana += v;
-      }
-    }
-    return s;
+    const mods = computeEquipmentCombatMods(equipped);
+    return {
+      health: 250 + mods.health,
+      mana: 100 + mods.mana,
+      stamina: 100,
+      damage: mods.damage + mods.magicDamage,
+      defense: Math.round(mods.defense * 100),
+      speed: 1.0 + mods.speed,
+      crit: Math.round(mods.crit * 100),
+      block: Math.round(mods.block * 100),
+      gearPieces: mods.pieces.length,
+    };
   }, [equipped]);
 
   // ─── Hover tooltip (single fixed element, fed by data-uuid) ───────────────────
@@ -286,12 +357,11 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
     hideTip();
   };
 
-  const accent = factionColor ?? RACE_META[selectedRace].color;
+  const accent = factionColor ?? RACE_META[portraitRaceId].color;
 
-  // ─── 3D portrait: race-based toon-rts GLB, hide all wardrobe meshes by
-  // default and only show body/head/arms/legs (+ shoulder, weapon, shield,
-  // quiver) matching the equipped loadout. See `data/characterMeshes.ts`.
-  const portraitRace: PortraitRaceId = selectedRace as PortraitRaceId;
+  // ─── 3D portrait: fixed race mesh for wardrobe preview (not a player choice).
+  // Hide wardrobe meshes by default; show body + equipped weapon/armor only.
+  const portraitRace: PortraitRaceId = portraitRaceId as PortraitRaceId;
   const visibilityFor = useMemo(() => {
     const equip = {
       mainCategory: equipped.Mainhand?.category,
@@ -332,7 +402,7 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
               </div>
               <div className="flex items-center gap-3" style={{ fontSize: 12 }}>
                 <span style={{ color: THEME.gold, fontFamily: THEME.fontDisplay, fontWeight: 700 }}>{character.name}</span>
-                <span style={{ color: THEME.muted, fontSize: 11 }}>Lv.{character.level} {character.class}</span>
+                <span style={{ color: THEME.muted, fontSize: 11 }}>Lv.{character.level} · {character.class.replace(/_/g, " ")}</span>
                 <div style={{ width: 120, height: 6, background: "#2a1e14", borderRadius: 3, border: `1px solid ${THEME.border}`, overflow: "hidden" }}>
                   <div style={{ height: "100%", width: `${Math.round((character.xp ?? 0.35) * 100)}%`, background: `linear-gradient(90deg, ${THEME.goldDark}, ${THEME.gold})`, transition: "width 0.3s" }} />
                 </div>
@@ -366,20 +436,19 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
                 <StatRow k="Block %" v={`${stats.block}%`} />
                 <StatRow k="Speed"   v={stats.speed.toFixed(1)} />
 
-                <SectionTitle style={{ marginTop: 20 }}>Identity</SectionTitle>
+                <SectionTitle style={{ marginTop: 20 }}>Champion</SectionTitle>
                 <div style={{ fontSize: 11, color: THEME.muted, lineHeight: 1.6 }}>
-                  Race: <span style={{ color: THEME.gold }}>{RACE_META[selectedRace].name}</span><br />
-                  Class: <span style={{ color: THEME.gold }}>{character.class}</span><br />
-                  Faction: <span style={{ color: THEME.gold }}>{character.faction ?? RACE_META[selectedRace].faction}</span><br />
-                  Mount: <span style={{ color: THEME.gold }}>{RACE_META[selectedRace].mount}</span>
+                  Fighter: <span style={{ color: THEME.gold }}>{character.name}</span><br />
+                  Role: <span style={{ color: THEME.gold }}>{character.class.replace(/_/g, " ")}</span><br />
+                  Gear pieces: <span style={{ color: THEME.gold }}>{stats.gearPieces}</span><br />
+                  <span style={{ color: THEME.dim, fontSize: 10 }}>Weapons &amp; armor boost damage, HP, crit, defense</span>
                 </div>
 
-                <SectionTitle style={{ marginTop: 20 }}>Data Sources</SectionTitle>
+                <SectionTitle style={{ marginTop: 20 }}>Armory</SectionTitle>
                 <div style={{ fontSize: 9, color: THEME.dim, lineHeight: 1.6, fontFamily: THEME.fontMono }}>
-                  Items: {data?.items.length ?? "…"}<br />
-                  Armor: {data?.armor.length ?? "…"}<br />
-                  Slots filled: {Object.keys(equipped).length} / {ALL_SLOTS.length}<br />
-                  Source: r2.dev / api v1
+                  Items: {data?.items.length ?? "…"} · Armor: {data?.armor.length ?? "…"}<br />
+                  Slots: {Object.keys(equipped).length} / {ALL_SLOTS.length}<br />
+                  Gear bonuses apply in combat
                 </div>
               </aside>
 
@@ -421,7 +490,7 @@ export function MainPanel({ open, onClose, character, factionColor, activeTab, o
                   {active === "equipment" && (
                     <EquipmentTab
                       character={character}
-                      selectedRace={selectedRace} setSelectedRace={setSelectedRace}
+                      portraitRaceId={portraitRaceId}
                       equipped={equipped} onSlotClick={unequip} stats={stats}
                       onSlotHover={showTip} onSlotMove={moveTip} onSlotLeave={hideTip}
                       portraitRace={portraitRace} visibilityFor={visibilityFor}
@@ -552,51 +621,31 @@ export function useMainPanelHotkeys(
 // ─── Sub-views ─────────────────────────────────────────────────────────────────
 
 function EquipmentTab({
-  character, selectedRace, setSelectedRace, equipped, onSlotClick, stats,
+  character, portraitRaceId, equipped, onSlotClick, stats,
   onSlotHover, onSlotMove, onSlotLeave, portraitRace, visibilityFor,
 }: {
   character: CharSummary;
-  selectedRace: RaceId; setSelectedRace: (r: RaceId) => void;
+  portraitRaceId: RaceId;
   equipped: Partial<Record<SlotName, AnyItem>>;
   onSlotClick: (s: SlotName) => void;
-  stats: { damage: number; defense: number; health: number; crit: number; block: number; speed: number };
+  stats: { damage: number; defense: number; health: number; crit: number; block: number; speed: number; gearPieces?: number };
   onSlotHover: (it: AnyItem, e: MouseEvent, hint?: string) => void;
   onSlotMove: (e: MouseEvent) => void;
   onSlotLeave: () => void;
   portraitRace: PortraitRaceId;
   visibilityFor: (meshNames: string[]) => Set<string>;
 }) {
-  const rm = RACE_META[selectedRace];
+  const accent = RACE_META[portraitRaceId].color;
+  const roleLabel = character.class.replace(/_/g, " ");
 
   return (
     <div>
-      {/* Race pills */}
-      <div className="flex justify-center flex-wrap" style={{ gap: 6, marginBottom: 10 }}>
-        {RACE_IDS.map((id) => {
-          const m = RACE_META[id];
-          const a = id === selectedRace;
-          return (
-            <button
-              key={id}
-              onClick={() => setSelectedRace(id)}
-              style={{
-                border: `2px solid ${a ? m.color : THEME.border}`,
-                background: a ? `${m.color}22` : "transparent",
-                color: a ? m.color : THEME.muted,
-                padding: "4px 12px", borderRadius: 16,
-                fontSize: 10, fontFamily: THEME.fontHeading, cursor: "pointer",
-                fontWeight: a ? 700 : 400, letterSpacing: 1, textTransform: "uppercase",
-                transition: "all 0.15s",
-              }}
-            >
-              {m.name}
-            </button>
-          );
-        })}
-      </div>
-
+      {/* No race/class picker — champion is the active fighter from /select. */}
       <p style={{ textAlign: "center", fontFamily: THEME.fontHeading, fontSize: 11, color: THEME.muted, letterSpacing: 2, textTransform: "uppercase", marginBottom: 12 }}>
-        {rm.name} · {character.class}
+        {character.name} · {roleLabel}
+      </p>
+      <p style={{ textAlign: "center", fontSize: 10, color: THEME.dim, marginBottom: 10 }}>
+        Equip weapons &amp; armor — bonuses apply in dungeon, boss, and camp combat
       </p>
 
       {/* 3-column equipment layout */}
@@ -610,31 +659,32 @@ function EquipmentTab({
         <div
           className="flex-1 flex flex-col items-center justify-center"
           style={{
-            background: `radial-gradient(ellipse at center, ${rm.color}10 0%, transparent 70%)`,
+            background: `radial-gradient(ellipse at center, ${accent}10 0%, transparent 70%)`,
             borderLeft: `1px solid ${THEME.goldDim}`, borderRight: `1px solid ${THEME.goldDim}`, minWidth: 180,
           }}
         >
-          <div style={{ fontFamily: THEME.fontDisplay, fontSize: 16, color: rm.color, letterSpacing: 1 }}>{rm.name}</div>
+          <div style={{ fontFamily: THEME.fontDisplay, fontSize: 16, color: accent, letterSpacing: 1 }}>{character.name}</div>
           <div style={{ fontSize: 9, color: THEME.muted, textTransform: "uppercase", letterSpacing: 2, margin: "2px 0 8px" }}>
-            {rm.display} · {rm.faction}
+            {roleLabel} · gear boosts combat
           </div>
           <div
             style={{
               width: 200, height: 280, borderRadius: 8, overflow: "hidden",
-              border: `2px solid ${rm.color}55`,
+              border: `2px solid ${accent}55`,
               background: "linear-gradient(180deg,rgba(30,20,12,0.95),rgba(20,14,8,0.8))",
               position: "relative",
             }}
           >
-            {/* Three.js portrait — toon-rts GLB; only meshes matching the
-                equipped loadout are made visible (see characterMeshes.ts). */}
+            {/* Three.js portrait — wardrobe follows equipped slots only. */}
             <PortraitCanvas
               src={PORTRAIT_URL(portraitRace)}
               visibilityFor={visibilityFor}
-              accent={rm.color}
+              accent={accent}
             />
           </div>
-          <div style={{ fontSize: 8, color: THEME.dim, marginTop: 6 }}>Mount: {rm.mount}</div>
+          <div style={{ fontSize: 8, color: THEME.dim, marginTop: 6 }}>
+            {stats.gearPieces ?? 0} pieces equipped · +{stats.damage} dmg · +{stats.health - 250} HP
+          </div>
         </div>
 
         <div className="flex flex-col justify-center" style={{ gap: 6, padding: "8px 6px", width: 92, flexShrink: 0 }}>
@@ -713,23 +763,99 @@ function EqSlot({
 }
 
 function AttributesTab({ character }: { character: CharSummary }) {
-  const entries = Object.entries(character.attributes ?? {});
+  const fighterId = getActiveFighterId() ?? character.name;
+  const [, setTick] = useState(0);
+  const refresh = () => setTick((t) => t + 1);
+  const spendable = getSpendableAttributePoints();
+  const spent = getAttributeAllocations(fighterId);
+  const base = character.attributes ?? {};
+
+  const rows = ATTR_ORDER.map((k) => {
+    const label = k.charAt(0).toUpperCase() + k.slice(1);
+    const baseV = Number(base[label] ?? base[k] ?? 0);
+    const add = spent[k] ?? 0;
+    return { key: k, label, total: baseV + add, base: baseV, add };
+  });
+
   return (
     <div>
       <SectionTitle>Character Attributes</SectionTitle>
-      <div className="flex items-center" style={{ gap: 12, padding: "10px 0" }}>
-        <span style={{ fontSize: 11, color: THEME.muted }}>Available Points:</span>
-        <span style={{ fontFamily: THEME.fontMono, fontSize: 14, color: THEME.gold, fontWeight: 700 }}>20</span>
+      <div className="flex items-center flex-wrap" style={{ gap: 12, padding: "10px 0" }}>
+        <span style={{ fontSize: 11, color: THEME.muted }}>Spendable:</span>
+        <span style={{ fontFamily: THEME.fontMono, fontSize: 14, color: THEME.gold, fontWeight: 700 }}>
+          {spendable.total}
+        </span>
+        <span style={{ fontSize: 10, color: THEME.dim }}>
+          ({spendable.free} free · {spendable.souls} souls)
+        </span>
       </div>
-      {entries.length === 0 && <p style={{ fontSize: 11, color: THEME.muted }}>No attributes recorded.</p>}
-      {entries.map(([k, v]) => (
-        <div key={k} className="mb-2" style={{ background: "linear-gradient(180deg, #221710 0%, #1a120c 100%)", border: `2px solid ${THEME.border}`, borderLeft: `3px solid ${THEME.gold}`, borderRadius: 8, padding: 12 }}>
-          <div className="flex items-center justify-between">
-            <span style={{ fontFamily: THEME.fontHeading, fontSize: 13, color: THEME.goldLight, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>{k}</span>
-            <span style={{ fontFamily: THEME.fontMono, fontSize: 14, color: THEME.gold, fontWeight: 700 }}>{v}</span>
+      <p style={{ fontSize: 10, color: THEME.dim, marginBottom: 8 }}>
+        Spend free points first, then 1 soul each. Points apply permanently to this champion.
+      </p>
+      {rows.map((r) => (
+        <div
+          key={r.key}
+          className="mb-2"
+          style={{
+            background: "linear-gradient(180deg, #221710 0%, #1a120c 100%)",
+            border: `2px solid ${THEME.border}`,
+            borderLeft: `3px solid ${THEME.gold}`,
+            borderRadius: 8,
+            padding: 12,
+          }}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span
+              style={{
+                fontFamily: THEME.fontHeading,
+                fontSize: 13,
+                color: THEME.goldLight,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: 1,
+              }}
+            >
+              {r.label}
+            </span>
+            <div className="flex items-center gap-2">
+              <span style={{ fontFamily: THEME.fontMono, fontSize: 14, color: THEME.gold, fontWeight: 700 }}>
+                {r.total}
+                {r.add > 0 ? (
+                  <span style={{ color: THEME.green, fontSize: 11 }}> (+{r.add})</span>
+                ) : null}
+              </span>
+              <button
+                type="button"
+                disabled={spendable.total <= 0 || r.add >= 20}
+                onClick={() => {
+                  const res = spendAttributePoint(r.key, fighterId);
+                  if (!res.ok) window.alert(res.message);
+                  refresh();
+                }}
+                style={{
+                  border: `1px solid ${THEME.gold}`,
+                  background: spendable.total > 0 ? `${THEME.gold}22` : "transparent",
+                  color: THEME.gold,
+                  borderRadius: 4,
+                  padding: "2px 8px",
+                  fontFamily: THEME.fontMono,
+                  fontSize: 12,
+                  cursor: spendable.total > 0 ? "pointer" : "not-allowed",
+                  opacity: spendable.total > 0 ? 1 : 0.4,
+                }}
+              >
+                +
+              </button>
+            </div>
           </div>
           <div style={{ height: 6, background: "rgba(0,0,0,0.4)", borderRadius: 3, marginTop: 6, overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${Math.min(100, Number(v) * 5)}%`, background: `linear-gradient(90deg, ${THEME.goldDark}, ${THEME.gold})` }} />
+            <div
+              style={{
+                height: "100%",
+                width: `${Math.min(100, r.total * 5)}%`,
+                background: `linear-gradient(90deg, ${THEME.goldDark}, ${THEME.gold})`,
+              }}
+            />
           </div>
         </div>
       ))}
@@ -739,6 +865,13 @@ function AttributesTab({ character }: { character: CharSummary }) {
 
 function SkillsTab({ character, mainCategory }: { character: CharSummary; mainCategory?: string }) {
   const { classSkills, weaponType, weaponSlots, isLoading, loadout } = useResolvedSkills(character.class, mainCategory);
+  const [, setTick] = useState(0);
+  const refresh = () => setTick((t) => t + 1);
+  const gold = getWallet().gold;
+
+  // Prefer fighter kit skills (1–5 + special) for upgrades when loadout present.
+  const kitSkills = loadout?.skills ?? [];
+  const special = loadout?.special;
 
   return (
     <div>
@@ -746,9 +879,119 @@ function SkillsTab({ character, mainCategory }: { character: CharSummary; mainCa
         Fighter Skills{classSkills ? ` — ${classSkills.name}` : ""}
       </SectionTitle>
       <p style={{ fontSize: 10, color: THEME.muted, marginBottom: 8 }}>
-        Independent arena kit · keys 1–5 cast · R special · AoE skills need a second LMB to place.
+        Upgrade ranks with gold · keys 1–5 cast · R special · gold: {gold}
         {loadout ? ` · Weapon: ${loadout.weapon.glyph} ${loadout.weapon.name}` : ""}
       </p>
+
+      {kitSkills.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 8, marginBottom: 12 }}>
+          {kitSkills.map((sk, idx) => {
+            const st = getSkillState(sk.id);
+            const cost = levelCost(st.level + 1);
+            const maxed = st.level >= 5;
+            return (
+              <div
+                key={sk.id}
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  padding: 8,
+                  borderRadius: 8,
+                  background: "linear-gradient(180deg,#221710,#1a120c)",
+                  border: `2px solid ${THEME.border}`,
+                  borderLeft: `3px solid ${THEME.gold}`,
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="flex items-center justify-between" style={{ gap: 6 }}>
+                    <span style={{ fontFamily: THEME.fontHeading, fontSize: 11, color: THEME.goldLight, fontWeight: 700 }}>
+                      {idx + 1}. {sk.name}
+                    </span>
+                    <span style={{ fontFamily: THEME.fontMono, fontSize: 9, color: THEME.gold }}>
+                      R{st.level}/5
+                    </span>
+                  </div>
+                  <p style={{ fontSize: 9, color: THEME.muted, marginTop: 2 }}>{sk.description}</p>
+                  <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
+                    <span style={{ fontFamily: THEME.fontMono, fontSize: 8, color: THEME.dim }}>
+                      +{Math.round(st.level * 8)}% dmg · CD −{Math.round(st.level * 3)}%
+                    </span>
+                    <button
+                      type="button"
+                      disabled={maxed}
+                      onClick={() => {
+                        const r = upgradeSkill(sk.id);
+                        if (!r.ok) window.alert(r.message);
+                        refresh();
+                      }}
+                      style={{
+                        marginLeft: "auto",
+                        border: `1px solid ${THEME.gold}`,
+                        background: maxed ? "transparent" : `${THEME.gold}22`,
+                        color: THEME.gold,
+                        borderRadius: 4,
+                        padding: "2px 8px",
+                        fontSize: 9,
+                        fontFamily: THEME.fontMono,
+                        cursor: maxed ? "not-allowed" : "pointer",
+                        opacity: maxed ? 0.45 : 1,
+                      }}
+                    >
+                      {maxed ? "MAX" : `Upgrade ${cost}g`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {special && (
+            <div
+              style={{
+                padding: 8,
+                borderRadius: 8,
+                background: "linear-gradient(180deg,#2a1a08,#1a120c)",
+                border: `2px solid ${THEME.gold}`,
+              }}
+            >
+              <div style={{ fontFamily: THEME.fontHeading, fontSize: 11, color: THEME.gold }}>
+                R · {special.name}
+              </div>
+              <p style={{ fontSize: 9, color: THEME.muted }}>{special.description}</p>
+              {(() => {
+                const specialId = `special_${character.name}`;
+                const st = getSkillState(specialId);
+                const cost = levelCost(st.level + 1);
+                const maxed = st.level >= 5;
+                return (
+                  <button
+                    type="button"
+                    disabled={maxed}
+                    onClick={() => {
+                      const r = upgradeSkill(specialId);
+                      if (!r.ok) window.alert(r.message);
+                      refresh();
+                    }}
+                    style={{
+                      marginTop: 6,
+                      border: `1px solid ${THEME.gold}`,
+                      background: `${THEME.gold}22`,
+                      color: THEME.gold,
+                      borderRadius: 4,
+                      padding: "2px 8px",
+                      fontSize: 9,
+                      fontFamily: THEME.fontMono,
+                      cursor: maxed ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {maxed ? `Special MAX R${st.level}` : `Upgrade special ${cost}g · R${st.level}`}
+                  </button>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
       {classSkills?.skills?.length ? (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 8, marginBottom: 8 }}>
           {classSkills.skills.map((sk) => (
@@ -764,24 +1007,19 @@ function SkillsTab({ character, mainCategory }: { character: CharSummary; mainCa
               <div style={{ width: 32, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <SkillIcon icon={sk.icon} glyph={sk.glyph} size={30} radius={5} />
               </div>
-              <div style={{ minWidth: 0 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <div className="flex items-center justify-between" style={{ gap: 6 }}>
                   <span style={{ fontFamily: THEME.fontHeading, fontSize: 11, color: THEME.goldLight, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>{sk.name}</span>
                   {sk.isSignature && <span style={{ fontSize: 7, color: "#000", background: THEME.gold, padding: "1px 4px", borderRadius: 3, fontWeight: 700, textTransform: "uppercase" }}>R</span>}
                 </div>
                 <p style={{ fontSize: 9, color: THEME.muted, lineHeight: 1.4, margin: "2px 0 0" }}>{sk.description}</p>
-                <div style={{ display: "flex", gap: 8, marginTop: 4, fontFamily: THEME.fontMono, fontSize: 8, color: THEME.dim }}>
-                  {sk.cooldown ? <span>CD {sk.cooldown}s</span> : null}
-                  {sk.manaCost ? <span style={{ color: THEME.blue }}>MP {sk.manaCost}</span> : null}
-                  {sk.damage ? <span style={{ color: THEME.red }}>{sk.damage}x</span> : null}
-                </div>
               </div>
             </div>
           ))}
         </div>
-      ) : (
+      ) : !kitSkills.length ? (
         <p style={{ fontSize: 11, color: THEME.muted }}>No skills for this fighter.</p>
-      )}
+      ) : null}
 
       <SectionTitle style={{ marginTop: 18 }}>
         {weaponType ? `Weapon — ${weaponType.name}` : "Weapon"}
@@ -813,10 +1051,119 @@ function SkillsTab({ character, mainCategory }: { character: CharSummary; mainCa
 }
 
 function CraftingTab() {
+  const [, setTick] = useState(0);
+  const refresh = () => setTick((t) => t + 1);
+  const tiers = getBuildingTiers();
+  const bag = getResources();
+  const gold = getWallet().gold;
+
   return (
     <div>
-      <SectionTitle>Crafting</SectionTitle>
-      <p style={{ fontSize: 11, color: THEME.muted }}>Recipe browser coming next. Pulls from <span style={{ fontFamily: THEME.fontMono, color: THEME.gold }}>master-recipes.json</span> when published.</p>
+      <SectionTitle>RTS Buildings</SectionTitle>
+      <p style={{ fontSize: 10, color: THEME.muted, marginBottom: 8 }}>
+        Upgrade production buildings · stock: {bag.wood} wood · {bag.stone} stone · {gold} gold
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 8, marginBottom: 16 }}>
+        {RTS_BUILDINGS.map((b) => {
+          const t = tiers[b.id] ?? 0;
+          const next = t + 1;
+          const cost = b.upgradeCost(Math.min(next, b.maxTier));
+          const maxed = t >= b.maxTier;
+          return (
+            <div
+              key={b.id}
+              style={{
+                padding: 10,
+                borderRadius: 8,
+                background: THEME.card,
+                border: `2px solid ${t > 0 ? THEME.gold + "66" : THEME.border}`,
+              }}
+            >
+              <div style={{ fontFamily: THEME.fontHeading, fontSize: 12, color: THEME.gold }}>
+                {b.glyph} {b.name}
+              </div>
+              <div style={{ fontFamily: THEME.fontMono, fontSize: 10, color: THEME.muted, margin: "4px 0" }}>
+                Tier {t}/{b.maxTier}
+              </div>
+              <p style={{ fontSize: 9, color: THEME.dim, marginBottom: 6 }}>{b.blurb}</p>
+              <button
+                type="button"
+                disabled={maxed}
+                onClick={() => {
+                  const r = upgradeBuilding(b.id);
+                  if (!r.ok) window.alert(r.message);
+                  refresh();
+                }}
+                style={{
+                  width: "100%",
+                  border: `1px solid ${THEME.gold}`,
+                  background: maxed ? "transparent" : `${THEME.gold}18`,
+                  color: THEME.gold,
+                  borderRadius: 4,
+                  padding: "4px 6px",
+                  fontSize: 9,
+                  fontFamily: THEME.fontMono,
+                  cursor: maxed ? "not-allowed" : "pointer",
+                }}
+              >
+                {maxed ? "Max tier" : `Upgrade ${cost.gold}g · ${cost.wood}w · ${cost.stone}s`}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <SectionTitle>Craft Recipes</SectionTitle>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 8 }}>
+        {CRAFT_RECIPES.map((r) => {
+          const ready = canCraft(r);
+          const needTier = getBuildingTier(r.building);
+          return (
+            <div
+              key={r.id}
+              style={{
+                padding: 10,
+                borderRadius: 8,
+                background: THEME.card,
+                border: `2px solid ${ready ? THEME.gold + "55" : THEME.border}`,
+                opacity: needTier < r.minTier ? 0.55 : 1,
+              }}
+            >
+              <div style={{ fontFamily: THEME.fontHeading, fontSize: 11, color: THEME.goldLight }}>
+                {r.glyph} {r.name}
+              </div>
+              <p style={{ fontSize: 9, color: THEME.muted, margin: "4px 0" }}>{r.blurb}</p>
+              <div style={{ fontFamily: THEME.fontMono, fontSize: 8, color: THEME.dim }}>
+                {r.building} T{r.minTier}+ · {r.cost.gold}g {r.cost.wood}w {r.cost.stone}s
+              </div>
+              <button
+                type="button"
+                disabled={!ready}
+                onClick={() => {
+                  const res = craftRecipe(r.id);
+                  if (!res.ok) window.alert(res.message);
+                  else window.alert(res.message);
+                  refresh();
+                }}
+                style={{
+                  marginTop: 6,
+                  width: "100%",
+                  border: `1px solid ${THEME.gold}`,
+                  background: ready ? `${THEME.gold}22` : "transparent",
+                  color: THEME.gold,
+                  borderRadius: 4,
+                  padding: "4px 6px",
+                  fontSize: 9,
+                  fontFamily: THEME.fontMono,
+                  cursor: ready ? "pointer" : "not-allowed",
+                }}
+              >
+                {needTier < r.minTier ? `Need ${r.building} T${r.minTier}` : "Craft"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

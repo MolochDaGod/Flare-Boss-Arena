@@ -75,7 +75,7 @@ export function getDeployReadiness(): DeployReadiness {
     {
       id: "skills",
       label: PLAY_LOOP[3]!.label,
-      note: "Review class & weapon skills",
+      note: "Review fighter skills",
       route: "/skills",
       status: "optional",
       done: true,

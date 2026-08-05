@@ -6,6 +6,9 @@ import type { FighterDef } from "./fighters";
 import { getActiveFighter } from "./fighters";
 import { getGameLoadout } from "./gameCombat";
 import { getFighterLevel, isOwned } from "./flareEconomy";
+import { getEquipmentLoadout } from "./equipmentLoadout";
+import { getAttributeAllocations } from "./attributePoints";
+import { ATTR_ORDER } from "./fighters";
 
 /** Virtual character shape consumed by dungeon/camp/boss stat helpers. */
 export interface PlayableCharacter {
@@ -23,26 +26,39 @@ export interface PlayableCharacter {
 
 function fighterAttributes(fighter: FighterDef): Record<string, number> {
   const s = fighter.stats;
-  return {
-    Strength: s.strength,
-    Vitality: s.vitality,
-    Dexterity: s.dexterity,
-    Agility: s.agility,
-    Endurance: s.endurance,
-    Intellect: s.intellect,
-    Tactics: s.tactics,
-    Wisdom: s.wisdom,
+  const spent = getAttributeAllocations(fighter.id);
+  const label: Record<(typeof ATTR_ORDER)[number], string> = {
+    strength: "Strength",
+    vitality: "Vitality",
+    dexterity: "Dexterity",
+    agility: "Agility",
+    endurance: "Endurance",
+    intellect: "Intellect",
+    tactics: "Tactics",
+    wisdom: "Wisdom",
   };
+  const out: Record<string, number> = {};
+  for (const k of ATTR_ORDER) {
+    out[label[k]] = (s[k] ?? 0) + (spent[k] ?? 0);
+  }
+  return out;
 }
 
 /** Build the active fighter as a virtual character for 3D scenes + HUD. */
 export function playableCharacterFromFighter(fighter: FighterDef): PlayableCharacter {
   const loadout = getGameLoadout(fighter.id);
   const owned = isOwned(fighter.id);
+  const gear = getEquipmentLoadout(fighter.id);
+  const equipment: Record<string, string | undefined> = {
+    mainHand: gear.Mainhand?.id ?? loadout.weapon.id,
+    offHand: gear.Offhand?.id,
+    helm: gear.Helm?.id,
+    chest: gear.Chest?.id,
+  };
   return {
     id: fighter.id,
     name: fighter.name,
-    // Class field kept for UI labels — maps to fighter role, not Warlords class trees.
+    // Role label only — not a Warlords race/class creation choice.
     class: fighter.role.toLowerCase().replace(/\s+/g, "_"),
     race: "human",
     // Level only from account if owned; weekly free always reads as 1.
@@ -50,7 +66,7 @@ export function playableCharacterFromFighter(fighter: FighterDef): PlayableChara
     owned,
     faction: "flare-boss-arena",
     attributes: fighterAttributes(fighter),
-    equipment: { mainHand: loadout.weapon.id },
+    equipment,
   };
 }
 

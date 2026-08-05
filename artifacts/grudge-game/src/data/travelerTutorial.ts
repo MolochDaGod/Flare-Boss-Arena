@@ -1,10 +1,10 @@
 /**
  * Dock Quest Traveler tutorial opener — ported for Flare Boss Arena.
  *
- * Same quest line for all 6 races; only destinations change.
- * Source: grudge-builder factionLobbyIslands quest_traveler + travelerTutorialQuest.
+ * Single opener quest line (no race/class/weapon picker). Destination text is
+ * filled from a fixed default shore so the player just plays.
  *
- * Ends: craft raft → sail to faction island → meet commander.
+ * Ends: craft raft → sail → meet commander.
  */
 
 export type RaceId = "human" | "barbarian" | "elf" | "dwarf" | "orc" | "undead";
@@ -59,7 +59,7 @@ export const TRAVELER_TUTORIAL_STEPS: TravelerTutorialStep[] = [
     objective: "Speak with the Dock Quest Traveler on your starter boat",
     hint: "Press E near the traveler",
     travelerLine:
-      "Easy there, shipwrecked. I am the Dock Traveler — every race hears the same first lesson. Listen close.",
+      "Easy there, shipwrecked. I am the Dock Traveler — first lesson is the same for every sailor. Listen close.",
     vocalCategory: "greeting",
     rewards: { gold: 15, xp: 25, items: [{ id: "item_ration_t0", name: "Travel Ration", qty: 2 }] },
   },
@@ -197,7 +197,7 @@ export const TRAVELER_TUTORIAL_STEPS: TravelerTutorialStep[] = [
     id: "sail_faction",
     kind: "sail",
     title: "Sail to Your People",
-    objective: "Sail the raft to {island} ({race} faction island)",
+    objective: "Sail the raft to {island}",
     hint: "Confirm sail when the traveler opens the heading",
     travelerLine:
       "Same road for every bloodline — only the shore changes. Sail for {island}. Your commander waits.",

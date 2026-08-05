@@ -12,6 +12,10 @@ import {
   type AttrKey,
 } from "@/data/fighters";
 import {
+  ANNIHILATE_FIGHTERS,
+  isAnnihilateHeroId,
+} from "@/data/annihilateHeroes";
+import {
   evolutionFamilyIds,
   getEvolutionMeta,
   isEvolutionFighter,
@@ -166,7 +170,7 @@ export default function Select() {
   const [previewSpin, setPreviewSpin] = useState(true);
   const [handBoneName, setHandBoneName] = useState<string | null>(null);
 
-  const { evolutionGroups, standalone } = useMemo(() => {
+  const { evolutionGroups, standalone, grudge24 } = useMemo(() => {
     const inFamily = new Set<string>();
     const groups: { familyId: string; familyName: string; fighters: FighterDef[] }[] = [];
     for (const familyId of evolutionFamilyIds()) {
@@ -179,8 +183,13 @@ export default function Select() {
         groups.push({ familyId, familyName: tiers[0]!.familyName, fighters });
       }
     }
-    const solo = FIGHTERS.filter((f) => !inFamily.has(f.id) && !isEvolutionFighter(f.id));
-    return { evolutionGroups: groups, standalone: solo };
+    // Warlords 24 first — 6 races × 4 classes, CDN Toon-RTS + baked anims
+    const grudge24 = ANNIHILATE_FIGHTERS;
+    const g6Ids = new Set(grudge24.map((f) => f.id));
+    const solo = FIGHTERS.filter(
+      (f) => !inFamily.has(f.id) && !isEvolutionFighter(f.id) && !g6Ids.has(f.id) && !isAnnihilateHeroId(f.id),
+    );
+    return { evolutionGroups: groups, standalone: solo, grudge24 };
   }, []);
 
   const onSelectFighter = (id: string) => {
@@ -242,8 +251,7 @@ export default function Select() {
             Choose Fighter
           </h1>
           <p className="mt-1 text-[11px] font-mono text-muted-foreground">
-            All locked by default · 1 Flare Grudge Token unlock · 3 free weekly for test · levels
-            save only if owned
+            All locked by default · 1 Flare Grudge Token unlock · 3 free weekly · Grudge Warlords 24 · Toon-RTS baked anims
           </p>
         </div>
         <div className="text-right">
@@ -385,6 +393,25 @@ export default function Select() {
         </div>
 
         <div className="max-h-[calc(100vh-12rem)] space-y-4 overflow-y-auto pr-1 self-start">
+          <div>
+            <p className="mb-2 font-serif text-[10px] uppercase tracking-[0.25em] text-[#c5a059]">
+              Grudge Warlords 24 — Toon RTS
+            </p>
+            <p className="mb-2 text-[10px] text-muted-foreground font-mono">
+              6 races × Warrior / Mage / Ranger / Worge · CDN meshes · class wardrobe · baked Bip001 clips
+            </p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {grudge24.map((f) => (
+                <FighterCard
+                  key={f.id}
+                  f={f}
+                  active={f.id === selectedId}
+                  onSelect={() => onSelectFighter(f.id)}
+                />
+              ))}
+            </div>
+          </div>
+
           {evolutionGroups.map((g) => (
             <div key={g.familyId}>
               <p className="mb-2 font-serif text-[10px] uppercase tracking-[0.25em] text-[#c5a059]/80">

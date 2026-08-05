@@ -9,7 +9,7 @@
 
 import type { Archetype } from "../game/EnemyFactory";
 import { ANIMATED_MONSTER_TEMPLATES, MONSTER_TEMPLATES } from "../game/MonsterModels";
-import { CDN_MONSTER_TEMPLATES } from "./cdnMonsters";
+import { CDN_ANIMATED_TEMPLATES, CDN_MONSTER_TEMPLATES } from "./cdnMonsters";
 
 export type MonsterFaction = "undead" | "dark_elf" | "arachnid" | "beast" | "orc" | "void" | "neutral";
 export type MonsterSource = "ummorpg" | "local_glb" | "cdn" | "procedural";
@@ -28,11 +28,14 @@ export interface CatalogEntry {
   tint?: number;
 }
 
-/** Dark-elf warband — real dark_elf.glb only (Unity / three-port mesh). */
+/**
+ * Dark Elf — mesh is always `dark_elf.glb`. Variant ids only change stats/tint;
+ * the display name stays "Dark Elf" (asset-faithful).
+ */
 export const DARK_ELF_TEMPLATES: CatalogEntry[] = [
   {
     id: "mon_dark_elf",
-    name: "Dark Elf Warband",
+    name: "Dark Elf",
     type: "humanoid",
     tier: 3,
     hp: 280,
@@ -44,7 +47,7 @@ export const DARK_ELF_TEMPLATES: CatalogEntry[] = [
   },
   {
     id: "mon_dark_elf_raider",
-    name: "Dark Elf Raider",
+    name: "Dark Elf",
     type: "humanoid",
     tier: 2,
     hp: 190,
@@ -57,7 +60,7 @@ export const DARK_ELF_TEMPLATES: CatalogEntry[] = [
   },
   {
     id: "mon_dark_elf_captain",
-    name: "Dark Elf Captain",
+    name: "Dark Elf",
     type: "humanoid",
     tier: 4,
     hp: 360,
@@ -70,11 +73,14 @@ export const DARK_ELF_TEMPLATES: CatalogEntry[] = [
   },
 ];
 
-/** Spider dens — pincher GLB variants. */
+/**
+ * Pincher dens — every entry uses pincher.glb (scale/tint variants).
+ * Names stay "Pincher" so HUD text matches the asset.
+ */
 export const SPIDER_TEMPLATES: CatalogEntry[] = [
   {
     id: "mon_pincher",
-    name: "Chitin Pincher",
+    name: "Pincher",
     type: "arachnid",
     tier: 2,
     hp: 190,
@@ -86,7 +92,7 @@ export const SPIDER_TEMPLATES: CatalogEntry[] = [
   },
   {
     id: "mon_spider_broodling",
-    name: "Broodling",
+    name: "Pincher",
     type: "arachnid",
     tier: 1,
     hp: 85,
@@ -98,7 +104,7 @@ export const SPIDER_TEMPLATES: CatalogEntry[] = [
   },
   {
     id: "mon_spider_matriarch",
-    name: "Spider Matriarch",
+    name: "Pincher",
     type: "arachnid",
     tier: 4,
     hp: 480,
@@ -110,11 +116,11 @@ export const SPIDER_TEMPLATES: CatalogEntry[] = [
   },
 ];
 
-/** uMMORPG skeleton meshes (not KayKit). */
+/** Skeleton meshes — names match skeleton.glb / skeleton_warrior_ummo.glb. */
 export const SKELETON_TEMPLATES: CatalogEntry[] = [
   {
     id: "mon_skeleton_ummo",
-    name: "uMMORPG Skeleton",
+    name: "Skeleton",
     type: "undead",
     tier: 2,
     hp: 200,
@@ -126,7 +132,7 @@ export const SKELETON_TEMPLATES: CatalogEntry[] = [
   },
   {
     id: "mon_skeleton_warrior_ummo",
-    name: "Bone Legionnaire",
+    name: "Skeleton Warrior",
     type: "undead",
     tier: 2,
     hp: 210,
@@ -161,14 +167,34 @@ for (const t of MONSTER_TEMPLATES) {
 
 for (const t of CDN_MONSTER_TEMPLATES) {
   if (!CATALOG_BY_ID.has(t.id)) {
+    const arch: Archetype =
+      t.type === "dragon" || t.type === "insect"
+        ? "flying"
+        : t.type === "plant" || t.type === "giant" || t.type === "demon"
+          ? "golem"
+          : t.type === "humanoid" || t.type === "undead"
+            ? "humanoid"
+            : t.type === "arachnid"
+              ? "arachnid"
+              : "quadruped";
     CATALOG_BY_ID.set(t.id, {
       ...t,
-      faction: t.type === "undead" ? "undead" : t.type === "aberration" ? "void" : "beast",
+      faction:
+        t.type === "undead"
+          ? "undead"
+          : t.type === "aberration" || t.type === "demon"
+            ? "void"
+            : t.type === "humanoid" && /orc/i.test(t.name)
+              ? "orc"
+              : "beast",
       source: "cdn",
-      archetype: "humanoid",
+      archetype: arch,
     });
   }
 }
+
+/** CDN monsters preferred for spawn (authored multi-clip packs). */
+export const CDN_SPAWN_TEMPLATES = CDN_ANIMATED_TEMPLATES;
 
 export function catalogAsTemplates(
   entries: CatalogEntry[],

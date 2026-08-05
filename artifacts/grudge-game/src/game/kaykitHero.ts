@@ -183,7 +183,14 @@ const HERO_CANDIDATES: Record<HeroState, string[]> = {
   cast: ["spellcast", "spell", "cast", "2h_ranged", "ranged", "shoot", "throw", "magic"],
   hit: ["hit_a", "hit_b", "hit", "damage"],
   jump: ["jump_full", "jump", "jumping"],
-  dodge: ["dodge", "roll", "evade"],
+  dodge: [
+    "standing dodge forward",
+    "dodge_forward",
+    "dodge",
+    "dodging",
+    "roll",
+    "evade",
+  ],
 };
 
 export class HeroAnimator implements HeroLike {
@@ -298,8 +305,16 @@ export class HeroAnimator implements HeroLike {
     const prev = this.actions[this.current];
     const nextA = this.actions[next];
     if (!nextA) return;
-    prev?.fadeOut(0.18);
-    nextA.reset().fadeIn(0.18).play();
+    // Snappier start (idle→walk), softer settle (walk→idle) — matches PlayerAnimator.
+    const fade = next === "idle" ? 0.22 : 0.14;
+    nextA.enabled = true;
+    nextA.setEffectiveWeight(1);
+    nextA.reset().play();
+    if (prev && prev !== nextA) {
+      prev.crossFadeTo(nextA, fade, false);
+    } else {
+      nextA.fadeIn(fade * 0.75);
+    }
     this.current = next;
     this.syncRacalvinPose(nextA.getClip().name);
   }
@@ -308,47 +323,70 @@ export class HeroAnimator implements HeroLike {
   trigger(state: HeroState): boolean {
     const a = this.actions[state];
     if (!a) return false;
-    if (this.oneShot) return false;
+    // Dodge may cancel an in-flight one-shot (attack recovery).
+    if (this.oneShot && state !== "dodge") return false;
+    if (this.oneShot && state === "dodge") {
+      this.oneShot.fadeOut(0.05);
+      this.rm.end();
+      this.oneShot = null;
+    }
     this.oneShot = a;
     a.reset();
     a.setLoop(THREE.LoopOnce, 1);
-    a.clampWhenFinished = false;
-    a.fadeIn(0.06).play();
-    this.actions[this.current]?.fadeOut(0.06);
-    this.rm.begin();
+    a.clampWhenFinished = true;
+    a.enabled = true;
+    a.setEffectiveWeight(1);
+    const fade = state === "dodge" || state === "hit" ? 0.05 : 0.08;
+    a.fadeIn(fade).play();
+    this.actions[this.current]?.fadeOut(fade);
+    // Engine owns dodge distance in Arena/Camp/Island — skip RM for rolls.
+    if (state !== "dodge") this.rm.begin();
     this.syncRacalvinPose(a.getClip().name);
     return true;
   }
 
-  /** Play the first clip whose name includes one of `candidates` as a one-shot. */
+  /**
+   * Play the first clip whose name includes one of `candidates` as a one-shot.
+   * Evasion candidates never fall back to attack (avoids slash-on-failed-dodge).
+   */
   triggerNamed(candidates: string[]): boolean {
-    if (this.oneShot) return true;
+    const sorted = [...candidates].sort((a, b) => b.length - a.length);
+    const isEvade = sorted.some((c) => /dodge|roll|evade/.test(c.toLowerCase()));
+    if (this.oneShot) {
+      if (!isEvade) return true;
+      this.oneShot.fadeOut(0.05);
+      this.rm.end();
+      this.oneShot = null;
+    }
     let clip: THREE.AnimationClip | undefined;
-    for (const cand of candidates) {
+    for (const cand of sorted) {
+      const lc = cand.toLowerCase();
       for (const [name, c] of this.byName) {
-        if (name.includes(cand)) {
+        if (name.includes(lc)) {
           clip = c;
           break;
         }
       }
       if (clip) break;
     }
-    if (!clip) return this.trigger("attack");
+    if (!clip) return isEvade ? false : this.trigger("attack");
     const a = this.mixer.clipAction(clip);
     this.oneShot = a;
     a.reset();
     a.setLoop(THREE.LoopOnce, 1);
-    a.clampWhenFinished = false;
-    a.fadeIn(0.06).play();
-    this.actions[this.current]?.fadeOut(0.06);
-    this.rm.begin();
+    a.clampWhenFinished = true;
+    a.enabled = true;
+    a.setEffectiveWeight(1);
+    a.fadeIn(isEvade ? 0.05 : 0.08).play();
+    this.actions[this.current]?.fadeOut(isEvade ? 0.05 : 0.08);
+    if (!isEvade) this.rm.begin();
     this.syncRacalvinPose(clip.name);
     return true;
   }
 
   update(delta: number) {
-    this.mixer.update(delta);
-    this.rm.sample(delta);
+    this.mixer.update(Math.min(delta, 0.05));
+    this.rm.sample(Math.min(delta, 0.05));
   }
 
   consumeRootMotion(out: THREE.Vector3): boolean {
@@ -387,16 +425,26 @@ export class PlayerHeroAdapter implements HeroLike {
       this.inner.triggerAttack();
       return true;
     }
-    if (state === "dodge" || state === "jump" || state === "hit") {
+    if (state === "dodge") {
+      return this.inner.triggerNamed(["dodge", "roll", "evade"], {
+        rootMotion: false,
+        allowAttackFallback: false,
+      });
+    }
+    if (state === "jump" || state === "hit") {
       return this.inner.triggerNamed(
-        state === "dodge" ? ["dodge", "roll", "evade"] : state === "jump" ? ["jump", "leap"] : ["hit", "damage"],
+        state === "jump" ? ["jump", "leap"] : ["hit", "damage"],
       );
     }
     return false;
   }
 
   triggerNamed(candidates: string[]): boolean {
-    return this.inner.triggerNamed(candidates);
+    const isEvade = candidates.some((c) => /dodge|roll|evade/i.test(c));
+    return this.inner.triggerNamed(candidates, {
+      rootMotion: isEvade ? false : undefined,
+      allowAttackFallback: isEvade ? false : undefined,
+    });
   }
 
   update(delta: number) {
@@ -429,14 +477,23 @@ export class SkinHeroAdapter implements HeroLike {
       this.inner.triggerAttack();
       return true;
     }
-    if (state === "dodge") return this.inner.triggerNamed(["dodge", "roll", "evade"]);
+    if (state === "dodge") {
+      return this.inner.triggerNamed(["dodge", "roll", "evade"], {
+        rootMotion: false,
+        allowAttackFallback: false,
+      });
+    }
     if (state === "jump") return this.inner.triggerNamed(["jump", "leap", "jump_full"]);
     if (state === "hit") return this.inner.triggerNamed(["hit", "damage", "hit_a"]);
     return false;
   }
 
   triggerNamed(candidates: string[]): boolean {
-    return this.inner.triggerNamed(candidates);
+    const isEvade = candidates.some((c) => /dodge|roll|evade/i.test(c));
+    return this.inner.triggerNamed(candidates, {
+      rootMotion: isEvade ? false : undefined,
+      allowAttackFallback: isEvade ? false : undefined,
+    });
   }
 
   update(delta: number) {

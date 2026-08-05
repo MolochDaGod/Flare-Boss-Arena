@@ -295,8 +295,8 @@ function MeshRuleRow({
 }
 
 const RACALVIN_TABS: { id: EditorTab; label: string; short: string }[] = [
-  { id: "swordHeld", label: "Sword — held", short: "Held" },
-  { id: "swordRest", label: "Sword — rest", short: "Rest" },
+  { id: "swordHeld", label: "Brothers' Keeper — mind strike", short: "Strike" },
+  { id: "swordRest", label: "Brothers' Keeper — back X", short: "Sheath" },
   { id: "pistol", label: "Pistol", short: "Pistol" },
   { id: "meshes", label: "Hidden parts", short: "Meshes" },
 ];

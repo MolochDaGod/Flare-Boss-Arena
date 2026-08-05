@@ -21,8 +21,11 @@ import type { CampStationCategory } from "@/data/campTown";
 import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type PanelKey } from "@/components/MainPanel";
 import { CLASS_STARTER_WEAPON } from "@/data/starterGear";
 import { useResolvedSkills } from "@/data/skillsResolver";
-import { SkillIcon } from "@/components/SkillIcon";
-import { BarGauge, OrbGauge, Separator, WarningBanner } from "@/components/CraftpixUI";
+import { skillIconSrc } from "@/data/skillIcons";
+import { WarningBanner } from "@/components/CraftpixUI";
+import { UnifiedCombatHud } from "@/components/UnifiedCombatHud";
+import { fromCampState } from "@/data/combatHudAdapters";
+import type { HudSkillSlot } from "@/data/combatHudModel";
 
 class CampErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
   state = { hasError: false, message: "" };
@@ -279,10 +282,6 @@ function Camp() {
   const catStyle = nearbyCat ? CATEGORY_STYLE[nearbyCat] : null;
   const isBossSigil = state?.nearbyStationId === "portal_boss";
 
-  const hpPct = state ? (state.playerHp / state.playerMaxHp) * 100 : 100;
-  const manaPct = state ? (state.playerMana / state.playerMaxMana) * 100 : 100;
-  const atkPct = state ? state.attackCooldownPct * 100 : 100;
-  const hpColor = hpPct > 50 ? "#22c55e" : hpPct > 25 ? "#f59e0b" : "#ef4444";
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col" style={{ zIndex: 50 }}>
@@ -404,184 +403,73 @@ function Camp() {
         )}
       </AnimatePresence>
 
-      {/* Player HUD — bottom left */}
+      {/* Unified combat HUD — camp training ground */}
       {state && loaded && (
-        <div className="absolute bottom-4 left-4 z-10 w-60 px-3.5 py-3" style={stonePanel}>
-          <Rivets />
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="font-serif text-sm tracking-widest uppercase" style={{ color: GOLD }}>{char.name as string}</span>
-            <span className="font-serif text-xs text-muted-foreground tracking-widest">Lv {state.playerLevel}</span>
-          </div>
-          <Separator className="mb-2.5 opacity-80" />
-          <div className="flex items-stretch gap-3">
-            <OrbGauge pct={hpPct} color={hpColor} size={58} className="self-center shrink-0" />
-            <div className="flex-1 min-w-0 space-y-1.5">
-              {/* HP */}
-              <div className="flex justify-between items-center">
-                <span className="text-[10px] font-mono uppercase text-muted-foreground tracking-widest">HP</span>
-                <span className="text-[10px] font-mono" style={{ color: hpColor }}>
-                  {Math.round(state.playerHp)} / {state.playerMaxHp}
-                </span>
-              </div>
-              <BarGauge pct={hpPct} color={hpColor} height={15} />
-              {/* Mana */}
-              <div className="flex justify-between items-center">
-                <span className="text-[10px] font-mono uppercase text-muted-foreground tracking-widest">MP</span>
-                <span className="text-[10px] font-mono text-blue-400">
-                  {Math.round(state.playerMana)} / {state.playerMaxMana}
-                </span>
-              </div>
-              <BarGauge pct={manaPct} color="#3b82f6" height={12} />
-              {/* Attack cooldown strip */}
-              <BarGauge pct={atkPct} color="#ffaa00" height={9} glow={false} />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Combat log — bottom right */}
-      {state && state.combatLog.length > 0 && (
-        <div className="absolute bottom-4 right-4 z-10 w-72 space-y-1 pointer-events-none">
-          <AnimatePresence initial={false}>
-            {state.combatLog.slice(0, 7).map((msg, i) => (
-              <motion.div
-                key={msg + i}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: Math.max(0.15, 1 - i * 0.12), x: 0 }}
-                exit={{ opacity: 0 }}
-                className="text-right text-[11px] font-serif tracking-wide"
-                style={{ color: msg.includes("shattered") ? "#f59e0b" : msg.includes("mana") ? "#60a5fa" : "#d1d5db" }}
+        <UnifiedCombatHud
+          state={fromCampState(state, {
+            charName: String(char.name ?? "Fighter"),
+            raceClass: `${String(char.race ?? "")} ${String(char.class ?? "")}`.trim(),
+            skills: (() => {
+              const slots: HudSkillSlot[] = [];
+              for (const s of hudClassSkills?.skills.slice(0, 5) ?? []) {
+                slots.push({
+                  id: s.id,
+                  name: s.name,
+                  key: String(slots.length + 1),
+                  glyph: s.glyph as string | undefined,
+                  icon: skillIconSrc(s.icon) ?? undefined,
+                  isSignature: s.isSignature,
+                  readyPct: state.skillCooldownPct[slots.length] ?? 1,
+                });
+              }
+              for (const slot of hudWeaponSlots) {
+                if (slots.length >= 5) break;
+                const sk = slot.skills[0];
+                if (!sk) continue;
+                slots.push({
+                  id: sk.id ?? slot.type,
+                  name: sk.name ?? slot.label,
+                  key: String(slots.length + 1),
+                  glyph: "⚔",
+                  icon: skillIconSrc(sk.icon) ?? undefined,
+                  readyPct: state.skillCooldownPct[slots.length] ?? 1,
+                });
+              }
+              return slots;
+            })(),
+          })}
+          onSkill={(idx) => sceneRef.current?.useSkill(idx)}
+          onAttack={() => sceneRef.current?.attackNearest()}
+          bottomActions={
+            <>
+              <button
+                type="button"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] tracking-widest uppercase"
+                style={{ border: "1px solid rgba(197,160,89,0.4)", background: "rgba(13,18,24,0.7)", color: GOLD }}
+                onClick={() => setPanelOpen(true)}
               >
-                {msg}
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
+                <LayoutGrid className="w-3.5 h-3.5" /> C
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] tracking-widest uppercase"
+                style={{ border: "1px solid rgba(239,68,68,0.4)", background: "rgba(13,18,24,0.7)", color: "#fca5a5" }}
+                onClick={() => setLocation("/game")}
+              >
+                <Swords className="w-3.5 h-3.5" /> Dungeon
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] tracking-widest uppercase"
+                style={{ border: "1px solid rgba(217,70,239,0.4)", background: "rgba(13,18,24,0.7)", color: "#e879f9" }}
+                onClick={() => setLocation("/boss")}
+              >
+                <Skull className="w-3.5 h-3.5" /> Boss
+              </button>
+            </>
+          }
+        />
       )}
-
-      {/* Dummy health bars */}
-      {state && state.dummies.map((d) => {
-        if (!d.alive) return null;
-        if (d.screenX < 0 || d.screenX > window.innerWidth || d.screenY < 0 || d.screenY > window.innerHeight) return null;
-        const pct = (d.hp / d.maxHp) * 100;
-        const col = pct > 50 ? "#22c55e" : pct > 25 ? "#f59e0b" : "#ef4444";
-        return (
-          <div key={d.id} className="absolute pointer-events-none z-10" style={{ left: d.screenX - 44, top: d.screenY - 28, width: 88 }}>
-            <p className="text-center text-[9px] font-serif tracking-widest uppercase mb-0.5 truncate text-amber-200/80">{d.name}</p>
-            <div className="h-1.5 bg-black/70 border border-white/10 rounded-sm overflow-hidden">
-              <div className="h-full rounded-sm transition-all duration-150" style={{ width: `${pct}%`, background: col }} />
-            </div>
-          </div>
-        );
-      })}
-
-      {/* Floating damage numbers */}
-      {state && state.damageNumbers.map((d) => (
-        <div
-          key={d.id}
-          className="absolute pointer-events-none font-mono font-bold z-20 select-none"
-          style={{
-            left: d.x,
-            top: d.y,
-            fontSize: d.isCrit ? 20 : 14,
-            color: d.isCrit ? "#ff6600" : "#ffffff",
-            textShadow: "0 1px 4px rgba(0,0,0,0.9)",
-            opacity: Math.max(0, 1 - d.age / 1.4),
-            transform: `translate(-50%, -${d.age * 32}px)`,
-          }}
-        >
-          {d.isCrit ? `${d.value}!` : `-${d.value}`}
-        </div>
-      ))}
-
-      {/* Skill bar — class + weapon skills (click or press 1–5) */}
-      {state && loaded && (hudClassSkills || hudWeaponSlots.length > 0) && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-10 flex items-end gap-4">
-          {hudClassSkills && (
-            <div className="flex flex-col items-center gap-1">
-              <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>Class · {hudClassSkills.name}</span>
-              <div className="flex gap-1.5">
-                {hudClassSkills.skills.slice(0, 5).map((s, i) => {
-                  const cd = state.skillCooldownPct[i] ?? 1;
-                  const ready = cd >= 1;
-                  return (
-                    <button
-                      key={s.id}
-                      title={`${s.name}${s.cooldown ? ` · CD ${s.cooldown}` : ""}\n${s.description}`}
-                      onClick={() => sceneRef.current?.useSkill(i)}
-                      className="relative w-11 h-11 rounded flex items-center justify-center text-lg bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all overflow-hidden"
-                      style={{ boxShadow: "inset 0 0 5px #000" }}
-                    >
-                      <SkillIcon icon={s.icon} glyph={s.glyph} size={40} radius={4} />
-                      <span className="absolute top-0.5 left-1 text-[9px] font-serif text-neutral-400">{i + 1}</span>
-                      {s.isSignature && <span className="absolute -bottom-1 -right-1 text-[9px] leading-none" style={{ color: GOLD }}>★</span>}
-                      {!ready && (
-                        <span className="absolute inset-0 bg-black/70" style={{ clipPath: `inset(0 0 ${cd * 100}% 0)` }} />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          {hudWeaponSlots.length > 0 && (
-            <div className="flex flex-col items-center gap-1">
-              <span className="text-[9px] font-serif tracking-widest uppercase" style={{ color: GOLD }}>Weapon</span>
-              <div className="flex gap-1.5">
-                {hudWeaponSlots.map((slot, j) => {
-                  const sk = slot.skills[0];
-                  if (!sk) return null;
-                  const slotIdx = Math.min(4, (hudClassSkills?.skills.length ?? 0) + j);
-                  return (
-                    <button
-                      key={slot.type}
-                      title={`${slot.label}: ${sk.name}${sk.cooldown ? ` · CD ${sk.cooldown}` : ""}\n${sk.description}`}
-                      onClick={() => sceneRef.current?.useSkill(slotIdx)}
-                      className="w-11 h-11 rounded flex items-center justify-center overflow-hidden bg-black border-2 border-neutral-700 hover:border-[#c5a059] hover:scale-105 transition-all"
-                      style={{ boxShadow: "inset 0 0 5px #000" }}
-                    >
-                      <SkillIcon icon={sk.icon} glyph="⚔️" size={28} radius={4} />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Action buttons — bottom centre */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex gap-3 px-4 py-2.5" style={stonePanel}>
-        <Rivets />
-        <button
-          className="flex flex-col items-center gap-1 px-4 py-2 rounded font-serif text-xs tracking-widest uppercase bg-black/40 border border-[#c5a059]/60 text-[#c5a059] hover:bg-[#c5a059]/15 hover:border-[#c5a059] transition-all active:scale-95"
-          onClick={() => sceneRef.current?.attackNearest()}
-        >
-          <Swords className="w-4 h-4" />
-          <span>Attack [F]</span>
-        </button>
-        <button
-          className="flex flex-col items-center gap-1 px-4 py-2 rounded font-serif text-xs tracking-widest uppercase bg-black/40 border border-neutral-700 text-muted-foreground hover:border-[#c5a059]/70 hover:text-[#c5a059] transition-all active:scale-95"
-          onClick={() => setPanelOpen(true)}
-        >
-          <LayoutGrid className="w-4 h-4" />
-          <span>Panel [C]</span>
-        </button>
-        <button
-          className="flex flex-col items-center gap-1 px-4 py-2 rounded font-serif text-xs tracking-widest uppercase bg-black/40 border border-red-500/50 text-red-300 hover:bg-red-500/15 hover:border-red-500 transition-all active:scale-95"
-          onClick={() => setLocation("/game")}
-        >
-          <Swords className="w-4 h-4" />
-          <span>Dungeon</span>
-        </button>
-        <button
-          className="flex flex-col items-center gap-1 px-4 py-2 rounded font-serif text-xs tracking-widest uppercase bg-black/40 border border-fuchsia-500/50 text-fuchsia-300 hover:bg-fuchsia-500/15 hover:border-fuchsia-500 transition-all active:scale-95"
-          onClick={() => setLocation("/boss")}
-        >
-          <Skull className="w-4 h-4" />
-          <span>Boss</span>
-        </button>
-      </div>
 
       {/* MainPanel overlay */}
       {charSummary && (

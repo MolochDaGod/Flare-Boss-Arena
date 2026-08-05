@@ -45,7 +45,8 @@ export type NavHref =
   | "/game"
   | "/pvp"
   | "/leaderboards"
-  | "/connections";
+  | "/connections"
+  | "/moba";
 
 export interface NavItem {
   label: string;
@@ -93,10 +94,11 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "World & Combat",
     blurb: "Deploy into live scenes",
     items: [
-      { label: "Enter World", href: "/game", icon: Swords, description: "Dungeon islands & rounds", primary: true },
-      { label: "Boss Arena", href: "/boss", icon: Skull, description: "Standalone boss fight", primary: true },
+      { label: "Enter World", href: "/game", icon: Swords, description: "Dungeon islands, fog map, open water, co-op", primary: true },
+      { label: "Boss Arena", href: "/boss", icon: Skull, description: "Boss fight + Arena PvP", primary: true },
       { label: "PvP Arena", href: "/pvp", icon: Crosshair, description: "Fleet Socket.IO multiplayer", badge: "LIVE", primary: true },
       { label: "Leaderboards", href: "/leaderboards", icon: Trophy, description: "Boss · island · arena ranks" },
+      { label: "MOBA Lanes", href: "/moba", icon: Flame, description: "Three-lane skirmish mode" },
       { label: "Sanctuary Camp", href: "/camp", icon: Tent, description: "Training ground & stations" },
       { label: "Bestiary", href: "/enemies", icon: Shield, description: "Enemy units" },
     ],

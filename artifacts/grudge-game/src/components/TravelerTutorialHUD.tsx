@@ -1,6 +1,6 @@
 /**
  * Dock Quest Traveler tutorial opener HUD.
- * Same quest line for all races — destinations filled from race.
+ * Single opener quest line — no race/class selection.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -16,8 +16,6 @@ import {
 } from "@/data/travelerTutorial";
 import { addResource } from "@/data/resources";
 import { getWallet, saveWallet } from "@/data/wallet";
-
-const RACES: RaceId[] = ["human", "barbarian", "elf", "dwarf", "orc", "undead"];
 
 function playVocal(step: TravelerTutorialStep) {
   try {
@@ -37,14 +35,25 @@ export function TravelerTutorialHUD(props: {
   /** Called when player finishes meet_commander */
   onComplete?: (p: TutorialProgress) => void;
   compact?: boolean;
+  /** Engine / E-key forces the panel open (Dock Traveler engage). */
+  forceOpen?: boolean;
+  onForceOpenConsumed?: () => void;
 }) {
-  const [raceId, setRaceId] = useState<RaceId>(props.raceId ?? "human");
+  // Fixed destination — opener never asks the player to pick a race or class.
+  const raceId: RaceId = props.raceId ?? "human";
   const [progress, setProgress] = useState<TutorialProgress>(() => loadTutorialProgress(raceId));
   const [log, setLog] = useState<string[]>([]);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (props.forceOpen) {
+      setOpen(true);
+      props.onForceOpenConsumed?.();
+    }
+  }, [props.forceOpen, props]);
 
   const steps = useMemo(() => stepsForRace(raceId), [raceId]);
-  const dest = RACE_DEST[raceId];
+  const dest = RACE_DEST[raceId] ?? RACE_DEST.human;
   const step = steps[Math.min(progress.stepIndex, steps.length - 1)]!;
   const done = progress.metCommander;
 
@@ -94,53 +103,63 @@ export function TravelerTutorialHUD(props: {
     [done, steps, progress, pushLog, dest.commanderName, props],
   );
 
+  const stepPct = done ? 100 : Math.round((progress.stepIndex / Math.max(1, steps.length)) * 100);
+
   if (!open) {
     return (
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-24 left-3 z-40 rounded border border-amber-700/60 bg-black/75 px-3 py-1.5 text-xs text-amber-200"
+        className="pointer-events-auto absolute bottom-28 left-3 z-40 rounded-lg border px-3 py-2 text-left shadow-lg"
+        style={{
+          borderColor: "rgba(197,160,89,0.45)",
+          background: "linear-gradient(180deg, rgba(18,14,10,0.92), rgba(6,6,8,0.95))",
+        }}
       >
-        Traveler Quest
+        <div className="text-[9px] font-serif uppercase tracking-widest text-[#c5a059]">Dock Quest</div>
+        <div className="text-[11px] text-amber-100/90">
+          {done ? "Opener complete" : `Step ${progress.stepIndex + 1}/${steps.length}`}
+        </div>
       </button>
     );
   }
 
   return (
-    <div className="fixed bottom-20 left-3 z-40 w-[min(100vw-1.5rem,22rem)] rounded-lg border border-amber-800/50 bg-gradient-to-b from-zinc-950/95 to-black/90 p-3 text-zinc-100 shadow-xl backdrop-blur">
+    <div
+      className="pointer-events-auto absolute bottom-24 left-3 z-40 w-[min(100vw-1.5rem,22rem)] rounded-lg border p-3 text-zinc-100 shadow-xl"
+      style={{
+        borderColor: "rgba(197,160,89,0.4)",
+        background: "linear-gradient(180deg, rgba(18,14,10,0.96), rgba(4,4,6,0.98))",
+        boxShadow: "0 12px 40px rgba(0,0,0,0.55)",
+      }}
+    >
       <div className="mb-2 flex items-start justify-between gap-2">
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-amber-500/90">
-            Dock Quest Traveler · Tutorial Opener
+          <div className="text-[10px] font-serif uppercase tracking-[0.2em] text-[#c5a059]">
+            Dock Quest Traveler
           </div>
-          <div className="text-sm font-semibold text-amber-100">
+          <div className="text-sm font-serif tracking-wide text-amber-100">
             {done ? "Opener Complete" : step.title}
+          </div>
+          <div className="mt-1 h-1 w-full max-w-[12rem] overflow-hidden rounded-full bg-black/50">
+            <div
+              className="h-full rounded-full transition-all duration-300"
+              style={{
+                width: `${stepPct}%`,
+                background: "linear-gradient(90deg, #7a5a23, #c5a059)",
+              }}
+            />
           </div>
         </div>
         <button
           type="button"
-          className="text-zinc-500 hover:text-zinc-300"
+          className="text-zinc-500 hover:text-[#c5a059]"
           onClick={() => setOpen(false)}
           aria-label="Collapse"
         >
           −
         </button>
       </div>
-
-      <label className="mb-2 flex items-center gap-2 text-[11px] text-zinc-400">
-        Race boat
-        <select
-          className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-zinc-200"
-          value={raceId}
-          onChange={(e) => setRaceId(e.target.value as RaceId)}
-        >
-          {RACES.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </select>
-      </label>
 
       <div className="mb-2 rounded border border-zinc-800 bg-black/40 p-2 text-[11px] leading-snug text-zinc-300">
         <div className="text-amber-200/90">→ {dest.islandName}</div>
@@ -150,7 +169,7 @@ export function TravelerTutorialHUD(props: {
             {dest.commanderName} {dest.commanderTitle}
           </span>
         </div>
-        <div className="text-zinc-500">Faction {dest.factionName} · same steps, different shore</div>
+        <div className="text-zinc-500">Dock opener · gather, craft, fight, sail</div>
       </div>
 
       {!done && (

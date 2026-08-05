@@ -156,6 +156,13 @@ export interface PlaceClaimOpts {
   maxTier?: number;
   now?: number;
   seed?: number;
+  /**
+   * Show the yellow/gold additive ground ring.
+   * Default false — player camps use fence + tower instead.
+   */
+  showRing?: boolean;
+  /** Show the tall banner pole (hide when a full camp is built). */
+  showFlag?: boolean;
 }
 
 /**
@@ -173,10 +180,18 @@ export function placeClaimFlag(
   group.position.copy(opts.position);
   group.position.y = 0;
 
-  const flag = makeFlagMesh(color, null);
-  group.add(flag);
-  const ring = makeClaimRing(radius, color);
-  group.add(ring);
+  // Camps own the visuals (fence + tower). Claim only scripts harvest by default.
+  if (opts.showFlag !== false && opts.showRing) {
+    const flag = makeFlagMesh(color, null);
+    group.add(flag);
+  } else if (opts.showFlag === true) {
+    const flag = makeFlagMesh(color, null);
+    group.add(flag);
+  }
+  if (opts.showRing) {
+    const ring = makeClaimRing(radius, color);
+    group.add(ring);
+  }
   field.root.add(group);
 
   const seed = opts.seed ?? hashString(id);

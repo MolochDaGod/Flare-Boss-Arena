@@ -54,7 +54,8 @@ export interface WispInstance {
   alive: boolean;
   group: THREE.Group;
   beam: THREE.Mesh;
-  core: THREE.Mesh;
+  /** Multi-mesh animated core group (or legacy mesh). */
+  core: THREE.Object3D;
   aggroRing: THREE.Mesh;
   /** 0 spline · 1 circles · 2 pillar */
   attackIndex: number;
@@ -65,6 +66,8 @@ export interface WispInstance {
   pillar: THREE.Group | null;
   pillarDir: THREE.Vector3;
   castSeed: number;
+  /** Bob phase for idle animation. */
+  bobT: number;
 }
 
 export interface WispEventField {
@@ -73,17 +76,85 @@ export interface WispEventField {
   dispose: () => void;
 }
 
-function makeWispCore(color: number): THREE.Mesh {
-  const mat = new THREE.MeshStandardMaterial({
-    color,
+/**
+ * Animated wisp core — multi-layer ball (core + plasma shell + orbit ring)
+ * with additive blending and time-driven pulse (updated in updateWisps).
+ */
+function makeWispCore(color: number): THREE.Group {
+  const g = new THREE.Group();
+  g.name = "WispCore";
+
+  const coreMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
     emissive: color,
-    emissiveIntensity: 1.8,
+    emissiveIntensity: 2.4,
     transparent: true,
-    opacity: 0.92,
-    roughness: 0.15,
-    metalness: 0.1,
+    opacity: 0.95,
+    roughness: 0.08,
+    metalness: 0.2,
   });
-  return new THREE.Mesh(new THREE.SphereGeometry(0.55, 16, 16), mat);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.42, 24, 24), coreMat);
+  core.name = "wisp_inner";
+  g.add(core);
+
+  const shellMat = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.35,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const shell = new THREE.Mesh(new THREE.SphereGeometry(0.72, 20, 20), shellMat);
+  shell.name = "wisp_shell";
+  g.add(shell);
+
+  const ringMat = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+  });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.06, 8, 32), ringMat);
+  ring.rotation.x = Math.PI / 2.4;
+  ring.name = "wisp_ring";
+  g.add(ring);
+
+  const ring2 = ring.clone();
+  ring2.rotation.x = Math.PI / 1.7;
+  ring2.rotation.z = 0.6;
+  ring2.name = "wisp_ring_b";
+  g.add(ring2);
+
+  // Soft sprite halo
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d")!;
+  const grd = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+  grd.addColorStop(0, "rgba(255,255,255,0.9)");
+  grd.addColorStop(0.35, "rgba(255,220,180,0.45)");
+  grd.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(canvas);
+  const halo = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: tex,
+      color,
+      transparent: true,
+      opacity: 0.75,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  );
+  halo.scale.set(2.4, 2.4, 1);
+  halo.name = "wisp_halo";
+  g.add(halo);
+
+  g.userData.color = color;
+  return g;
 }
 
 function makeBeam(color: number): THREE.Mesh {
@@ -138,6 +209,38 @@ export function createWispEventField(scene: THREE.Scene): WispEventField {
   };
 }
 
+function makeWispHpBar(color: number): THREE.Group {
+  const g = new THREE.Group();
+  g.name = "wisp_hp_bar";
+  const maxW = 1.2;
+  const bg = new THREE.Mesh(
+    new THREE.PlaneGeometry(maxW, 0.09),
+    new THREE.MeshBasicMaterial({ color: 0x0a0a12, transparent: true, opacity: 0.7, depthWrite: false }),
+  );
+  const fg = new THREE.Mesh(
+    new THREE.PlaneGeometry(maxW, 0.07),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthWrite: false }),
+  );
+  fg.position.z = 0.01;
+  fg.name = "hp_fg";
+  g.add(bg, fg);
+  g.userData.maxW = maxW;
+  g.userData.fg = fg;
+  g.position.y = 2.8;
+  return g;
+}
+
+function setWispHpBar(w: WispInstance) {
+  const bar = w.group.userData.hpBar as THREE.Group | undefined;
+  if (!bar) return;
+  const fg = bar.userData.fg as THREE.Mesh | undefined;
+  const maxW = (bar.userData.maxW as number) ?? 1.2;
+  if (!fg) return;
+  const r = Math.max(0, Math.min(1, w.hp / w.maxHp));
+  fg.scale.x = Math.max(0.001, r);
+  fg.position.x = -((1 - r) * maxW) * 0.5;
+}
+
 export function spawnWisp(
   field: WispEventField,
   position: THREE.Vector3,
@@ -146,16 +249,19 @@ export function spawnWisp(
 ): WispInstance {
   const pal = WISP_PALETTES[seed % WISP_PALETTES.length]!;
   const aggroRadius = opts?.aggroRadius ?? 14;
-  const maxHp = opts?.hp ?? 420;
+  // Tougher default so wisps are real combat objectives, not one-shots.
+  const maxHp = opts?.hp ?? 560;
   const group = new THREE.Group();
   group.position.copy(position);
   group.position.y = 0;
 
   const core = makeWispCore(pal.color);
-  core.position.y = 1.4;
+  core.position.y = 1.55;
   const beam = makeBeam(pal.color);
   const aggroRing = makeAggroRing(aggroRadius, pal.color);
-  group.add(core, beam, aggroRing);
+  const hpBar = makeWispHpBar(pal.color);
+  group.add(core, beam, aggroRing, hpBar);
+  group.userData.hpBar = hpBar;
   field.root.add(group);
 
   const w: WispInstance = {
@@ -177,6 +283,7 @@ export function spawnWisp(
     pillar: null,
     pillarDir: new THREE.Vector3(0, 0, 1),
     castSeed: seed,
+    bobT: seededUnit(seed, 7) * Math.PI * 2,
   };
   field.wisps.push(w);
   return w;
@@ -381,9 +488,25 @@ export function updateWisps(field: WispEventField, ctx: WispUpdateCtx): boolean 
   let anyAggro = false;
   for (const w of field.wisps) {
     if (!w.alive) continue;
-    // Bob + beam pulse
-    w.core.position.y = 1.4 + Math.sin(ctx.time * 3 + w.castSeed) * 0.15;
-    w.core.rotation.y += ctx.delta * 1.2;
+    // Animated ball: bob, spin rings, pulse shell
+    w.bobT = (w.bobT ?? 0) + ctx.delta;
+    const bob = Math.sin(ctx.time * 3.2 + w.castSeed) * 0.18;
+    w.core.position.y = 1.55 + bob;
+    w.core.rotation.y += ctx.delta * 1.4;
+    const shell = w.core.getObjectByName("wisp_shell");
+    const ring = w.core.getObjectByName("wisp_ring");
+    const ringB = w.core.getObjectByName("wisp_ring_b");
+    const halo = w.core.getObjectByName("wisp_halo");
+    if (shell) {
+      const s = 1 + 0.08 * Math.sin(ctx.time * 5 + w.castSeed);
+      shell.scale.setScalar(s);
+    }
+    if (ring) ring.rotation.z += ctx.delta * 2.2;
+    if (ringB) ringB.rotation.z -= ctx.delta * 1.6;
+    if (halo) {
+      const hs = 2.2 + 0.35 * Math.sin(ctx.time * 4.5 + w.castSeed);
+      halo.scale.set(hs, hs, 1);
+    }
     const beamMat = w.beam.material as THREE.MeshBasicMaterial;
     beamMat.opacity = 0.28 + 0.2 * Math.sin(ctx.time * 4 + w.castSeed);
 
@@ -518,6 +641,13 @@ export function updateWisps(field: WispEventField, ctx: WispUpdateCtx): boolean 
 export function damageWisp(w: WispInstance, dmg: number): boolean {
   if (!w.alive) return false;
   w.hp = Math.max(0, w.hp - dmg);
+  setWispHpBar(w);
+  // Flash core on hit
+  const shell = w.core.getObjectByName("wisp_shell") as THREE.Mesh | undefined;
+  if (shell) {
+    const mat = shell.material as THREE.MeshBasicMaterial;
+    mat.opacity = 0.75;
+  }
   if (w.hp <= 0) {
     w.alive = false;
     w.group.visible = false;

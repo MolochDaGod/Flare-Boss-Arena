@@ -10,7 +10,7 @@ import type { DamageShapeKind } from "../game/combat/damageShapes";
 import { getActiveFighter, RACALVIN_ID } from "./fighters";
 import { annihilateFighterKit } from "./annihilateHeroes";
 
-export type SkillTargeting = "instant" | "ground_aoe" | "slash_wave" | "self";
+export type SkillTargeting = "instant" | "ground_aoe" | "slash_wave" | "self" | "deployable";
 
 export interface FighterSkillDef {
   id: string;
@@ -20,18 +20,20 @@ export interface FighterSkillDef {
   /** Clip name substrings (most specific first) for triggerNamed. */
   anim: string[];
   targeting: SkillTargeting;
-  shape: DamageShapeKind | "slash";
+  shape: DamageShapeKind | "slash" | "deployable";
   element: SkillElement;
   damageMult: number;
   manaCost: number;
   cooldown: number;
   /** Ground AoE / nova radius. */
   aoeRadius?: number;
-  /** Max place range for ground AoE. */
+  /** Max place range for ground AoE / deployables. */
   placeRange?: number;
   /** Slash-wave travel distance. */
   slashRange?: number;
   color?: number;
+  /** When targeting is deployable (or inferred). */
+  deployable?: "fire_totem" | "turret" | "trap";
 }
 
 export interface FighterSpecialDef {
