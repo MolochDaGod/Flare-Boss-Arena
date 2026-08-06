@@ -153,6 +153,19 @@ export interface GltfLoaderOptions {
   fresh?: boolean;
 }
 
+/** Meshopt WASM must be ready before EXT_meshopt_compression GLBs (crew packs). */
+let meshoptReady: Promise<void> | null = null;
+
+export function ensureMeshoptReady(): Promise<void> {
+  if (!meshoptReady) {
+    const ready = (MeshoptDecoder as { ready?: Promise<unknown> }).ready;
+    meshoptReady = ready
+      ? ready.then(() => undefined).catch(() => undefined)
+      : Promise.resolve();
+  }
+  return meshoptReady;
+}
+
 /**
  * Wire Draco + Meshopt + SpecGloss (+ KTX2 when bound/renderer provided).
  */
@@ -161,6 +174,7 @@ export function makeGltfLoader(opts: GltfLoaderOptions = {}): GLTFLoader {
   const loader = new GLTFLoader(manager);
   loader.setDRACOLoader(getDraco());
   try {
+    // Always register; loads should await ensureMeshoptReady() first.
     loader.setMeshoptDecoder(MeshoptDecoder);
   } catch {
     /* meshopt optional if bundler strips wasm */

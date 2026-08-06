@@ -1,0 +1,2535 @@
+{
+  "pack": "craftpix-net-172265-rpg-magic-icons-spellbook-pixel-ui-pack",
+  "version": 2,
+  "generatedAt": "2026-08-06T04:31:26.140Z",
+  "sourceDisk": "D:/Games/Models/craftpix-rpg-magic-spellbook-ui",
+  "flarePublic": "public/ui/craftpix/spellbook",
+  "uiStudio": "assets/craftpix/spellbook",
+  "iconCellSize": 32,
+  "iconDisplaySize": 96,
+  "schools": [
+    {
+      "id": "fire",
+      "label": "Fire Magic",
+      "accent": "#e85d2a",
+      "iconCount": 45,
+      "gem": "gems/gem_fire.png"
+    },
+    {
+      "id": "air",
+      "label": "Air Magic",
+      "accent": "#5ab0e8",
+      "iconCount": 45,
+      "gem": "gems/gem_air.png"
+    },
+    {
+      "id": "water",
+      "label": "Water Magic",
+      "accent": "#3d8fd4",
+      "iconCount": 45,
+      "gem": "gems/gem_water.png"
+    },
+    {
+      "id": "earth",
+      "label": "Earth Magic",
+      "accent": "#6a9a3a",
+      "iconCount": 45,
+      "gem": "gems/gem_earth.png"
+    }
+  ],
+  "chrome": {
+    "bookPage": "book_page.png",
+    "bookContent": "book_content.png",
+    "infoTileset": "info_tileset.png",
+    "slotTileset": "sells_full.png",
+    "iconsSheet": "Icons.png",
+    "fontSample1": "Text1.png",
+    "fontSample2": "Text2.png",
+    "slotDefault": "slots/slot_default.png",
+    "gem_fire": "gems/gem_fire.png",
+    "gem_water": "gems/gem_water.png",
+    "gem_earth": "gems/gem_earth.png",
+    "gem_air": "gems/gem_air.png",
+    "panel_small_a": "panels/panel_small_a.png",
+    "panel_small_b": "panels/panel_small_b.png",
+    "panel_dialog": "panels/panel_dialog.png"
+  },
+  "slots": [
+    {
+      "id": "slot_a",
+      "file": "slots/slot_a.png",
+      "role": "top",
+      "col": 0,
+      "row": 0
+    },
+    {
+      "id": "slot_b",
+      "file": "slots/slot_b.png",
+      "role": "top",
+      "col": 1,
+      "row": 0
+    },
+    {
+      "id": "slot_c",
+      "file": "slots/slot_c.png",
+      "role": "top",
+      "col": 2,
+      "row": 0
+    },
+    {
+      "id": "slot_d",
+      "file": "slots/slot_d.png",
+      "role": "mid",
+      "col": 0,
+      "row": 1
+    },
+    {
+      "id": "slot_e",
+      "file": "slots/slot_e.png",
+      "role": "mid",
+      "col": 1,
+      "row": 1
+    },
+    {
+      "id": "slot_f",
+      "file": "slots/slot_f.png",
+      "role": "mid",
+      "col": 2,
+      "row": 1
+    },
+    {
+      "id": "slot_g",
+      "file": "slots/slot_g.png",
+      "role": "bottom",
+      "col": 0,
+      "row": 2
+    },
+    {
+      "id": "slot_h",
+      "file": "slots/slot_h.png",
+      "role": "bottom",
+      "col": 1,
+      "row": 2
+    },
+    {
+      "id": "slot_i",
+      "file": "slots/slot_i.png",
+      "role": "bottom",
+      "col": 2,
+      "row": 2
+    },
+    {
+      "id": "slot_default",
+      "file": "slots/slot_default.png",
+      "role": "default",
+      "col": 1,
+      "row": 1
+    }
+  ],
+  "gems": [
+    {
+      "id": "gem_fire",
+      "file": "gems/gem_fire.png",
+      "school": "fire"
+    },
+    {
+      "id": "gem_water",
+      "file": "gems/gem_water.png",
+      "school": "water"
+    },
+    {
+      "id": "gem_earth",
+      "file": "gems/gem_earth.png",
+      "school": "earth"
+    },
+    {
+      "id": "gem_air",
+      "file": "gems/gem_air.png",
+      "school": "air"
+    }
+  ],
+  "icons": [
+    {
+      "id": "water_water_blade",
+      "school": "water",
+      "name": "water_blade",
+      "label": "Water Blade",
+      "file": "icons/water_water_blade.png",
+      "tile": {
+        "col": 0,
+        "row": 0,
+        "size": 32
+      },
+      "index": 0
+    },
+    {
+      "id": "water_water_vortex",
+      "school": "water",
+      "name": "water_vortex",
+      "label": "Water Vortex",
+      "file": "icons/water_water_vortex.png",
+      "tile": {
+        "col": 1,
+        "row": 0,
+        "size": 32
+      },
+      "index": 1
+    },
+    {
+      "id": "water_water_drop",
+      "school": "water",
+      "name": "water_drop",
+      "label": "Water Drop",
+      "file": "icons/water_water_drop.png",
+      "tile": {
+        "col": 2,
+        "row": 0,
+        "size": 32
+      },
+      "index": 2
+    },
+    {
+      "id": "water_freeze_cube",
+      "school": "water",
+      "name": "freeze_cube",
+      "label": "Freeze Cube",
+      "file": "icons/water_freeze_cube.png",
+      "tile": {
+        "col": 3,
+        "row": 0,
+        "size": 32
+      },
+      "index": 3
+    },
+    {
+      "id": "water_freeze_figure",
+      "school": "water",
+      "name": "freeze_figure",
+      "label": "Freeze Figure",
+      "file": "icons/water_freeze_figure.png",
+      "tile": {
+        "col": 4,
+        "row": 0,
+        "size": 32
+      },
+      "index": 4
+    },
+    {
+      "id": "water_ice_crystal",
+      "school": "water",
+      "name": "ice_crystal",
+      "label": "Ice Crystal",
+      "file": "icons/water_ice_crystal.png",
+      "tile": {
+        "col": 5,
+        "row": 0,
+        "size": 32
+      },
+      "index": 5
+    },
+    {
+      "id": "water_snowflake",
+      "school": "water",
+      "name": "snowflake",
+      "label": "Snowflake",
+      "file": "icons/water_snowflake.png",
+      "tile": {
+        "col": 6,
+        "row": 0,
+        "size": 32
+      },
+      "index": 6
+    },
+    {
+      "id": "water_gust_of_wind",
+      "school": "water",
+      "name": "gust_of_wind",
+      "label": "Gust Of Wind",
+      "file": "icons/water_gust_of_wind.png",
+      "tile": {
+        "col": 7,
+        "row": 0,
+        "size": 32
+      },
+      "index": 7
+    },
+    {
+      "id": "water_bubble_cluster",
+      "school": "water",
+      "name": "bubble_cluster",
+      "label": "Bubble Cluster",
+      "file": "icons/water_bubble_cluster.png",
+      "tile": {
+        "col": 8,
+        "row": 0,
+        "size": 32
+      },
+      "index": 8
+    },
+    {
+      "id": "earth_earth_blade",
+      "school": "earth",
+      "name": "earth_blade",
+      "label": "Earth Blade",
+      "file": "icons/earth_earth_blade.png",
+      "tile": {
+        "col": 9,
+        "row": 0,
+        "size": 32
+      },
+      "index": 9
+    },
+    {
+      "id": "earth_earth_shield",
+      "school": "earth",
+      "name": "earth_shield",
+      "label": "Earth Shield",
+      "file": "icons/earth_earth_shield.png",
+      "tile": {
+        "col": 10,
+        "row": 0,
+        "size": 32
+      },
+      "index": 10
+    },
+    {
+      "id": "earth_earth_fist",
+      "school": "earth",
+      "name": "earth_fist",
+      "label": "Earth Fist",
+      "file": "icons/earth_earth_fist.png",
+      "tile": {
+        "col": 11,
+        "row": 0,
+        "size": 32
+      },
+      "index": 11
+    },
+    {
+      "id": "earth_earth_globe",
+      "school": "earth",
+      "name": "earth_globe",
+      "label": "Earth Globe",
+      "file": "icons/earth_earth_globe.png",
+      "tile": {
+        "col": 12,
+        "row": 0,
+        "size": 32
+      },
+      "index": 12
+    },
+    {
+      "id": "earth_earth_golem",
+      "school": "earth",
+      "name": "earth_golem",
+      "label": "Earth Golem",
+      "file": "icons/earth_earth_golem.png",
+      "tile": {
+        "col": 13,
+        "row": 0,
+        "size": 32
+      },
+      "index": 13
+    },
+    {
+      "id": "earth_earth_gust",
+      "school": "earth",
+      "name": "earth_gust",
+      "label": "Earth Gust",
+      "file": "icons/earth_earth_gust.png",
+      "tile": {
+        "col": 14,
+        "row": 0,
+        "size": 32
+      },
+      "index": 14
+    },
+    {
+      "id": "earth_stone_pillars",
+      "school": "earth",
+      "name": "stone_pillars",
+      "label": "Stone Pillars",
+      "file": "icons/earth_stone_pillars.png",
+      "tile": {
+        "col": 15,
+        "row": 0,
+        "size": 32
+      },
+      "index": 15
+    },
+    {
+      "id": "earth_grass_slash",
+      "school": "earth",
+      "name": "grass_slash",
+      "label": "Grass Slash",
+      "file": "icons/earth_grass_slash.png",
+      "tile": {
+        "col": 16,
+        "row": 0,
+        "size": 32
+      },
+      "index": 16
+    },
+    {
+      "id": "earth_tree_summoning",
+      "school": "earth",
+      "name": "tree_summoning",
+      "label": "Tree Summoning",
+      "file": "icons/earth_tree_summoning.png",
+      "tile": {
+        "col": 17,
+        "row": 0,
+        "size": 32
+      },
+      "index": 17
+    },
+    {
+      "id": "water_fountain",
+      "school": "water",
+      "name": "fountain",
+      "label": "Fountain",
+      "file": "icons/water_fountain.png",
+      "tile": {
+        "col": 0,
+        "row": 1,
+        "size": 32
+      },
+      "index": 18
+    },
+    {
+      "id": "water_tidal",
+      "school": "water",
+      "name": "tidal",
+      "label": "Tidal",
+      "file": "icons/water_tidal.png",
+      "tile": {
+        "col": 1,
+        "row": 1,
+        "size": 32
+      },
+      "index": 19
+    },
+    {
+      "id": "water_frost_bolt",
+      "school": "water",
+      "name": "frost_bolt",
+      "label": "Frost Bolt",
+      "file": "icons/water_frost_bolt.png",
+      "tile": {
+        "col": 2,
+        "row": 1,
+        "size": 32
+      },
+      "index": 20
+    },
+    {
+      "id": "water_ice_shield",
+      "school": "water",
+      "name": "ice_shield",
+      "label": "Ice Shield",
+      "file": "icons/water_ice_shield.png",
+      "tile": {
+        "col": 3,
+        "row": 1,
+        "size": 32
+      },
+      "index": 21
+    },
+    {
+      "id": "water_mist",
+      "school": "water",
+      "name": "mist",
+      "label": "Mist",
+      "file": "icons/water_mist.png",
+      "tile": {
+        "col": 4,
+        "row": 1,
+        "size": 32
+      },
+      "index": 22
+    },
+    {
+      "id": "water_torrent",
+      "school": "water",
+      "name": "torrent",
+      "label": "Torrent",
+      "file": "icons/water_torrent.png",
+      "tile": {
+        "col": 5,
+        "row": 1,
+        "size": 32
+      },
+      "index": 23
+    },
+    {
+      "id": "water_spell_15",
+      "school": "water",
+      "name": "spell_15",
+      "label": "Spell 15",
+      "file": "icons/water_spell_15.png",
+      "tile": {
+        "col": 6,
+        "row": 1,
+        "size": 32
+      },
+      "index": 24
+    },
+    {
+      "id": "water_spell_16",
+      "school": "water",
+      "name": "spell_16",
+      "label": "Spell 16",
+      "file": "icons/water_spell_16.png",
+      "tile": {
+        "col": 7,
+        "row": 1,
+        "size": 32
+      },
+      "index": 25
+    },
+    {
+      "id": "water_spell_17",
+      "school": "water",
+      "name": "spell_17",
+      "label": "Spell 17",
+      "file": "icons/water_spell_17.png",
+      "tile": {
+        "col": 8,
+        "row": 1,
+        "size": 32
+      },
+      "index": 26
+    },
+    {
+      "id": "earth_earth_figure",
+      "school": "earth",
+      "name": "earth_figure",
+      "label": "Earth Figure",
+      "file": "icons/earth_earth_figure.png",
+      "tile": {
+        "col": 9,
+        "row": 1,
+        "size": 32
+      },
+      "index": 27
+    },
+    {
+      "id": "earth_leaf",
+      "school": "earth",
+      "name": "leaf",
+      "label": "Leaf",
+      "file": "icons/earth_leaf.png",
+      "tile": {
+        "col": 10,
+        "row": 1,
+        "size": 32
+      },
+      "index": 28
+    },
+    {
+      "id": "earth_boulder",
+      "school": "earth",
+      "name": "boulder",
+      "label": "Boulder",
+      "file": "icons/earth_boulder.png",
+      "tile": {
+        "col": 11,
+        "row": 1,
+        "size": 32
+      },
+      "index": 29
+    },
+    {
+      "id": "earth_vine",
+      "school": "earth",
+      "name": "vine",
+      "label": "Vine",
+      "file": "icons/earth_vine.png",
+      "tile": {
+        "col": 12,
+        "row": 1,
+        "size": 32
+      },
+      "index": 30
+    },
+    {
+      "id": "earth_quake",
+      "school": "earth",
+      "name": "quake",
+      "label": "Quake",
+      "file": "icons/earth_quake.png",
+      "tile": {
+        "col": 13,
+        "row": 1,
+        "size": 32
+      },
+      "index": 31
+    },
+    {
+      "id": "earth_root",
+      "school": "earth",
+      "name": "root",
+      "label": "Root",
+      "file": "icons/earth_root.png",
+      "tile": {
+        "col": 14,
+        "row": 1,
+        "size": 32
+      },
+      "index": 32
+    },
+    {
+      "id": "earth_spell_15",
+      "school": "earth",
+      "name": "spell_15",
+      "label": "Spell 15",
+      "file": "icons/earth_spell_15.png",
+      "tile": {
+        "col": 15,
+        "row": 1,
+        "size": 32
+      },
+      "index": 33
+    },
+    {
+      "id": "earth_spell_16",
+      "school": "earth",
+      "name": "spell_16",
+      "label": "Spell 16",
+      "file": "icons/earth_spell_16.png",
+      "tile": {
+        "col": 16,
+        "row": 1,
+        "size": 32
+      },
+      "index": 34
+    },
+    {
+      "id": "earth_spell_17",
+      "school": "earth",
+      "name": "spell_17",
+      "label": "Spell 17",
+      "file": "icons/earth_spell_17.png",
+      "tile": {
+        "col": 17,
+        "row": 1,
+        "size": 32
+      },
+      "index": 35
+    },
+    {
+      "id": "water_spell_18",
+      "school": "water",
+      "name": "spell_18",
+      "label": "Spell 18",
+      "file": "icons/water_spell_18.png",
+      "tile": {
+        "col": 0,
+        "row": 2,
+        "size": 32
+      },
+      "index": 36
+    },
+    {
+      "id": "water_spell_19",
+      "school": "water",
+      "name": "spell_19",
+      "label": "Spell 19",
+      "file": "icons/water_spell_19.png",
+      "tile": {
+        "col": 1,
+        "row": 2,
+        "size": 32
+      },
+      "index": 37
+    },
+    {
+      "id": "water_spell_20",
+      "school": "water",
+      "name": "spell_20",
+      "label": "Spell 20",
+      "file": "icons/water_spell_20.png",
+      "tile": {
+        "col": 2,
+        "row": 2,
+        "size": 32
+      },
+      "index": 38
+    },
+    {
+      "id": "water_spell_21",
+      "school": "water",
+      "name": "spell_21",
+      "label": "Spell 21",
+      "file": "icons/water_spell_21.png",
+      "tile": {
+        "col": 3,
+        "row": 2,
+        "size": 32
+      },
+      "index": 39
+    },
+    {
+      "id": "water_spell_22",
+      "school": "water",
+      "name": "spell_22",
+      "label": "Spell 22",
+      "file": "icons/water_spell_22.png",
+      "tile": {
+        "col": 4,
+        "row": 2,
+        "size": 32
+      },
+      "index": 40
+    },
+    {
+      "id": "water_spell_23",
+      "school": "water",
+      "name": "spell_23",
+      "label": "Spell 23",
+      "file": "icons/water_spell_23.png",
+      "tile": {
+        "col": 5,
+        "row": 2,
+        "size": 32
+      },
+      "index": 41
+    },
+    {
+      "id": "water_spell_24",
+      "school": "water",
+      "name": "spell_24",
+      "label": "Spell 24",
+      "file": "icons/water_spell_24.png",
+      "tile": {
+        "col": 6,
+        "row": 2,
+        "size": 32
+      },
+      "index": 42
+    },
+    {
+      "id": "water_spell_25",
+      "school": "water",
+      "name": "spell_25",
+      "label": "Spell 25",
+      "file": "icons/water_spell_25.png",
+      "tile": {
+        "col": 7,
+        "row": 2,
+        "size": 32
+      },
+      "index": 43
+    },
+    {
+      "id": "water_spell_26",
+      "school": "water",
+      "name": "spell_26",
+      "label": "Spell 26",
+      "file": "icons/water_spell_26.png",
+      "tile": {
+        "col": 8,
+        "row": 2,
+        "size": 32
+      },
+      "index": 44
+    },
+    {
+      "id": "earth_spell_18",
+      "school": "earth",
+      "name": "spell_18",
+      "label": "Spell 18",
+      "file": "icons/earth_spell_18.png",
+      "tile": {
+        "col": 9,
+        "row": 2,
+        "size": 32
+      },
+      "index": 45
+    },
+    {
+      "id": "earth_spell_19",
+      "school": "earth",
+      "name": "spell_19",
+      "label": "Spell 19",
+      "file": "icons/earth_spell_19.png",
+      "tile": {
+        "col": 10,
+        "row": 2,
+        "size": 32
+      },
+      "index": 46
+    },
+    {
+      "id": "earth_spell_20",
+      "school": "earth",
+      "name": "spell_20",
+      "label": "Spell 20",
+      "file": "icons/earth_spell_20.png",
+      "tile": {
+        "col": 11,
+        "row": 2,
+        "size": 32
+      },
+      "index": 47
+    },
+    {
+      "id": "earth_spell_21",
+      "school": "earth",
+      "name": "spell_21",
+      "label": "Spell 21",
+      "file": "icons/earth_spell_21.png",
+      "tile": {
+        "col": 12,
+        "row": 2,
+        "size": 32
+      },
+      "index": 48
+    },
+    {
+      "id": "earth_spell_22",
+      "school": "earth",
+      "name": "spell_22",
+      "label": "Spell 22",
+      "file": "icons/earth_spell_22.png",
+      "tile": {
+        "col": 13,
+        "row": 2,
+        "size": 32
+      },
+      "index": 49
+    },
+    {
+      "id": "earth_spell_23",
+      "school": "earth",
+      "name": "spell_23",
+      "label": "Spell 23",
+      "file": "icons/earth_spell_23.png",
+      "tile": {
+        "col": 14,
+        "row": 2,
+        "size": 32
+      },
+      "index": 50
+    },
+    {
+      "id": "earth_spell_24",
+      "school": "earth",
+      "name": "spell_24",
+      "label": "Spell 24",
+      "file": "icons/earth_spell_24.png",
+      "tile": {
+        "col": 15,
+        "row": 2,
+        "size": 32
+      },
+      "index": 51
+    },
+    {
+      "id": "earth_spell_25",
+      "school": "earth",
+      "name": "spell_25",
+      "label": "Spell 25",
+      "file": "icons/earth_spell_25.png",
+      "tile": {
+        "col": 16,
+        "row": 2,
+        "size": 32
+      },
+      "index": 52
+    },
+    {
+      "id": "earth_spell_26",
+      "school": "earth",
+      "name": "spell_26",
+      "label": "Spell 26",
+      "file": "icons/earth_spell_26.png",
+      "tile": {
+        "col": 17,
+        "row": 2,
+        "size": 32
+      },
+      "index": 53
+    },
+    {
+      "id": "water_spell_27",
+      "school": "water",
+      "name": "spell_27",
+      "label": "Spell 27",
+      "file": "icons/water_spell_27.png",
+      "tile": {
+        "col": 0,
+        "row": 3,
+        "size": 32
+      },
+      "index": 54
+    },
+    {
+      "id": "water_spell_28",
+      "school": "water",
+      "name": "spell_28",
+      "label": "Spell 28",
+      "file": "icons/water_spell_28.png",
+      "tile": {
+        "col": 1,
+        "row": 3,
+        "size": 32
+      },
+      "index": 55
+    },
+    {
+      "id": "water_spell_29",
+      "school": "water",
+      "name": "spell_29",
+      "label": "Spell 29",
+      "file": "icons/water_spell_29.png",
+      "tile": {
+        "col": 2,
+        "row": 3,
+        "size": 32
+      },
+      "index": 56
+    },
+    {
+      "id": "water_spell_30",
+      "school": "water",
+      "name": "spell_30",
+      "label": "Spell 30",
+      "file": "icons/water_spell_30.png",
+      "tile": {
+        "col": 3,
+        "row": 3,
+        "size": 32
+      },
+      "index": 57
+    },
+    {
+      "id": "water_spell_31",
+      "school": "water",
+      "name": "spell_31",
+      "label": "Spell 31",
+      "file": "icons/water_spell_31.png",
+      "tile": {
+        "col": 4,
+        "row": 3,
+        "size": 32
+      },
+      "index": 58
+    },
+    {
+      "id": "water_spell_32",
+      "school": "water",
+      "name": "spell_32",
+      "label": "Spell 32",
+      "file": "icons/water_spell_32.png",
+      "tile": {
+        "col": 5,
+        "row": 3,
+        "size": 32
+      },
+      "index": 59
+    },
+    {
+      "id": "water_spell_33",
+      "school": "water",
+      "name": "spell_33",
+      "label": "Spell 33",
+      "file": "icons/water_spell_33.png",
+      "tile": {
+        "col": 6,
+        "row": 3,
+        "size": 32
+      },
+      "index": 60
+    },
+    {
+      "id": "water_spell_34",
+      "school": "water",
+      "name": "spell_34",
+      "label": "Spell 34",
+      "file": "icons/water_spell_34.png",
+      "tile": {
+        "col": 7,
+        "row": 3,
+        "size": 32
+      },
+      "index": 61
+    },
+    {
+      "id": "water_spell_35",
+      "school": "water",
+      "name": "spell_35",
+      "label": "Spell 35",
+      "file": "icons/water_spell_35.png",
+      "tile": {
+        "col": 8,
+        "row": 3,
+        "size": 32
+      },
+      "index": 62
+    },
+    {
+      "id": "earth_spell_27",
+      "school": "earth",
+      "name": "spell_27",
+      "label": "Spell 27",
+      "file": "icons/earth_spell_27.png",
+      "tile": {
+        "col": 9,
+        "row": 3,
+        "size": 32
+      },
+      "index": 63
+    },
+    {
+      "id": "earth_spell_28",
+      "school": "earth",
+      "name": "spell_28",
+      "label": "Spell 28",
+      "file": "icons/earth_spell_28.png",
+      "tile": {
+        "col": 10,
+        "row": 3,
+        "size": 32
+      },
+      "index": 64
+    },
+    {
+      "id": "earth_spell_29",
+      "school": "earth",
+      "name": "spell_29",
+      "label": "Spell 29",
+      "file": "icons/earth_spell_29.png",
+      "tile": {
+        "col": 11,
+        "row": 3,
+        "size": 32
+      },
+      "index": 65
+    },
+    {
+      "id": "earth_spell_30",
+      "school": "earth",
+      "name": "spell_30",
+      "label": "Spell 30",
+      "file": "icons/earth_spell_30.png",
+      "tile": {
+        "col": 12,
+        "row": 3,
+        "size": 32
+      },
+      "index": 66
+    },
+    {
+      "id": "earth_spell_31",
+      "school": "earth",
+      "name": "spell_31",
+      "label": "Spell 31",
+      "file": "icons/earth_spell_31.png",
+      "tile": {
+        "col": 13,
+        "row": 3,
+        "size": 32
+      },
+      "index": 67
+    },
+    {
+      "id": "earth_spell_32",
+      "school": "earth",
+      "name": "spell_32",
+      "label": "Spell 32",
+      "file": "icons/earth_spell_32.png",
+      "tile": {
+        "col": 14,
+        "row": 3,
+        "size": 32
+      },
+      "index": 68
+    },
+    {
+      "id": "earth_spell_33",
+      "school": "earth",
+      "name": "spell_33",
+      "label": "Spell 33",
+      "file": "icons/earth_spell_33.png",
+      "tile": {
+        "col": 15,
+        "row": 3,
+        "size": 32
+      },
+      "index": 69
+    },
+    {
+      "id": "earth_spell_34",
+      "school": "earth",
+      "name": "spell_34",
+      "label": "Spell 34",
+      "file": "icons/earth_spell_34.png",
+      "tile": {
+        "col": 16,
+        "row": 3,
+        "size": 32
+      },
+      "index": 70
+    },
+    {
+      "id": "earth_spell_35",
+      "school": "earth",
+      "name": "spell_35",
+      "label": "Spell 35",
+      "file": "icons/earth_spell_35.png",
+      "tile": {
+        "col": 17,
+        "row": 3,
+        "size": 32
+      },
+      "index": 71
+    },
+    {
+      "id": "water_spell_36",
+      "school": "water",
+      "name": "spell_36",
+      "label": "Spell 36",
+      "file": "icons/water_spell_36.png",
+      "tile": {
+        "col": 0,
+        "row": 4,
+        "size": 32
+      },
+      "index": 72
+    },
+    {
+      "id": "water_spell_37",
+      "school": "water",
+      "name": "spell_37",
+      "label": "Spell 37",
+      "file": "icons/water_spell_37.png",
+      "tile": {
+        "col": 1,
+        "row": 4,
+        "size": 32
+      },
+      "index": 73
+    },
+    {
+      "id": "water_spell_38",
+      "school": "water",
+      "name": "spell_38",
+      "label": "Spell 38",
+      "file": "icons/water_spell_38.png",
+      "tile": {
+        "col": 2,
+        "row": 4,
+        "size": 32
+      },
+      "index": 74
+    },
+    {
+      "id": "water_spell_39",
+      "school": "water",
+      "name": "spell_39",
+      "label": "Spell 39",
+      "file": "icons/water_spell_39.png",
+      "tile": {
+        "col": 3,
+        "row": 4,
+        "size": 32
+      },
+      "index": 75
+    },
+    {
+      "id": "water_spell_40",
+      "school": "water",
+      "name": "spell_40",
+      "label": "Spell 40",
+      "file": "icons/water_spell_40.png",
+      "tile": {
+        "col": 4,
+        "row": 4,
+        "size": 32
+      },
+      "index": 76
+    },
+    {
+      "id": "water_spell_41",
+      "school": "water",
+      "name": "spell_41",
+      "label": "Spell 41",
+      "file": "icons/water_spell_41.png",
+      "tile": {
+        "col": 5,
+        "row": 4,
+        "size": 32
+      },
+      "index": 77
+    },
+    {
+      "id": "water_spell_42",
+      "school": "water",
+      "name": "spell_42",
+      "label": "Spell 42",
+      "file": "icons/water_spell_42.png",
+      "tile": {
+        "col": 6,
+        "row": 4,
+        "size": 32
+      },
+      "index": 78
+    },
+    {
+      "id": "water_spell_43",
+      "school": "water",
+      "name": "spell_43",
+      "label": "Spell 43",
+      "file": "icons/water_spell_43.png",
+      "tile": {
+        "col": 7,
+        "row": 4,
+        "size": 32
+      },
+      "index": 79
+    },
+    {
+      "id": "water_spell_44",
+      "school": "water",
+      "name": "spell_44",
+      "label": "Spell 44",
+      "file": "icons/water_spell_44.png",
+      "tile": {
+        "col": 8,
+        "row": 4,
+        "size": 32
+      },
+      "index": 80
+    },
+    {
+      "id": "earth_spell_36",
+      "school": "earth",
+      "name": "spell_36",
+      "label": "Spell 36",
+      "file": "icons/earth_spell_36.png",
+      "tile": {
+        "col": 9,
+        "row": 4,
+        "size": 32
+      },
+      "index": 81
+    },
+    {
+      "id": "earth_spell_37",
+      "school": "earth",
+      "name": "spell_37",
+      "label": "Spell 37",
+      "file": "icons/earth_spell_37.png",
+      "tile": {
+        "col": 10,
+        "row": 4,
+        "size": 32
+      },
+      "index": 82
+    },
+    {
+      "id": "earth_spell_38",
+      "school": "earth",
+      "name": "spell_38",
+      "label": "Spell 38",
+      "file": "icons/earth_spell_38.png",
+      "tile": {
+        "col": 11,
+        "row": 4,
+        "size": 32
+      },
+      "index": 83
+    },
+    {
+      "id": "earth_spell_39",
+      "school": "earth",
+      "name": "spell_39",
+      "label": "Spell 39",
+      "file": "icons/earth_spell_39.png",
+      "tile": {
+        "col": 12,
+        "row": 4,
+        "size": 32
+      },
+      "index": 84
+    },
+    {
+      "id": "earth_spell_40",
+      "school": "earth",
+      "name": "spell_40",
+      "label": "Spell 40",
+      "file": "icons/earth_spell_40.png",
+      "tile": {
+        "col": 13,
+        "row": 4,
+        "size": 32
+      },
+      "index": 85
+    },
+    {
+      "id": "earth_spell_41",
+      "school": "earth",
+      "name": "spell_41",
+      "label": "Spell 41",
+      "file": "icons/earth_spell_41.png",
+      "tile": {
+        "col": 14,
+        "row": 4,
+        "size": 32
+      },
+      "index": 86
+    },
+    {
+      "id": "earth_spell_42",
+      "school": "earth",
+      "name": "spell_42",
+      "label": "Spell 42",
+      "file": "icons/earth_spell_42.png",
+      "tile": {
+        "col": 15,
+        "row": 4,
+        "size": 32
+      },
+      "index": 87
+    },
+    {
+      "id": "earth_spell_43",
+      "school": "earth",
+      "name": "spell_43",
+      "label": "Spell 43",
+      "file": "icons/earth_spell_43.png",
+      "tile": {
+        "col": 16,
+        "row": 4,
+        "size": 32
+      },
+      "index": 88
+    },
+    {
+      "id": "earth_spell_44",
+      "school": "earth",
+      "name": "spell_44",
+      "label": "Spell 44",
+      "file": "icons/earth_spell_44.png",
+      "tile": {
+        "col": 17,
+        "row": 4,
+        "size": 32
+      },
+      "index": 89
+    },
+    {
+      "id": "fire_blazing_sword",
+      "school": "fire",
+      "name": "blazing_sword",
+      "label": "Blazing Sword",
+      "file": "icons/fire_blazing_sword.png",
+      "tile": {
+        "col": 0,
+        "row": 5,
+        "size": 32
+      },
+      "index": 90
+    },
+    {
+      "id": "fire_fire_shield",
+      "school": "fire",
+      "name": "fire_shield",
+      "label": "Fire Shield",
+      "file": "icons/fire_fire_shield.png",
+      "tile": {
+        "col": 1,
+        "row": 5,
+        "size": 32
+      },
+      "index": 91
+    },
+    {
+      "id": "fire_fire_strike",
+      "school": "fire",
+      "name": "fire_strike",
+      "label": "Fire Strike",
+      "file": "icons/fire_fire_strike.png",
+      "tile": {
+        "col": 2,
+        "row": 5,
+        "size": 32
+      },
+      "index": 92
+    },
+    {
+      "id": "fire_fireball",
+      "school": "fire",
+      "name": "fireball",
+      "label": "Fireball",
+      "file": "icons/fire_fireball.png",
+      "tile": {
+        "col": 3,
+        "row": 5,
+        "size": 32
+      },
+      "index": 93
+    },
+    {
+      "id": "fire_fire_whirlwind",
+      "school": "fire",
+      "name": "fire_whirlwind",
+      "label": "Fire Whirlwind",
+      "file": "icons/fire_fire_whirlwind.png",
+      "tile": {
+        "col": 4,
+        "row": 5,
+        "size": 32
+      },
+      "index": 94
+    },
+    {
+      "id": "fire_meteor",
+      "school": "fire",
+      "name": "meteor",
+      "label": "Meteor",
+      "file": "icons/fire_meteor.png",
+      "tile": {
+        "col": 5,
+        "row": 5,
+        "size": 32
+      },
+      "index": 95
+    },
+    {
+      "id": "fire_fire_ring",
+      "school": "fire",
+      "name": "fire_ring",
+      "label": "Fire Ring",
+      "file": "icons/fire_fire_ring.png",
+      "tile": {
+        "col": 6,
+        "row": 5,
+        "size": 32
+      },
+      "index": 96
+    },
+    {
+      "id": "fire_fire_wing",
+      "school": "fire",
+      "name": "fire_wing",
+      "label": "Fire Wing",
+      "file": "icons/fire_fire_wing.png",
+      "tile": {
+        "col": 7,
+        "row": 5,
+        "size": 32
+      },
+      "index": 97
+    },
+    {
+      "id": "fire_fire_arrow",
+      "school": "fire",
+      "name": "fire_arrow",
+      "label": "Fire Arrow",
+      "file": "icons/fire_fire_arrow.png",
+      "tile": {
+        "col": 8,
+        "row": 5,
+        "size": 32
+      },
+      "index": 98
+    },
+    {
+      "id": "air_air_blade",
+      "school": "air",
+      "name": "air_blade",
+      "label": "Air Blade",
+      "file": "icons/air_air_blade.png",
+      "tile": {
+        "col": 9,
+        "row": 5,
+        "size": 32
+      },
+      "index": 99
+    },
+    {
+      "id": "air_air_shield",
+      "school": "air",
+      "name": "air_shield",
+      "label": "Air Shield",
+      "file": "icons/air_air_shield.png",
+      "tile": {
+        "col": 10,
+        "row": 5,
+        "size": 32
+      },
+      "index": 100
+    },
+    {
+      "id": "air_lightning_feather",
+      "school": "air",
+      "name": "lightning_feather",
+      "label": "Lightning Feather",
+      "file": "icons/air_lightning_feather.png",
+      "tile": {
+        "col": 11,
+        "row": 5,
+        "size": 32
+      },
+      "index": 101
+    },
+    {
+      "id": "air_air_strike",
+      "school": "air",
+      "name": "air_strike",
+      "label": "Air Strike",
+      "file": "icons/air_air_strike.png",
+      "tile": {
+        "col": 12,
+        "row": 5,
+        "size": 32
+      },
+      "index": 102
+    },
+    {
+      "id": "air_nullification",
+      "school": "air",
+      "name": "nullification",
+      "label": "Nullification",
+      "file": "icons/air_nullification.png",
+      "tile": {
+        "col": 13,
+        "row": 5,
+        "size": 32
+      },
+      "index": 103
+    },
+    {
+      "id": "air_air_wave",
+      "school": "air",
+      "name": "air_wave",
+      "label": "Air Wave",
+      "file": "icons/air_air_wave.png",
+      "tile": {
+        "col": 14,
+        "row": 5,
+        "size": 32
+      },
+      "index": 104
+    },
+    {
+      "id": "air_air_strike_2",
+      "school": "air",
+      "name": "air_strike_2",
+      "label": "Air Strike 2",
+      "file": "icons/air_air_strike_2.png",
+      "tile": {
+        "col": 15,
+        "row": 5,
+        "size": 32
+      },
+      "index": 105
+    },
+    {
+      "id": "air_air_storm",
+      "school": "air",
+      "name": "air_storm",
+      "label": "Air Storm",
+      "file": "icons/air_air_storm.png",
+      "tile": {
+        "col": 16,
+        "row": 5,
+        "size": 32
+      },
+      "index": 106
+    },
+    {
+      "id": "air_air_discharge",
+      "school": "air",
+      "name": "air_discharge",
+      "label": "Air Discharge",
+      "file": "icons/air_air_discharge.png",
+      "tile": {
+        "col": 17,
+        "row": 5,
+        "size": 32
+      },
+      "index": 107
+    },
+    {
+      "id": "fire_fire_heart",
+      "school": "fire",
+      "name": "fire_heart",
+      "label": "Fire Heart",
+      "file": "icons/fire_fire_heart.png",
+      "tile": {
+        "col": 0,
+        "row": 6,
+        "size": 32
+      },
+      "index": 108
+    },
+    {
+      "id": "fire_ember",
+      "school": "fire",
+      "name": "ember",
+      "label": "Ember",
+      "file": "icons/fire_ember.png",
+      "tile": {
+        "col": 1,
+        "row": 6,
+        "size": 32
+      },
+      "index": 109
+    },
+    {
+      "id": "fire_inferno",
+      "school": "fire",
+      "name": "inferno",
+      "label": "Inferno",
+      "file": "icons/fire_inferno.png",
+      "tile": {
+        "col": 2,
+        "row": 6,
+        "size": 32
+      },
+      "index": 110
+    },
+    {
+      "id": "fire_flame_burst",
+      "school": "fire",
+      "name": "flame_burst",
+      "label": "Flame Burst",
+      "file": "icons/fire_flame_burst.png",
+      "tile": {
+        "col": 3,
+        "row": 6,
+        "size": 32
+      },
+      "index": 111
+    },
+    {
+      "id": "fire_scorch",
+      "school": "fire",
+      "name": "scorch",
+      "label": "Scorch",
+      "file": "icons/fire_scorch.png",
+      "tile": {
+        "col": 4,
+        "row": 6,
+        "size": 32
+      },
+      "index": 112
+    },
+    {
+      "id": "fire_pyre",
+      "school": "fire",
+      "name": "pyre",
+      "label": "Pyre",
+      "file": "icons/fire_pyre.png",
+      "tile": {
+        "col": 5,
+        "row": 6,
+        "size": 32
+      },
+      "index": 113
+    },
+    {
+      "id": "fire_spell_15",
+      "school": "fire",
+      "name": "spell_15",
+      "label": "Spell 15",
+      "file": "icons/fire_spell_15.png",
+      "tile": {
+        "col": 6,
+        "row": 6,
+        "size": 32
+      },
+      "index": 114
+    },
+    {
+      "id": "fire_spell_16",
+      "school": "fire",
+      "name": "spell_16",
+      "label": "Spell 16",
+      "file": "icons/fire_spell_16.png",
+      "tile": {
+        "col": 7,
+        "row": 6,
+        "size": 32
+      },
+      "index": 115
+    },
+    {
+      "id": "fire_spell_17",
+      "school": "fire",
+      "name": "spell_17",
+      "label": "Spell 17",
+      "file": "icons/fire_spell_17.png",
+      "tile": {
+        "col": 8,
+        "row": 6,
+        "size": 32
+      },
+      "index": 116
+    },
+    {
+      "id": "air_air_target",
+      "school": "air",
+      "name": "air_target",
+      "label": "Air Target",
+      "file": "icons/air_air_target.png",
+      "tile": {
+        "col": 9,
+        "row": 6,
+        "size": 32
+      },
+      "index": 117
+    },
+    {
+      "id": "air_gust",
+      "school": "air",
+      "name": "gust",
+      "label": "Gust",
+      "file": "icons/air_gust.png",
+      "tile": {
+        "col": 10,
+        "row": 6,
+        "size": 32
+      },
+      "index": 118
+    },
+    {
+      "id": "air_cyclone",
+      "school": "air",
+      "name": "cyclone",
+      "label": "Cyclone",
+      "file": "icons/air_cyclone.png",
+      "tile": {
+        "col": 11,
+        "row": 6,
+        "size": 32
+      },
+      "index": 119
+    },
+    {
+      "id": "air_thunder",
+      "school": "air",
+      "name": "thunder",
+      "label": "Thunder",
+      "file": "icons/air_thunder.png",
+      "tile": {
+        "col": 12,
+        "row": 6,
+        "size": 32
+      },
+      "index": 120
+    },
+    {
+      "id": "air_gale",
+      "school": "air",
+      "name": "gale",
+      "label": "Gale",
+      "file": "icons/air_gale.png",
+      "tile": {
+        "col": 13,
+        "row": 6,
+        "size": 32
+      },
+      "index": 121
+    },
+    {
+      "id": "air_zephyr",
+      "school": "air",
+      "name": "zephyr",
+      "label": "Zephyr",
+      "file": "icons/air_zephyr.png",
+      "tile": {
+        "col": 14,
+        "row": 6,
+        "size": 32
+      },
+      "index": 122
+    },
+    {
+      "id": "air_spell_15",
+      "school": "air",
+      "name": "spell_15",
+      "label": "Spell 15",
+      "file": "icons/air_spell_15.png",
+      "tile": {
+        "col": 15,
+        "row": 6,
+        "size": 32
+      },
+      "index": 123
+    },
+    {
+      "id": "air_spell_16",
+      "school": "air",
+      "name": "spell_16",
+      "label": "Spell 16",
+      "file": "icons/air_spell_16.png",
+      "tile": {
+        "col": 16,
+        "row": 6,
+        "size": 32
+      },
+      "index": 124
+    },
+    {
+      "id": "air_spell_17",
+      "school": "air",
+      "name": "spell_17",
+      "label": "Spell 17",
+      "file": "icons/air_spell_17.png",
+      "tile": {
+        "col": 17,
+        "row": 6,
+        "size": 32
+      },
+      "index": 125
+    },
+    {
+      "id": "fire_spell_18",
+      "school": "fire",
+      "name": "spell_18",
+      "label": "Spell 18",
+      "file": "icons/fire_spell_18.png",
+      "tile": {
+        "col": 0,
+        "row": 7,
+        "size": 32
+      },
+      "index": 126
+    },
+    {
+      "id": "fire_spell_19",
+      "school": "fire",
+      "name": "spell_19",
+      "label": "Spell 19",
+      "file": "icons/fire_spell_19.png",
+      "tile": {
+        "col": 1,
+        "row": 7,
+        "size": 32
+      },
+      "index": 127
+    },
+    {
+      "id": "fire_spell_20",
+      "school": "fire",
+      "name": "spell_20",
+      "label": "Spell 20",
+      "file": "icons/fire_spell_20.png",
+      "tile": {
+        "col": 2,
+        "row": 7,
+        "size": 32
+      },
+      "index": 128
+    },
+    {
+      "id": "fire_spell_21",
+      "school": "fire",
+      "name": "spell_21",
+      "label": "Spell 21",
+      "file": "icons/fire_spell_21.png",
+      "tile": {
+        "col": 3,
+        "row": 7,
+        "size": 32
+      },
+      "index": 129
+    },
+    {
+      "id": "fire_spell_22",
+      "school": "fire",
+      "name": "spell_22",
+      "label": "Spell 22",
+      "file": "icons/fire_spell_22.png",
+      "tile": {
+        "col": 4,
+        "row": 7,
+        "size": 32
+      },
+      "index": 130
+    },
+    {
+      "id": "fire_spell_23",
+      "school": "fire",
+      "name": "spell_23",
+      "label": "Spell 23",
+      "file": "icons/fire_spell_23.png",
+      "tile": {
+        "col": 5,
+        "row": 7,
+        "size": 32
+      },
+      "index": 131
+    },
+    {
+      "id": "fire_spell_24",
+      "school": "fire",
+      "name": "spell_24",
+      "label": "Spell 24",
+      "file": "icons/fire_spell_24.png",
+      "tile": {
+        "col": 6,
+        "row": 7,
+        "size": 32
+      },
+      "index": 132
+    },
+    {
+      "id": "fire_spell_25",
+      "school": "fire",
+      "name": "spell_25",
+      "label": "Spell 25",
+      "file": "icons/fire_spell_25.png",
+      "tile": {
+        "col": 7,
+        "row": 7,
+        "size": 32
+      },
+      "index": 133
+    },
+    {
+      "id": "fire_spell_26",
+      "school": "fire",
+      "name": "spell_26",
+      "label": "Spell 26",
+      "file": "icons/fire_spell_26.png",
+      "tile": {
+        "col": 8,
+        "row": 7,
+        "size": 32
+      },
+      "index": 134
+    },
+    {
+      "id": "air_spell_18",
+      "school": "air",
+      "name": "spell_18",
+      "label": "Spell 18",
+      "file": "icons/air_spell_18.png",
+      "tile": {
+        "col": 9,
+        "row": 7,
+        "size": 32
+      },
+      "index": 135
+    },
+    {
+      "id": "air_spell_19",
+      "school": "air",
+      "name": "spell_19",
+      "label": "Spell 19",
+      "file": "icons/air_spell_19.png",
+      "tile": {
+        "col": 10,
+        "row": 7,
+        "size": 32
+      },
+      "index": 136
+    },
+    {
+      "id": "air_spell_20",
+      "school": "air",
+      "name": "spell_20",
+      "label": "Spell 20",
+      "file": "icons/air_spell_20.png",
+      "tile": {
+        "col": 11,
+        "row": 7,
+        "size": 32
+      },
+      "index": 137
+    },
+    {
+      "id": "air_spell_21",
+      "school": "air",
+      "name": "spell_21",
+      "label": "Spell 21",
+      "file": "icons/air_spell_21.png",
+      "tile": {
+        "col": 12,
+        "row": 7,
+        "size": 32
+      },
+      "index": 138
+    },
+    {
+      "id": "air_spell_22",
+      "school": "air",
+      "name": "spell_22",
+      "label": "Spell 22",
+      "file": "icons/air_spell_22.png",
+      "tile": {
+        "col": 13,
+        "row": 7,
+        "size": 32
+      },
+      "index": 139
+    },
+    {
+      "id": "air_spell_23",
+      "school": "air",
+      "name": "spell_23",
+      "label": "Spell 23",
+      "file": "icons/air_spell_23.png",
+      "tile": {
+        "col": 14,
+        "row": 7,
+        "size": 32
+      },
+      "index": 140
+    },
+    {
+      "id": "air_spell_24",
+      "school": "air",
+      "name": "spell_24",
+      "label": "Spell 24",
+      "file": "icons/air_spell_24.png",
+      "tile": {
+        "col": 15,
+        "row": 7,
+        "size": 32
+      },
+      "index": 141
+    },
+    {
+      "id": "air_spell_25",
+      "school": "air",
+      "name": "spell_25",
+      "label": "Spell 25",
+      "file": "icons/air_spell_25.png",
+      "tile": {
+        "col": 16,
+        "row": 7,
+        "size": 32
+      },
+      "index": 142
+    },
+    {
+      "id": "air_spell_26",
+      "school": "air",
+      "name": "spell_26",
+      "label": "Spell 26",
+      "file": "icons/air_spell_26.png",
+      "tile": {
+        "col": 17,
+        "row": 7,
+        "size": 32
+      },
+      "index": 143
+    },
+    {
+      "id": "fire_spell_27",
+      "school": "fire",
+      "name": "spell_27",
+      "label": "Spell 27",
+      "file": "icons/fire_spell_27.png",
+      "tile": {
+        "col": 0,
+        "row": 8,
+        "size": 32
+      },
+      "index": 144
+    },
+    {
+      "id": "fire_spell_28",
+      "school": "fire",
+      "name": "spell_28",
+      "label": "Spell 28",
+      "file": "icons/fire_spell_28.png",
+      "tile": {
+        "col": 1,
+        "row": 8,
+        "size": 32
+      },
+      "index": 145
+    },
+    {
+      "id": "fire_spell_29",
+      "school": "fire",
+      "name": "spell_29",
+      "label": "Spell 29",
+      "file": "icons/fire_spell_29.png",
+      "tile": {
+        "col": 2,
+        "row": 8,
+        "size": 32
+      },
+      "index": 146
+    },
+    {
+      "id": "fire_spell_30",
+      "school": "fire",
+      "name": "spell_30",
+      "label": "Spell 30",
+      "file": "icons/fire_spell_30.png",
+      "tile": {
+        "col": 3,
+        "row": 8,
+        "size": 32
+      },
+      "index": 147
+    },
+    {
+      "id": "fire_spell_31",
+      "school": "fire",
+      "name": "spell_31",
+      "label": "Spell 31",
+      "file": "icons/fire_spell_31.png",
+      "tile": {
+        "col": 4,
+        "row": 8,
+        "size": 32
+      },
+      "index": 148
+    },
+    {
+      "id": "fire_spell_32",
+      "school": "fire",
+      "name": "spell_32",
+      "label": "Spell 32",
+      "file": "icons/fire_spell_32.png",
+      "tile": {
+        "col": 5,
+        "row": 8,
+        "size": 32
+      },
+      "index": 149
+    },
+    {
+      "id": "fire_spell_33",
+      "school": "fire",
+      "name": "spell_33",
+      "label": "Spell 33",
+      "file": "icons/fire_spell_33.png",
+      "tile": {
+        "col": 6,
+        "row": 8,
+        "size": 32
+      },
+      "index": 150
+    },
+    {
+      "id": "fire_spell_34",
+      "school": "fire",
+      "name": "spell_34",
+      "label": "Spell 34",
+      "file": "icons/fire_spell_34.png",
+      "tile": {
+        "col": 7,
+        "row": 8,
+        "size": 32
+      },
+      "index": 151
+    },
+    {
+      "id": "fire_spell_35",
+      "school": "fire",
+      "name": "spell_35",
+      "label": "Spell 35",
+      "file": "icons/fire_spell_35.png",
+      "tile": {
+        "col": 8,
+        "row": 8,
+        "size": 32
+      },
+      "index": 152
+    },
+    {
+      "id": "air_spell_27",
+      "school": "air",
+      "name": "spell_27",
+      "label": "Spell 27",
+      "file": "icons/air_spell_27.png",
+      "tile": {
+        "col": 9,
+        "row": 8,
+        "size": 32
+      },
+      "index": 153
+    },
+    {
+      "id": "air_spell_28",
+      "school": "air",
+      "name": "spell_28",
+      "label": "Spell 28",
+      "file": "icons/air_spell_28.png",
+      "tile": {
+        "col": 10,
+        "row": 8,
+        "size": 32
+      },
+      "index": 154
+    },
+    {
+      "id": "air_spell_29",
+      "school": "air",
+      "name": "spell_29",
+      "label": "Spell 29",
+      "file": "icons/air_spell_29.png",
+      "tile": {
+        "col": 11,
+        "row": 8,
+        "size": 32
+      },
+      "index": 155
+    },
+    {
+      "id": "air_spell_30",
+      "school": "air",
+      "name": "spell_30",
+      "label": "Spell 30",
+      "file": "icons/air_spell_30.png",
+      "tile": {
+        "col": 12,
+        "row": 8,
+        "size": 32
+      },
+      "index": 156
+    },
+    {
+      "id": "air_spell_31",
+      "school": "air",
+      "name": "spell_31",
+      "label": "Spell 31",
+      "file": "icons/air_spell_31.png",
+      "tile": {
+        "col": 13,
+        "row": 8,
+        "size": 32
+      },
+      "index": 157
+    },
+    {
+      "id": "air_spell_32",
+      "school": "air",
+      "name": "spell_32",
+      "label": "Spell 32",
+      "file": "icons/air_spell_32.png",
+      "tile": {
+        "col": 14,
+        "row": 8,
+        "size": 32
+      },
+      "index": 158
+    },
+    {
+      "id": "air_spell_33",
+      "school": "air",
+      "name": "spell_33",
+      "label": "Spell 33",
+      "file": "icons/air_spell_33.png",
+      "tile": {
+        "col": 15,
+        "row": 8,
+        "size": 32
+      },
+      "index": 159
+    },
+    {
+      "id": "air_spell_34",
+      "school": "air",
+      "name": "spell_34",
+      "label": "Spell 34",
+      "file": "icons/air_spell_34.png",
+      "tile": {
+        "col": 16,
+        "row": 8,
+        "size": 32
+      },
+      "index": 160
+    },
+    {
+      "id": "air_spell_35",
+      "school": "air",
+      "name": "spell_35",
+      "label": "Spell 35",
+      "file": "icons/air_spell_35.png",
+      "tile": {
+        "col": 17,
+        "row": 8,
+        "size": 32
+      },
+      "index": 161
+    },
+    {
+      "id": "fire_spell_36",
+      "school": "fire",
+      "name": "spell_36",
+      "label": "Spell 36",
+      "file": "icons/fire_spell_36.png",
+      "tile": {
+        "col": 0,
+        "row": 9,
+        "size": 32
+      },
+      "index": 162
+    },
+    {
+      "id": "fire_spell_37",
+      "school": "fire",
+      "name": "spell_37",
+      "label": "Spell 37",
+      "file": "icons/fire_spell_37.png",
+      "tile": {
+        "col": 1,
+        "row": 9,
+        "size": 32
+      },
+      "index": 163
+    },
+    {
+      "id": "fire_spell_38",
+      "school": "fire",
+      "name": "spell_38",
+      "label": "Spell 38",
+      "file": "icons/fire_spell_38.png",
+      "tile": {
+        "col": 2,
+        "row": 9,
+        "size": 32
+      },
+      "index": 164
+    },
+    {
+      "id": "fire_spell_39",
+      "school": "fire",
+      "name": "spell_39",
+      "label": "Spell 39",
+      "file": "icons/fire_spell_39.png",
+      "tile": {
+        "col": 3,
+        "row": 9,
+        "size": 32
+      },
+      "index": 165
+    },
+    {
+      "id": "fire_spell_40",
+      "school": "fire",
+      "name": "spell_40",
+      "label": "Spell 40",
+      "file": "icons/fire_spell_40.png",
+      "tile": {
+        "col": 4,
+        "row": 9,
+        "size": 32
+      },
+      "index": 166
+    },
+    {
+      "id": "fire_spell_41",
+      "school": "fire",
+      "name": "spell_41",
+      "label": "Spell 41",
+      "file": "icons/fire_spell_41.png",
+      "tile": {
+        "col": 5,
+        "row": 9,
+        "size": 32
+      },
+      "index": 167
+    },
+    {
+      "id": "fire_spell_42",
+      "school": "fire",
+      "name": "spell_42",
+      "label": "Spell 42",
+      "file": "icons/fire_spell_42.png",
+      "tile": {
+        "col": 6,
+        "row": 9,
+        "size": 32
+      },
+      "index": 168
+    },
+    {
+      "id": "fire_spell_43",
+      "school": "fire",
+      "name": "spell_43",
+      "label": "Spell 43",
+      "file": "icons/fire_spell_43.png",
+      "tile": {
+        "col": 7,
+        "row": 9,
+        "size": 32
+      },
+      "index": 169
+    },
+    {
+      "id": "fire_spell_44",
+      "school": "fire",
+      "name": "spell_44",
+      "label": "Spell 44",
+      "file": "icons/fire_spell_44.png",
+      "tile": {
+        "col": 8,
+        "row": 9,
+        "size": 32
+      },
+      "index": 170
+    },
+    {
+      "id": "air_spell_36",
+      "school": "air",
+      "name": "spell_36",
+      "label": "Spell 36",
+      "file": "icons/air_spell_36.png",
+      "tile": {
+        "col": 9,
+        "row": 9,
+        "size": 32
+      },
+      "index": 171
+    },
+    {
+      "id": "air_spell_37",
+      "school": "air",
+      "name": "spell_37",
+      "label": "Spell 37",
+      "file": "icons/air_spell_37.png",
+      "tile": {
+        "col": 10,
+        "row": 9,
+        "size": 32
+      },
+      "index": 172
+    },
+    {
+      "id": "air_spell_38",
+      "school": "air",
+      "name": "spell_38",
+      "label": "Spell 38",
+      "file": "icons/air_spell_38.png",
+      "tile": {
+        "col": 11,
+        "row": 9,
+        "size": 32
+      },
+      "index": 173
+    },
+    {
+      "id": "air_spell_39",
+      "school": "air",
+      "name": "spell_39",
+      "label": "Spell 39",
+      "file": "icons/air_spell_39.png",
+      "tile": {
+        "col": 12,
+        "row": 9,
+        "size": 32
+      },
+      "index": 174
+    },
+    {
+      "id": "air_spell_40",
+      "school": "air",
+      "name": "spell_40",
+      "label": "Spell 40",
+      "file": "icons/air_spell_40.png",
+      "tile": {
+        "col": 13,
+        "row": 9,
+        "size": 32
+      },
+      "index": 175
+    },
+    {
+      "id": "air_spell_41",
+      "school": "air",
+      "name": "spell_41",
+      "label": "Spell 41",
+      "file": "icons/air_spell_41.png",
+      "tile": {
+        "col": 14,
+        "row": 9,
+        "size": 32
+      },
+      "index": 176
+    },
+    {
+      "id": "air_spell_42",
+      "school": "air",
+      "name": "spell_42",
+      "label": "Spell 42",
+      "file": "icons/air_spell_42.png",
+      "tile": {
+        "col": 15,
+        "row": 9,
+        "size": 32
+      },
+      "index": 177
+    },
+    {
+      "id": "air_spell_43",
+      "school": "air",
+      "name": "spell_43",
+      "label": "Spell 43",
+      "file": "icons/air_spell_43.png",
+      "tile": {
+        "col": 16,
+        "row": 9,
+        "size": 32
+      },
+      "index": 178
+    },
+    {
+      "id": "air_spell_44",
+      "school": "air",
+      "name": "spell_44",
+      "label": "Spell 44",
+      "file": "icons/air_spell_44.png",
+      "tile": {
+        "col": 17,
+        "row": 9,
+        "size": 32
+      },
+      "index": 179
+    }
+  ],
+  "firstBooks": [
+    {
+      "id": "book_fire_novice",
+      "school": "fire",
+      "title": "Ember Ally Tome",
+      "blurb": "Teach allies fire strike + ward. Best on bruiser / fighter.",
+      "unlockSkillIds": [
+        "fire_blazing_sword",
+        "fire_fire_shield"
+      ]
+    },
+    {
+      "id": "book_water_novice",
+      "school": "water",
+      "title": "Frost Ally Tome",
+      "blurb": "Teach allies heal arts + chill ward. Best on healers.",
+      "unlockSkillIds": [
+        "water_water_blade",
+        "water_water_vortex"
+      ]
+    },
+    {
+      "id": "book_earth_novice",
+      "school": "earth",
+      "title": "Stone Ally Tome",
+      "blurb": "Teach allies bulk + earth blade. Best on tank / unarmed.",
+      "unlockSkillIds": [
+        "earth_earth_blade",
+        "earth_earth_shield"
+      ]
+    },
+    {
+      "id": "book_air_novice",
+      "school": "air",
+      "title": "Gale Ally Tome",
+      "blurb": "Teach allies speed + reach. Best on ranger / skirmisher.",
+      "unlockSkillIds": [
+        "air_air_blade",
+        "air_air_shield"
+      ]
+    }
+  ]
+}

@@ -3,6 +3,7 @@ import {
   bindKtx2,
   createFrameTimer,
   createGltfLoader,
+  ensureMeshoptReady,
   disposeRenderer,
 } from "@/game/threeSetup";
 import { createEnemyModel, updateEnemyAnimation, makeAnimState, archetypeFor, type EnemyModel, type AnimState } from "./EnemyFactory";
@@ -562,6 +563,15 @@ export class GameEngine {
     };
   }
   private hoveredEnemy: EnemyInstance | null = null;
+  /** Contextual hover (pirates / boats / harvest / claim) for Kenney cursors. */
+  private hoverPirateRole: import("./PirateNPC").PirateRole | null = null;
+  private hoverHarvestKind: import("./Harvestables").HarvestKind | null = null;
+  private hoverBoat = false;
+  private hoverDock = false;
+  private hoverClaim = false;
+  private hoverChest = false;
+  private hoverAlly = false;
+  private hoverDungeon = false;
   private hoverEmissive = new Map<THREE.MeshStandardMaterial, { hex: number; intensity: number }>();
   private _moveHandler!: (e: MouseEvent) => void;
   private _downHandler!: (e: MouseEvent) => void;
@@ -699,7 +709,11 @@ export class GameEngine {
     this.buildWorldCollectables();
     this.scatterGenerativeProps();
     this.setupLighting();
-    this.loadPlayerModel();
+    // Crew packs require meshopt WASM — wait so /game doesn't T-pose/fail silently
+    void ensureMeshoptReady().then(() => {
+      if (this.disposed) return;
+      this.loadPlayerModel();
+    });
     this.spawnInitialEnemies();
     this.spawnDungeonBoss();
     this.setupInput(container);
@@ -1033,6 +1047,24 @@ export class GameEngine {
       loaded.holder.userData.collectKey = key;
       loaded.holder.userData.stationId = place.stationId;
       loaded.holder.userData.groundProp = floatY === 0;
+      // Pixel-cursor interact tags (loot / dungeon flavor)
+      const pid = place.propId.toLowerCase();
+      let worldInteract: "loot" | "dungeon" | "interact" | "prop" = "prop";
+      if (/door|gate|portal|dungeon|sigil|boss/.test(pid) || /door|gate|portal/.test(def?.name?.toLowerCase() ?? "")) {
+        worldInteract = "dungeon";
+      } else if (
+        def?.kind === "collectable" ||
+        def?.kind === "perk_symbol" ||
+        /chest|coin|loot|pouch|key|potion|bag|barrel/.test(pid)
+      ) {
+        worldInteract = "loot";
+      } else if (def?.kind === "machine" || place.stationId) {
+        worldInteract = "interact";
+      }
+      loaded.holder.userData.worldInteract = worldInteract;
+      loaded.holder.traverse((c) => {
+        c.userData.worldInteract = worldInteract;
+      });
       this.scene.add(loaded.holder);
       this.worldCollectables.push(loaded);
     }
@@ -1086,6 +1118,13 @@ export class GameEngine {
   /** Load a self-contained pirate-kit prop, scaled so its longest XZ ≈ extent. */
   private loadCoveProp(rel: string, pos: THREE.Vector3, extent: number, rotY: number) {
     const url = `${import.meta.env.BASE_URL}models/pirates/${rel}`;
+    // Cursor / interact tags for hover (boats, dock, loot)
+    let interact: "boat" | "dock" | "chest" | "prop" = "prop";
+    const low = rel.toLowerCase();
+    if (low.includes("ship")) interact = "boat";
+    else if (low.includes("dock")) interact = "dock";
+    else if (low.includes("chest") || low.includes("coins") || low.includes("barrel")) interact = "chest";
+
     loadGLTFCached(this.loader, url).then(
       (gltf) => {
         // Teardown-race guard: if the engine was disposed mid-load, release the
@@ -1108,11 +1147,13 @@ export class GameEngine {
           if (m.isMesh) {
             m.castShadow = true;
             m.receiveShadow = true;
+            m.userData.coveInteract = interact;
           }
         });
         const holder = new THREE.Group();
         holder.position.copy(pos);
         holder.rotation.y = rotY;
+        holder.userData.coveInteract = interact;
         holder.add(root);
         this.scene.add(holder);
         this.coveProps.push(holder);
@@ -1850,9 +1891,38 @@ export class GameEngine {
   }
 
   private refreshCursor(container: HTMLDivElement) {
+    // Proximity harvest kind for soft cursor (when not ray-hovering a node)
+    let nearbyHarvest: "wood" | "stone" | "herb" | null = null;
+    if (this.harvestField && this.nearbyHarvestLabel) {
+      const lbl = this.nearbyHarvestLabel.toLowerCase();
+      if (lbl.includes("tree") || lbl.includes("wood")) nearbyHarvest = "wood";
+      else if (lbl.includes("rock") || lbl.includes("stone") || lbl.includes("quarry")) nearbyHarvest = "stone";
+      else nearbyHarvest = "herb";
+    }
+
+    const hardLocked =
+      !!this.targetEnemy &&
+      this.targetEnemy.state !== "dead" &&
+      this.targetEnemy.state !== "death";
+
     const mode = resolveCombatCursor({
       skillTargeting: this.pendingSkillIdx >= 0,
-      hoverEnemy: !!this.hoveredEnemy,
+      targetLocked: hardLocked,
+      hoverEnemy: !!this.hoveredEnemy && !hardLocked,
+      hoverAlly: this.hoverAlly,
+      hoverPirate: !!this.hoverPirateRole,
+      pirateRole: this.hoverPirateRole,
+      hoverHarvest: this.hoverHarvestKind,
+      nearbyHarvest: this.hoverHarvestKind ? null : nearbyHarvest,
+      hoverBoat: this.hoverBoat,
+      hoverDock: this.hoverDock,
+      hoverDungeon: this.hoverDungeon,
+      hoverClaim: this.hoverClaim,
+      hoverInteract: this.hoverChest,
+      // RTS claim place: hold C → hammer / house cursor
+      claimReady: this.claimPlaceCd <= 0 && this.keys.has("KeyC"),
+      nearbyPirate: !!this.nearbyPirate && !this.hoverPirateRole,
+      nearbyPirateRole: this.nearbyPirate?.role ?? null,
       lmbHeld: this.pointerDown,
       rmbHeld: this.attackHeld,
       dead: this.playerHp <= 0,
@@ -1864,8 +1934,8 @@ export class GameEngine {
   }
 
   /**
-   * Hover raycast: highlight the enemy under the cursor (emissive glow) and
-   * set contextual OS cursor (pointer / crosshair / cell / move).
+   * Hover raycast: enemy glow + Kenney pixel cursors
+   * (lock / ally / enemy / harvest / boat / dungeon / claim).
    */
   private handleHover(e: MouseEvent, container: HTMLDivElement) {
     const rect = container.getBoundingClientRect();
@@ -1875,17 +1945,18 @@ export class GameEngine {
     );
     this.raycaster.setFromCamera(mouse, this.camera);
 
-    const liveGroups = this.enemies
-      .filter((en) => en.state !== "dead" && en.state !== "death")
-      .map((en) => en.model.group);
-    const hits = this.raycaster.intersectObjects(liveGroups, true);
-
     // Track the cursor's ground point for cursor-aim.
     this.updatePointerGround(e, container, false);
 
+    // ── Enemies ──────────────────────────────────────────────
+    const liveGroups = this.enemies
+      .filter((en) => en.state !== "dead" && en.state !== "death")
+      .map((en) => en.model.group);
+    const enemyHits = this.raycaster.intersectObjects(liveGroups, true);
+
     let hovered: EnemyInstance | null = null;
-    if (hits.length > 0) {
-      const eid = hits[0].object.userData.enemyId as string | undefined;
+    if (enemyHits.length > 0) {
+      const eid = enemyHits[0].object.userData.enemyId as string | undefined;
       hovered = this.enemies.find((en) => en.id === eid) ?? null;
     }
 
@@ -1900,6 +1971,125 @@ export class GameEngine {
       }
       this.hoveredEnemy = hovered;
     }
+
+    // Reset soft interact hovers each move (re-resolved below)
+    this.hoverPirateRole = null;
+    this.hoverHarvestKind = null;
+    this.hoverBoat = false;
+    this.hoverDock = false;
+    this.hoverClaim = false;
+    this.hoverChest = false;
+    this.hoverAlly = false;
+    this.hoverDungeon = false;
+
+    // Skip deeper picks while locked on an enemy (combat first)
+    if (!hovered) {
+      // ── Party allies ───────────────────────────────────────
+      const allyGroups = this.allies
+        .filter((a) => !a.dead)
+        .map((a) => a.instance.group);
+      if (allyGroups.length > 0) {
+        const ah = this.raycaster.intersectObjects(allyGroups, true);
+        if (ah.length > 0) this.hoverAlly = true;
+      }
+
+      // ── Pirates (friendly NPC — talk / trade / sail) ───────
+      if (!this.hoverAlly) {
+        const pirateGroups = this.pirates.filter((p) => p.ready).map((p) => p.group);
+        if (pirateGroups.length > 0) {
+          const ph = this.raycaster.intersectObjects(pirateGroups, true);
+          if (ph.length > 0) {
+            let obj: THREE.Object3D | null = ph[0].object;
+            while (obj) {
+              const pid = obj.userData.pirateId as string | undefined;
+              if (pid) {
+                const role = (obj.userData.pirateRole as import("./PirateNPC").PirateRole) ?? "crew";
+                this.hoverPirateRole = role;
+                break;
+              }
+              obj = obj.parent;
+            }
+          }
+        }
+      }
+
+      // ── Cove boats / docks / chests ────────────────────────
+      if (!this.hoverPirateRole && !this.hoverAlly && this.coveProps.length > 0) {
+        const ch = this.raycaster.intersectObjects(this.coveProps, true);
+        if (ch.length > 0) {
+          let obj: THREE.Object3D | null = ch[0].object;
+          let kind: string | undefined;
+          while (obj) {
+            kind = obj.userData.coveInteract as string | undefined;
+            if (kind) break;
+            obj = obj.parent;
+          }
+          if (kind === "boat") this.hoverBoat = true;
+          else if (kind === "dock") this.hoverDock = true;
+          else if (kind === "chest") this.hoverChest = true;
+        }
+      }
+
+      // ── World props (loot / dungeon-ish stations) ───────────
+      if (
+        !this.hoverPirateRole &&
+        !this.hoverBoat &&
+        !this.hoverAlly &&
+        this.worldCollectables.length > 0
+      ) {
+        const holders = this.worldCollectables.map((w) => w.holder);
+        const wh = this.raycaster.intersectObjects(holders, true);
+        if (wh.length > 0) {
+          let obj: THREE.Object3D | null = wh[0].object;
+          let wKind: string | undefined;
+          while (obj) {
+            wKind = obj.userData.worldInteract as string | undefined;
+            if (wKind) break;
+            obj = obj.parent;
+          }
+          if (wKind === "dungeon") this.hoverDungeon = true;
+          else if (wKind === "loot" || wKind === "interact") this.hoverChest = true;
+        }
+      }
+
+      // ── Harvest nodes under cursor (ground proximity) ──────
+      if (
+        !this.hoverPirateRole &&
+        !this.hoverBoat &&
+        !this.hoverDock &&
+        !this.hoverAlly &&
+        this.harvestField &&
+        this.pointerGround
+      ) {
+        const now = performance.now() / 1000;
+        const n = nearestHarvestNode(this.harvestField.nodes, this.pointerGround, 2.2, now);
+        if (n) this.hoverHarvestKind = n.kind;
+      }
+
+      // ── Claim flag rings ───────────────────────────────────
+      if (!this.hoverPirateRole && !this.hoverBoat && !this.hoverAlly && this.claimFlags?.root) {
+        const fh = this.raycaster.intersectObject(this.claimFlags.root, true);
+        if (fh.length > 0) this.hoverClaim = true;
+      }
+
+      // Soft dungeon cue: deep maze rooms (far from spawn / cove)
+      if (
+        !this.hoverPirateRole &&
+        !this.hoverBoat &&
+        !this.hoverHarvestKind &&
+        !this.hoverAlly &&
+        this.maze &&
+        this.pointerGround
+      ) {
+        const dSpawn = Math.hypot(this.pointerGround.x, this.pointerGround.z);
+        const dCove = Math.hypot(
+          this.pointerGround.x - this.coveCenter.x,
+          this.pointerGround.z - this.coveCenter.z,
+        );
+        if (dSpawn > 28 && dCove > 22) this.hoverDungeon = true;
+      }
+    }
+
     this.refreshCursor(container);
   }
 
@@ -3410,10 +3600,18 @@ export class GameEngine {
         this.playerPos.x += this._rmTmp.x;
         this.playerPos.z += this._rmTmp.z;
       }
-      // Scourge Faithbearer — animate chain-anchor throw extension
+      // Scourge Faithbearer — chain throw + Minecraft-taught idle tumble (throw/spin/catch)
       if (this.playerGroup?.userData.scourgeChainUpdate) {
-        const c = this.playerGroup.userData.scourgeChain as { update?: (d: number) => void } | undefined;
-        c?.update?.(delta);
+        const c = this.playerGroup.userData.scourgeChain as {
+          update?: (d: number, idleAllow?: boolean) => void;
+        } | undefined;
+        const idleAllow =
+          !playerMoving &&
+          this.playerAttackCooldown <= 0 &&
+          !this.attackHeld &&
+          this.pendingSkillIdx < 0 &&
+          this.playerHp > 0;
+        c?.update?.(delta, idleAllow);
       }
     } else if (this.playerMixer) {
       this.playerMixer.update(delta);
@@ -3535,8 +3733,9 @@ export class GameEngine {
       }
     }
 
-    // Proximity prompts for cove + harvest nodes.
+    // Proximity prompts for cove + harvest nodes (+ soft Kenney cursor).
     this.refreshNearbyInteractables();
+    if (this.container) this.refreshCursor(this.container);
 
     // Soft-respawn harvest nodes on timer.
     if (this.harvestField) {

@@ -368,7 +368,7 @@ function Game() {
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col" style={{ zIndex: 50 }}>
-      {/* 3D canvas — OS mouse restored; GameEngine sets contextual cursor (crosshair/pointer/move/cell) */}
+      {/* 3D canvas — OS mouse + Kenney contextual cursors (combat/harvest/boat/claim/sail) via GameEngine */}
       <div ref={mountRef} className="absolute inset-0" style={{ cursor: "crosshair" }} />
       <GameEscapeMenu open={menuOpen} onOpenChange={setMenuOpen} />
       <SystemHub open={hubOpen} onOpenChange={setHubOpen} />

@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "generatedAt": "2026-08-06T02:17:18.851Z",
+  "pattern": "racalvin-style: base.glb + skeleton-only anim/*.glb + hero.glb viewport",
+  "si": {
+    "unit": "meter",
+    "humanHeight": 1.8,
+    "viewportTargetHeight": 2.05
+  },
+  "fileType": "model/gltf-binary (glTF 2.0)",
+  "crews": {
+    "scourge": {
+      "base": "prod/base.glb",
+      "hero": "prod/hero.glb",
+      "animDir": "prod/anim/",
+      "anchor": "prod/anchor.glb",
+      "bytesBefore": 154799636,
+      "bytesAfter": 23066124,
+      "anims": [
+        {
+          "name": "attack.glb",
+          "before": 10346756,
+          "after": 54308
+        },
+        {
+          "name": "combo.glb",
+          "before": 10383964,
+          "after": 91536
+        },
+        {
+          "name": "dodge.glb",
+          "before": 10323384,
+          "after": 30932
+        },
+        {
+          "name": "hit.glb",
+          "before": 10341580,
+          "after": 49164
+        },
+        {
+          "name": "idle.glb",
+          "before": 10334716,
+          "after": 42300
+        },
+        {
+          "name": "run.glb",
+          "before": 10319984,
+          "after": 27552
+        },
+        {
+          "name": "skill1.glb",
+          "before": 10325484,
+          "after": 33072
+        },
+        {
+          "name": "skill2.glb",
+          "before": 10328680,
+          "after": 36252
+        },
+        {
+          "name": "skill3.glb",
+          "before": 10332684,
+          "after": 40264
+        },
+        {
+          "name": "slam.glb",
+          "before": 10345896,
+          "after": 53456
+        },
+        {
+          "name": "slash.glb",
+          "before": 10351148,
+          "after": 58704
+        },
+        {
+          "name": "walk.glb",
+          "before": 10324592,
+          "after": 32184
+        }
+      ]
+    },
+    "johnwayne": {
+      "base": "prod/base.glb",
+      "hero": "prod/hero.glb",
+      "animDir": "prod/anim/",
+      "anchor": null,
+      "bytesBefore": 133594084,
+      "bytesAfter": 8882596,
+      "anims": [
+        {
+          "name": "attack.glb",
+          "before": 9573848,
+          "after": 80324
+        },
+        {
+          "name": "cast.glb",
+          "before": 9587820,
+          "after": 94324
+        },
+        {
+          "name": "charge.glb",
+          "before": 9520832,
+          "after": 27244
+        },
+        {
+          "name": "combo.glb",
+          "before": 9543396,
+          "after": 49860
+        },
+        {
+          "name": "combo2.glb",
+          "before": 9565864,
+          "after": 72328
+        },
+        {
+          "name": "dodge.glb",
+          "before": 9542664,
+          "after": 49152
+        },
+        {
+          "name": "hit.glb",
+          "before": 9530724,
+          "after": 37196
+        },
+        {
+          "name": "idle.glb",
+          "before": 9535792,
+          "after": 42280
+        },
+        {
+          "name": "jump.glb",
+          "before": 9529968,
+          "after": 36456
+        },
+        {
+          "name": "run.glb",
+          "before": 9521072,
+          "after": 27540
+        },
+        {
+          "name": "slash.glb",
+          "before": 9551800,
+          "after": 58296
+        },
+        {
+          "name": "special.glb",
+          "before": 9551696,
+          "after": 58188
+        },
+        {
+          "name": "walk.glb",
+          "before": 9525676,
+          "after": 32168
+        }
+      ]
+    }
+  }
+}

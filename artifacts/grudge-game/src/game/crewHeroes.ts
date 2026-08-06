@@ -248,7 +248,8 @@ export function pickCrewRoleClips(
     return undefined;
   };
   return {
-    idle: pick("idle", "walk"),
+    // Standing: walk first — Meshy "idle" packs for these crews are get-up recoveries
+    idle: pick("walk", "run", "idle", "attack"),
     walk: pick("walk", "run", "idle"),
     run: pick("run", "walk"),
     attack: pick("attack", "combo", "slash", "skill1", "combo2"),
@@ -367,15 +368,81 @@ export async function loadCrewClips(
 }
 
 /** Essential locomotion for /select + /units viewport (fast first paint). */
-export const CREW_VIEWPORT_ANIMS = ["idle", "walk", "run", "attack"] as const;
+export const CREW_VIEWPORT_ANIMS = ["walk", "run", "attack", "idle"] as const;
 
-/** Portrait showcase order — better look than frozen bind on roster cards. */
-export const CREW_SHOWCASE_CYCLE = [
-  { name: "idle", seconds: 4.2 },
-  { name: "walk", seconds: 2.4 },
-  { name: "run", seconds: 1.6 },
-  { name: "attack", seconds: 0 }, // play once then return
+/**
+ * Portrait default / standing loop.
+ * Meshy idle packs for Scourge + Cap'n John are get-up / floor recoveries —
+ * prefer walk → run → attack so previews never open on get-up.
+ */
+/**
+ * Prefer attack (weapon motion) then run — idle packs are get-ups.
+ * "attack" is the select portrait default users preferred for crew.
+ */
+export const CREW_PREVIEW_STAND_CANDIDATES = [
+  "attack",
+  "run",
+  "walk",
+  "slash",
+  "combo",
+  "idle",
 ] as const;
+
+/** Portrait showcase — attack loop first (weapon flair), then loco. */
+export const CREW_SHOWCASE_CYCLE = [
+  { name: "attack", seconds: 2.8 },
+  { name: "run", seconds: 2.0 },
+  { name: "walk", seconds: 2.4 },
+  { name: "attack", seconds: 2.2 },
+] as const;
+
+/**
+ * Pick a standing loop for /select + roster thumbs.
+ * Never prefer a clip that is only a get-up-named idle when walk/attack exist.
+ */
+export function pickCrewPreviewStandClip(
+  clips: THREE.AnimationClip[],
+): THREE.AnimationClip | undefined {
+  const by = new Map(clips.map((c) => [c.name.toLowerCase(), c]));
+  for (const n of CREW_PREVIEW_STAND_CANDIDATES) {
+    const c = by.get(n);
+    if (c && !isStaticBindClip(c)) return c;
+  }
+  return clips.find((c) => !isStaticBindClip(c)) ?? clips[0];
+}
+
+/**
+ * Meshy "idle" packs for Scourge / Cap'n John are floor get-ups.
+ * Promote walk (or run/attack) to the name `idle` so HeroAnimator / previews
+ * stand correctly; keep the raw get-up as `getup` for optional one-shots.
+ */
+export function promoteCrewStandIdle(clips: THREE.AnimationClip[]): THREE.AnimationClip[] {
+  if (!clips.length) return clips;
+  const by = new Map(clips.map((c) => [c.name.toLowerCase(), c]));
+  // Prefer attack (weapon) then run/walk as standing "idle" for game + preview
+  const stand =
+    by.get("attack") ?? by.get("run") ?? by.get("walk") ?? by.get("slash");
+  const badIdle = by.get("idle");
+  if (!stand) return clips;
+  // Already standing-named and no better stand source
+  if (!badIdle && stand.name.toLowerCase() === "idle") return clips;
+
+  const out: THREE.AnimationClip[] = [];
+  if (badIdle) {
+    const getup = badIdle.clone();
+    getup.name = "getup";
+    out.push(getup);
+  }
+  const idleAlias = stand.clone();
+  idleAlias.name = "idle";
+  out.push(idleAlias);
+  for (const c of clips) {
+    const k = c.name.toLowerCase();
+    if (k === "idle") continue; // replaced
+    out.push(c);
+  }
+  return out;
+}
 
 /**
  * Chain + warpick mount for Scourge.
@@ -388,6 +455,8 @@ export class ScourgeChainWeapon {
   private links: THREE.Mesh[] = [];
   private mode: "rest" | "throw" = "rest";
   private throwT = 0;
+  /** Minecraft Idol axe tumble — throw / spin / catch while idle at rest. */
+  private tumble: import("./weaponTumbleIdle").WeaponTumbleIdle | null = null;
 
   constructor() {
     this.mount.name = "ScourgeChainMount";
@@ -413,6 +482,11 @@ export class ScourgeChainWeapon {
     this.pickRoot.name = "Warpick";
     this.mount.add(this.pickRoot);
     this.layoutRest();
+    // Lazy-bind tumble after first rest layout (hand grip)
+    void import("./weaponTumbleIdle").then(({ WeaponTumbleIdle }) => {
+      this.tumble = new WeaponTumbleIdle();
+      this.tumble.bind(this.pickRoot, { posScale: 0.38, cycleSec: 3.6 });
+    });
   }
 
   attachPick(mesh: THREE.Object3D) {
@@ -431,6 +505,8 @@ export class ScourgeChainWeapon {
     // Point pick along chain axis
     mesh.rotation.set(0, 0, -Math.PI / 2);
     this.pickRoot.add(mesh);
+    // Re-bind tumble rest after warpick is mounted (constructor bind was empty)
+    this.tumble?.bind(this.pickRoot, { posScale: 0.42, cycleSec: 3.2 });
   }
 
   private layoutRest() {
@@ -463,8 +539,11 @@ export class ScourgeChainWeapon {
     if (mode === "rest") {
       this.throwT = 0;
       this.layoutRest();
+      // Re-capture rest grip after layout so tumble offsets from correct pose
+      this.tumble?.bind(this.pickRoot, { posScale: 0.38, cycleSec: 3.6 });
     } else {
       this.throwT = 0;
+      this.tumble?.snapRest();
     }
   }
 
@@ -472,11 +551,18 @@ export class ScourgeChainWeapon {
     return this.mode;
   }
 
-  /** Drive throw extension (seconds). Call from scene update. */
-  update(dt: number) {
-    if (this.mode !== "throw") return;
-    this.throwT = Math.min(1, this.throwT + dt * 2.4);
-    this.layoutThrow(this.throwT);
+  /**
+   * Drive throw extension OR idle tumble (Minecraft Idol teach).
+   * @param idleAllow true when player is standing (not attacking / sprinting)
+   */
+  update(dt: number, idleAllow = true) {
+    if (this.mode === "throw") {
+      this.throwT = Math.min(1, this.throwT + dt * 2.4);
+      this.layoutThrow(this.throwT);
+      return;
+    }
+    // Rest: teach weapon throw-spin-catch on warpick
+    this.tumble?.update(dt, idleAllow);
   }
 }
 
@@ -622,7 +708,8 @@ export function loadCrewHero(
       };
 
       const finish = (lib: THREE.AnimationClip[], notifyUpdate = false) => {
-        const all = merge(lib);
+        // walk → idle so previews / HeroAnimator never open on Meshy get-up packs
+        const all = promoteCrewStandIdle(merge(lib));
         if (notifyUpdate) opts?.onClipsUpdated?.(all);
         else onReady(wrapper, root, all);
       };

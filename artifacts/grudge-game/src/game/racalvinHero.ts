@@ -130,6 +130,12 @@ export class RacalvinWeapons {
   private _q = new THREE.Quaternion();
   private onStrikeHit: ((worldPos: THREE.Vector3) => void) | null = null;
   private hitFired = false;
+  /**
+   * Minecraft Idol-taught tumble (throw / spin / catch) on sheathed blades.
+   * Loaded async — only runs while flight === sheathed.
+   */
+  private tumbleA: import("./weaponTumbleIdle").WeaponTumbleIdle | null = null;
+  private tumbleB: import("./weaponTumbleIdle").WeaponTumbleIdle | null = null;
 
   constructor(
     /** Primary (right) Brothers' Keeper mount */
@@ -139,6 +145,13 @@ export class RacalvinWeapons {
     readonly pistolMount: THREE.Object3D,
   ) {
     this.setMode("sword");
+    void import("./weaponTumbleIdle").then(({ WeaponTumbleIdle }) => {
+      this.tumbleA = new WeaponTumbleIdle();
+      this.tumbleB = new WeaponTumbleIdle();
+      // Smaller toss on back sheath — still readable spin/catch
+      this.tumbleA.bind(this.swordMount, { posScale: 0.22, cycleSec: 4.0 });
+      this.tumbleB.bind(this.swordMountB, { posScale: 0.2, cycleSec: 4.2 });
+    });
   }
 
   bindSkeleton(
@@ -298,6 +311,9 @@ export class RacalvinWeapons {
     this.swordMountB.rotation.copy(BACK_SHEATH_B.rotation);
     this.flight = "sheathed";
     this.phaseT = 0;
+    // Re-capture sheath rest so Minecraft tumble offsets from X-back pose
+    this.tumbleA?.bind(this.swordMount, { posScale: 0.22, cycleSec: 4.0 });
+    this.tumbleB?.bind(this.swordMountB, { posScale: 0.2, cycleSec: 4.2 });
     if (!instant) {
       /* snap is fine — return path already lerped in free flight */
     }
@@ -337,9 +353,15 @@ export class RacalvinWeapons {
 
     switch (this.flight) {
       case "sheathed":
-        // subtle idle float on back
-        this.swordMount.position.y = BACK_SHEATH_A.position.y + Math.sin(this.spin * 0.35) * 0.01;
-        this.swordMountB.position.y = BACK_SHEATH_B.position.y + Math.sin(this.spin * 0.35 + 1) * 0.01;
+        // Minecraft Idol teach: throw / spin / catch on sheathed blades
+        if (this.tumbleA?.isBound()) {
+          this.tumbleA.update(dt, true);
+          this.tumbleB?.update(dt, true);
+        } else {
+          // Fallback float until tumble keys bind
+          this.swordMount.position.y = BACK_SHEATH_A.position.y + Math.sin(this.spin * 0.35) * 0.01;
+          this.swordMountB.position.y = BACK_SHEATH_B.position.y + Math.sin(this.spin * 0.35 + 1) * 0.01;
+        }
         break;
       case "to_hands":
         // Brief hand connect then release
