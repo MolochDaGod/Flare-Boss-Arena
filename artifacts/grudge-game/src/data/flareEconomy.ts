@@ -14,6 +14,7 @@
  */
 
 import { FIGHTERS, RACALVIN_ID, SCOURGE_ID, JOHN_WAYNE_ID } from "./fighters";
+import { ANNIHILATE_FIGHTERS } from "./annihilateHeroes";
 
 export const FLARE_TOKEN_ID = "flare_grudge_token" as const;
 export const GBUX_PER_TOKEN = 1000;
@@ -23,10 +24,11 @@ export const WEEKLY_FREE_COUNT = 3;
 export const UNLOCK_TOKEN_COST = 1;
 
 /**
- * Always free-to-play (not permanent owned) — Racalvin pirate crew + captain.
- * Levels still require token unlock. Tokens can still buy permanent ownership.
+ * Always free-to-play — all Warlords Toon RTS ★ race×class heroes + Racalvin crew.
+ * Permanent ownership still via token for long-term level saves.
  */
 export const STARTER_FREE_IDS: readonly string[] = [
+  ...ANNIHILATE_FIGHTERS.map((f) => f.id),
   RACALVIN_ID,
   SCOURGE_ID,
   JOHN_WAYNE_ID,

@@ -4,6 +4,8 @@ import {
   createFrameTimer,
   createGltfLoader,
   disposeRenderer,
+  ensureMeshoptReady,
+  bindKtx2,
 } from "@/game/threeSetup";
 import { getSkin, skinUrl, SKIN_CLIP_SUFFIX } from "@/data/skins";
 import { disposeObject3D } from "@/game/kaykitHero";
@@ -26,6 +28,7 @@ import {
   getScourgeChain,
   syncScourgeWeaponForClip,
   CREW_SHOWCASE_CYCLE,
+  pickCrewPreviewStandClip,
 } from "@/game/crewHeroes";
 import { getFighterAssetTuning, type FighterAssetTuning } from "@/data/fighterAssetTuning";
 import { collectMeshNames, setupFighterMeshVisibility, syncHiddenMeshesForClip } from "@/game/assetVisibility";
@@ -111,7 +114,11 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
   const snapBindPose = () => {
     const s = sceneRef.current;
     if (!s.model || !s.mixer || !s.clips.length) return;
-    const idle = s.clips.find((c) => c.name === "idle") ?? s.clips[0];
+    // Crew: stand pose from walk/attack (not get-up idle packs)
+    const idle =
+      isCrewFighterId(fighterId) || isCrewFighterId(skinId)
+        ? pickCrewPreviewStandClip(s.clips)
+        : (s.clips.find((c) => c.name === "idle") ?? s.clips[0]);
     if (!idle) return;
     s.activeAction = sampleClipPose(s.model, s.mixer, idle);
     if (fighterId === RACALVIN_ID) {
@@ -126,7 +133,9 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     const clip =
       s.clips.find((c) => c.name === name) ??
       s.clips.find((c) => c.name.toLowerCase().includes(name.toLowerCase())) ??
-      s.clips.find((c) => c.name === "idle") ??
+      (isCrewFighterId(fighterId) || isCrewFighterId(skinId)
+        ? pickCrewPreviewStandClip(s.clips)
+        : s.clips.find((c) => c.name === "idle")) ??
       s.clips[0];
     if (!clip) return;
     s.activeAction?.fadeOut(0.18);
@@ -145,6 +154,15 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
   };
 
   const playIdle = () => {
+    // Scourge / Cap'n John: standing walk (or attack), never get-up "idle"
+    if (isCrewFighterId(fighterId) || isCrewFighterId(skinId)) {
+      const s = sceneRef.current;
+      const stand = pickCrewPreviewStandClip(s.clips);
+      if (stand) {
+        playClipNamed(stand.name, true);
+        return;
+      }
+    }
     playClipNamed("idle", true);
   };
 
@@ -298,7 +316,8 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     let disposed = false;
     const timer = createFrameTimer();
     timer.connect(document);
-    const loader = createGltfLoader();
+    bindKtx2(renderer);
+    const loader = createGltfLoader({ renderer });
 
     sceneRef.current = {
       model: null,
@@ -345,17 +364,23 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
         sceneRef.current.mixer = mixer;
       }
       if (freezePoseRef.current) {
-        const idleClip = loaded.find((c) => c.name === "idle") ?? loaded[0];
+        const idleClip =
+          isCrewFighterId(fighterId) || isCrewFighterId(skinId)
+            ? pickCrewPreviewStandClip(loaded)
+            : (loaded.find((c) => c.name === "idle") ?? loaded[0]);
         if (idleClip && mixer) {
           activeAction = sampleClipPose(m, mixer, idleClip);
           sceneRef.current.activeAction = activeAction;
         }
         return;
       }
+      // Crew: walk/run/attack first — Meshy idle packs are get-up recoveries
       const idle =
-        loaded.find((c) => c.name === "idle") ??
-        loaded.find((c) => c.name === "walk") ??
-        loaded[0];
+        isCrewFighterId(fighterId) || isCrewFighterId(skinId)
+          ? pickCrewPreviewStandClip(loaded)
+          : (loaded.find((c) => c.name === "idle") ??
+            loaded.find((c) => c.name === "walk") ??
+            loaded[0]);
       if (idle) {
         activeAction?.fadeOut(0.12);
         activeAction = mixer!
@@ -374,112 +399,148 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     };
 
     // ── Racalvin crew (Scourge / Captain John Wayne) — models/crew/* base.glb ──
+    // Meshopt WASM must be ready or EXT_meshopt_compression loads fail → "Preview unavailable"
     if (isCrewFighterId(skinId) || isCrewFighterId(fighterId)) {
       const crew = (isCrewFighterId(skinId) ? skinId : fighterId) as CrewId;
-      // Viewport: SI ~2.0 m, progressive anims (idle first) — Racalvin deployment pattern
-      loadCrewHero(
-        loader,
-        crew,
-        2.0,
-        (wrapper, root, loadedClips) => {
-          if (disposed) {
-            disposeObject3D(wrapper);
-            return;
-          }
-          // loadCrewHero already feet-fit; only add to scene (no double scale)
-          scene.add(wrapper);
-          model = wrapper;
-          sceneRef.current.model = wrapper;
-          onMeshesReady?.(collectMeshNames(wrapper));
-          const names =
-            crew === SCOURGE_ID
-              ? [...SCOURGE_ANIMS]
-              : crew === JOHN_WAYNE_ID
-                ? [...JOHN_ANIMS]
-                : loadedClips.map((c) => c.name);
-          playIdleFrom(wrapper, loadedClips, names);
-          const chain = getScourgeChain(wrapper) ?? getScourgeChain(root);
-          if (chain) {
-            onHandBoneReady?.("RightHand (chain+anchor)");
-          } else {
-            onHandBoneReady?.(null);
-          }
-        },
-        () => {
-          if (!disposed) setFailed(true);
-        },
-        {
-          viewportFirst: true,
-          onClipsUpdated: (all) => {
-            if (disposed || !model) return;
-            clips = all;
-            sceneRef.current.clips = all;
+      void ensureMeshoptReady().then(() => {
+        if (disposed) return;
+        // Viewport: SI ~2.0 m — attack-first stand (weapon flair), not get-up idle
+        loadCrewHero(
+          loader,
+          crew,
+          2.0,
+          (wrapper, root, loadedClips) => {
+            if (disposed) {
+              disposeObject3D(wrapper);
+              return;
+            }
+            // loadCrewHero already feet-fit; only add to scene (no double scale)
+            scene.add(wrapper);
+            model = wrapper;
+            sceneRef.current.model = wrapper;
+            onMeshesReady?.(collectMeshNames(wrapper));
             const names =
               crew === SCOURGE_ID
                 ? [...SCOURGE_ANIMS]
                 : crew === JOHN_WAYNE_ID
                   ? [...JOHN_ANIMS]
-                  : all.map((c) => c.name);
-            onClipsReady?.(names);
-            // If still on a weak fallback, crossfade into real idle
-            const idle = all.find((c) => c.name === "idle");
-            if (idle && mixer && !freezePoseRef.current) {
-              const cur = sceneRef.current.activeAction?.getClip().name;
-              if (!cur || cur !== "idle") {
-                activeAction?.fadeOut(0.15);
-                activeAction = mixer
-                  .clipAction(idle)
-                  .reset()
-                  .setLoop(THREE.LoopRepeat, Infinity)
-                  .fadeIn(0.2)
-                  .play();
-                sceneRef.current.activeAction = activeAction;
-              }
+                  : loadedClips.map((c) => c.name);
+            playIdleFrom(wrapper, loadedClips, names);
+            const chain = getScourgeChain(wrapper) ?? getScourgeChain(root);
+            if (chain) {
+              onHandBoneReady?.("RightHand (chain+anchor)");
+            } else {
+              onHandBoneReady?.(null);
             }
           },
-        },
-      );
+          () => {
+            if (!disposed) setFailed(true);
+          },
+          {
+            viewportFirst: true,
+            onClipsUpdated: (all) => {
+              if (disposed || !model) return;
+              clips = all;
+              sceneRef.current.clips = all;
+              const names =
+                crew === SCOURGE_ID
+                  ? [...SCOURGE_ANIMS]
+                  : crew === JOHN_WAYNE_ID
+                    ? [...JOHN_ANIMS]
+                    : all.map((c) => c.name);
+              onClipsReady?.(names);
+              // Prefer attack/run once full pack is in — never force get-up idle
+              const stand = pickCrewPreviewStandClip(all);
+              if (stand && mixer && !freezePoseRef.current) {
+                const cur = sceneRef.current.activeAction?.getClip().name;
+                const standing = new Set(
+                  ["walk", "run", "attack", "slash", "combo"].map((n) => n.toLowerCase()),
+                );
+                if (!cur || !standing.has(cur.toLowerCase()) || cur === "getup") {
+                  activeAction?.fadeOut(0.15);
+                  activeAction = mixer
+                    .clipAction(stand)
+                    .reset()
+                    .setLoop(THREE.LoopRepeat, Infinity)
+                    .fadeIn(0.2)
+                    .play();
+                  sceneRef.current.activeAction = activeAction;
+                  syncScourgeWeaponForClip(model, stand.name);
+                }
+              }
+            },
+          },
+        );
+      });
     } else if (isAnnihilateHeroId(skinId) || isAnnihilateHeroId(fighterId)) {
-      // grudge6 / Toon RTS — unifySkeletons + atlas + baked idle (never raw multi-skin GLB)
+      // Warlords Toon RTS ★ — Grudge6Factory → raceGlbUrlCandidates (toon-rts CDN first)
       const g6 =
         parseAnnihilateHeroId(skinId) ?? parseAnnihilateHeroId(fighterId);
       if (!g6) {
         setFailed(true);
       } else {
-        void import("@/game/grudge6/Grudge6Character").then(({ Grudge6Factory }) => {
+        void Promise.all([
+          import("@/game/grudge6/Grudge6Character"),
+          import("@/data/grudge6Assets"),
+        ]).then(([{ Grudge6Factory }, { targetHeightForRace, raceGlbUrl }]) => {
           if (disposed) return;
           const factory = new Grudge6Factory();
+          const playUrl = raceGlbUrl(g6.race);
           factory
             .createPlayer({
               race: g6.race,
               classId: g6.classId,
               displayName: fighterId,
-              height: 1.85,
+              height: targetHeightForRace(g6.race),
             })
             .then((inst) => {
               if (disposed) {
                 inst.dispose();
                 return;
               }
+              // Record file system path for UI/debug
+              inst.group.userData.playMeshUrl = inst.debug?.glbUrl || playUrl;
+              inst.group.userData.playMesh = "toon-rts";
               scene.add(inst.group);
               model = inst.group;
               sceneRef.current.model = inst.group;
-              onMeshesReady?.(collectMeshNames(inst.group));
+              onMeshesReady?.(
+                collectMeshNames(inst.group).concat([
+                  `[toon] ${String(inst.debug?.glbUrl || playUrl).split("/").pop()}`,
+                ]),
+              );
               onHandBoneReady?.(null);
-              // Drive ally animator idle (baked) — no separate mixer needed
               const anim = inst.animator;
               if (anim) {
-                anim.setMoving(false);
+                anim.setMoving?.(false);
+                anim.setGaitFromSpeed?.(0, false);
                 anim.update(1 / 30);
-                // Wrap for dispose with scene
-                (inst.group as THREE.Object3D & { userData: Record<string, unknown> }).userData.g6Dispose =
-                  () => inst.dispose();
+                (
+                  inst.group as THREE.Object3D & { userData: Record<string, unknown> }
+                ).userData.g6Dispose = () => inst.dispose();
               }
-              onClipsReady?.(inst.debug.clipNames.length ? inst.debug.clipNames : ["idle"]);
-              // Keep animator ticking in render loop via userData
+              const clips =
+                inst.debug.clipNames.length > 0
+                  ? inst.debug.clipNames
+                  : ["idle", "walk", "run", "attack"];
+              onClipsReady?.(clips);
               (inst.group as THREE.Object3D).userData.g6Animator = anim;
+              // Slow rotate showcase gait
+              if (showcaseRef.current && anim?.setGaitFromSpeed) {
+                let t = 0;
+                const gaitTick = () => {
+                  if (disposed || freezePoseRef.current) return;
+                  t += 1 / 60;
+                  const phase = Math.floor(t / 3) % 3;
+                  if (phase === 0) anim.setGaitFromSpeed?.(0, false);
+                  else if (phase === 1) anim.setGaitFromSpeed?.(0.45, false);
+                  else anim.setGaitFromSpeed?.(0.9, true);
+                };
+                (inst.group as THREE.Object3D).userData.g6GaitTick = gaitTick;
+              }
             })
-            .catch(() => {
+            .catch((err) => {
+              console.error("[FighterPreview] Toon RTS load failed", g6, playUrl, err);
               if (!disposed) setFailed(true);
             });
         });
@@ -547,7 +608,13 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
       const d = timer.getDelta();
       if (!freezePoseRef.current) {
         mixer?.update(d);
-        // grudge6 ally animator (preview path)
+        // Warlords Toon RTS animator (preview path)
+        const g6Tick = model?.userData?.g6GaitTick as (() => void) | undefined;
+        try {
+          g6Tick?.();
+        } catch {
+          /* */
+        }
         const g6a = model?.userData?.g6Animator as
           | { update?: (dt: number) => void; setMoving?: (m: boolean) => void }
           | undefined;
@@ -567,11 +634,12 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
             s.showcaseTimer = 0;
             s.showcaseIdx = (s.showcaseIdx + 1) % CREW_SHOWCASE_CYCLE.length;
             const next = CREW_SHOWCASE_CYCLE[s.showcaseIdx]!;
-            const loop = next.name === "idle" || next.name === "walk" || next.name === "run";
-            // Inline play to avoid stale closure on playClipNamed
+            // Loop attack/run/walk; one-shots only for true non-loco clips
+            const loop = /^(idle|walk|run|attack|slash|combo)$/i.test(next.name);
+            // Inline play — fall back to attack/run, never get-up-only idle
             const clip =
               s.clips.find((c) => c.name === next.name) ??
-              s.clips.find((c) => c.name === "idle") ??
+              pickCrewPreviewStandClip(s.clips) ??
               s.clips[0];
             if (clip && mixer) {
               s.activeAction?.fadeOut(0.16);
@@ -590,10 +658,10 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
           }
         }
       }
-      // Scourge chain throw extension (if mounted)
+      // Scourge chain + Minecraft Idol weapon tumble (idle throw/spin/catch)
       if (model) {
         const chain = getScourgeChain(model);
-        chain?.update(d);
+        chain?.update(d, !freezePoseRef.current);
       }
       // Soft auto-orbit on units even when drag-orbit enabled — keeps cards lively
       if (model) {

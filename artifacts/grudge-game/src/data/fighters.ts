@@ -343,12 +343,21 @@ export const FIGHTERS: FighterDef[] = [
     stats: S(8, 8, 7, 7, 8, 5, 7, 6),
     featured: true,
   },
-  // ── Annihilate / Warlords 24 (skill creation + MOBA + dungeon) ──
+  // ── Annihilate / Warlords 24 (Toon RTS ★ primary play mesh) ──
   ...ANNIHILATE_FIGHTERS,
 ];
 
-/** Default champion — Racalvin is always free-to-play starter crew. */
-export const DEFAULT_FIGHTER_ID = RACALVIN_ID;
+/** Default champion — Warlords Toon RTS human warrior (not One Piece / Meshy). */
+export const DEFAULT_FIGHTER_ID = "g6_human_warrior";
+
+/** All 24 Warlords race×class heroes (Toon RTS GLB file system). */
+export function warlordsFighters(): FighterDef[] {
+  return FIGHTERS.filter((f) => f.id.startsWith("g6_"));
+}
+
+export function isWarlordsFighterId(id: string | null | undefined): boolean {
+  return !!id && id.startsWith("g6_");
+}
 
 export function getFighter(id: string | null | undefined): FighterDef | undefined {
   if (!id) return undefined;

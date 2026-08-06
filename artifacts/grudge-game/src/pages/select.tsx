@@ -10,9 +10,13 @@ import {
   RACALVIN_ID,
   SCOURGE_ID,
   JOHN_WAYNE_ID,
+  warlordsFighters,
+  isWarlordsFighterId,
   type FighterDef,
   type AttrKey,
 } from "@/data/fighters";
+import { raceGlbUrl } from "@/data/grudge6Assets";
+import { parseAnnihilateHeroId } from "@/data/annihilateHeroes";
 import {
   evolutionFamilyIds,
   getEvolutionMeta,
@@ -177,12 +181,16 @@ export default function Select() {
 
   const CREW_IDS = useMemo(() => new Set([RACALVIN_ID, SCOURGE_ID, JOHN_WAYNE_ID]), []);
 
-  const { evolutionGroups, standalone, racalvinCrew } = useMemo(() => {
+  const { warlordsRoster, evolutionGroups, standalone, racalvinCrew } = useMemo(() => {
+    const warlords = warlordsFighters();
+    const warlordsIds = new Set(warlords.map((f) => f.id));
     const inFamily = new Set<string>();
     const groups: { familyId: string; familyName: string; fighters: FighterDef[] }[] = [];
     for (const familyId of evolutionFamilyIds()) {
       const tiers = tiersInFamily(familyId);
-      const fighters = FIGHTERS.filter((f) => getEvolutionMeta(f.id)?.familyId === familyId).sort(
+      const fighters = FIGHTERS.filter(
+        (f) => getEvolutionMeta(f.id)?.familyId === familyId && !warlordsIds.has(f.id),
+      ).sort(
         (a, b) => (getEvolutionMeta(a.id)?.tier ?? 0) - (getEvolutionMeta(b.id)?.tier ?? 0),
       );
       fighters.forEach((f) => inFamily.add(f.id));
@@ -192,10 +200,25 @@ export default function Select() {
     }
     const crew = FIGHTERS.filter((f) => CREW_IDS.has(f.id));
     const solo = FIGHTERS.filter(
-      (f) => !inFamily.has(f.id) && !isEvolutionFighter(f.id) && !CREW_IDS.has(f.id),
+      (f) =>
+        !inFamily.has(f.id) &&
+        !isEvolutionFighter(f.id) &&
+        !CREW_IDS.has(f.id) &&
+        !warlordsIds.has(f.id),
     );
-    return { evolutionGroups: groups, standalone: solo, racalvinCrew: crew };
+    return {
+      warlordsRoster: warlords,
+      evolutionGroups: groups,
+      standalone: solo,
+      racalvinCrew: crew,
+    };
   }, [CREW_IDS]);
+
+  const selectedToonUrl = useMemo(() => {
+    if (!isWarlordsFighterId(selected.id)) return null;
+    const g6 = parseAnnihilateHeroId(selected.id);
+    return g6 ? raceGlbUrl(g6.race) : null;
+  }, [selected.id]);
 
   const onSelectFighter = (id: string) => {
     setSelectedId(id);
@@ -224,10 +247,11 @@ export default function Select() {
       description: selectedOwned
         ? `${selected.title} — owned. Level ${selectedLevel} saves to account.`
         : selectedStarter
-          ? `${selected.title} — Racalvin crew free play. Levels save after token unlock.`
+          ? `${selected.title} — Racalvin crew free play. Deploying to dungeon…`
           : `${selected.title} — weekly free test. Levels will NOT save until owned.`,
     });
-    navigate("/");
+    // Deploy straight into play (not war panel) — intentional single-intent handoff
+    navigate("/game");
   };
 
   const unlock = () => {
@@ -255,13 +279,15 @@ export default function Select() {
       <header className="flex items-end justify-between border-b border-[#c5a059]/20 pb-4">
         <div>
           <p className="font-serif text-xs uppercase tracking-[0.3em] text-muted-foreground">
-            The Roster · Production locks
+            Warlords · Toon RTS ★
           </p>
           <h1 className="font-serif text-4xl font-bold uppercase tracking-widest text-[#c5a059]">
             Choose Fighter
           </h1>
           <p className="mt-1 text-[11px] font-mono text-muted-foreground">
-            Racalvin crew free to play · others 1 Flare Grudge Token or weekly free · levels save only if owned
+            24 race×class heroes free · mesh{" "}
+            <code className="text-[#c5a059]/90">toon-rts-characters/glb/characters/{"{race}"}.glb</code>
+            {" · "}legacy One Piece / crew optional
           </p>
         </div>
         <div className="text-right">
@@ -281,6 +307,12 @@ export default function Select() {
               tuning={assetTuning}
               pauseRotation={!previewSpin}
               freezePose={tunerOpen}
+              // Crew: attack → run → walk cycle (weapon-forward, no get-up)
+              showcaseLocomotion={
+                selected.id === SCOURGE_ID ||
+                selected.id === JOHN_WAYNE_ID ||
+                selected.id === RACALVIN_ID
+              }
               onMeshesReady={setMeshNames}
               onClipsReady={(clips) => {
                 if (clips.length) setClipNames(clips);
@@ -346,6 +378,14 @@ export default function Select() {
                 </p>
               )}
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{selected.blurb}</p>
+              {selectedToonUrl && (
+                <p
+                  className="mt-2 truncate font-mono text-[10px] text-emerald-400/90"
+                  title={selectedToonUrl}
+                >
+                  ★ PLAY {selectedToonUrl.replace("https://assets.grudge-studio.com/", "")}
+                </p>
+              )}
               <div className="mt-3 rounded border border-white/10 bg-black/40 px-3 py-2">
                 <p className="text-[9px] font-serif uppercase tracking-widest text-[#c5a059] mb-1">
                   R — {selectedKit.special.isUltimate ? "Ultimate" : "Power-Up"}
@@ -408,6 +448,27 @@ export default function Select() {
         </div>
 
         <div className="max-h-[calc(100vh-12rem)] space-y-4 overflow-y-auto pr-1 self-start">
+          {warlordsRoster.length > 0 && (
+            <div>
+              <p className="mb-2 font-serif text-[10px] uppercase tracking-[0.25em] text-emerald-400/90">
+                Warlords · Toon RTS ★ — 6 races × 4 classes ({warlordsRoster.length})
+              </p>
+              <p className="mb-2 text-[9px] font-mono text-muted-foreground leading-relaxed">
+                File system: assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters/
+                human · elf · dwarf · orc · undead · barbarian .glb
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {warlordsRoster.map((f) => (
+                  <FighterCard
+                    key={f.id}
+                    f={f}
+                    active={f.id === selectedId}
+                    onSelect={() => onSelectFighter(f.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
           {racalvinCrew.length > 0 && (
             <div>
               <p className="mb-2 font-serif text-[10px] uppercase tracking-[0.25em] text-[#c5a059]/80">

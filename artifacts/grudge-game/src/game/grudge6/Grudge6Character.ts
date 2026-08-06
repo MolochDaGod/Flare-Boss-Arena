@@ -301,6 +301,8 @@ async function loadRaceScene(race: RaceId, loader: ReturnType<typeof createGltfL
       try {
         const gltf = await loadGLTFCached(loader, url);
         const scene = gltf.scene as THREE.Group;
+        scene.userData.loadedUrl = url;
+        scene.userData.playMesh = /toon-rts-characters/.test(url) ? "toon-rts" : "legacy-races";
         raceSceneCache.set(race, { scene });
         return scene;
       } catch (e) {
@@ -443,7 +445,11 @@ export async function createGrudge6Character(
 
   const raceScene = await loadRaceScene(def.race, loader);
   const model = cloneGLTFScene(raceScene);
-  model.userData.importPipeline = "fbx-atlas";
+  const loadedUrl = String(raceScene.userData.loadedUrl || raceGlbUrl(def.race));
+  debug.glbUrl = loadedUrl;
+  model.userData.importPipeline = "toon-rts-glb";
+  model.userData.loadedUrl = loadedUrl;
+  model.userData.playMesh = raceScene.userData.playMesh || "toon-rts";
   model.traverse((child) => {
     const mesh = child as THREE.Mesh;
     if (mesh.isMesh) {
