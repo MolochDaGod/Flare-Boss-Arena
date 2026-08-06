@@ -30,7 +30,8 @@ export default function AuthCallback() {
       }
       setStatus(me.displayName ? `Welcome, ${me.displayName}` : "Welcome to production Flare");
       setTimeout(() => {
-        if (!cancelled) navigate(next || "/");
+        // Capital Harbor is production start; honor explicit next when set
+        if (!cancelled) navigate(next && next !== "/" ? next : "/camp");
       }, 600);
     })();
     return () => {

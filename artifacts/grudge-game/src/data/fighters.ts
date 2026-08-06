@@ -80,6 +80,9 @@ const S = (
 /** Racalvin is the bespoke Corsair King hero — its model is NOT a `skins.ts`
  *  entry; the 3D scenes special-case this id to load `models/racalvin/`. */
 export const RACALVIN_ID = "racalvin";
+/** Racalvin crew — Meshy bipeds under models/crew/* (not skins.ts). */
+export const SCOURGE_ID = "scourge_faithbearer";
+export const JOHN_WAYNE_ID = "capt_john_wayne";
 
 export const FIGHTERS: FighterDef[] = [
   {
@@ -91,6 +94,28 @@ export const FIGHTERS: FighterDef[] = [
       "The Corsair King himself — a towering warlord who carries the Brothers' Keeper greatblade into every grudge.",
     skinId: RACALVIN_ID,
     stats: S(10, 9, 7, 7, 9, 6, 8, 7),
+    featured: true,
+  },
+  {
+    id: SCOURGE_ID,
+    name: "Scourge Faithbearer",
+    title: "Crimson Warbrute",
+    role: "Chain Tank",
+    blurb:
+      "Racalvin's crew — mid-range tank who flings a Cryoshard warpick on an iron chain, then yanks prey into the crush.",
+    skinId: SCOURGE_ID,
+    stats: S(9, 10, 5, 5, 9, 4, 6, 5),
+    featured: true,
+  },
+  {
+    id: JOHN_WAYNE_ID,
+    name: "Captain John Wayne",
+    title: "Gadgeteer Pathfinder",
+    role: "Ranged Engineer",
+    blurb:
+      "Racalvin's crew — long-range engineer fire, traps, and field gadgets from the Pathfinder kit.",
+    skinId: JOHN_WAYNE_ID,
+    stats: S(5, 6, 9, 8, 6, 8, 9, 6),
     featured: true,
   },
   {
@@ -322,7 +347,8 @@ export const FIGHTERS: FighterDef[] = [
   ...ANNIHILATE_FIGHTERS,
 ];
 
-export const DEFAULT_FIGHTER_ID = "nightmare_luffy";
+/** Default champion — Racalvin is always free-to-play starter crew. */
+export const DEFAULT_FIGHTER_ID = RACALVIN_ID;
 
 export function getFighter(id: string | null | undefined): FighterDef | undefined {
   if (!id) return undefined;

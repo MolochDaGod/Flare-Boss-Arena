@@ -1,3 +1,13 @@
+/**
+ * Tileable pixel pack loader — **cube foundations as a graph**, props ON TOP.
+ *
+ * Critical rules (camp look SSOT):
+ * 1. Atlas meshes are stacked at origin — always clone + bake world matrix.
+ * 2. Instanced floors MUST bake normalize into **geometry** (not Object3D.position).
+ *    Previously instance matrices ignored normalize → every tile meshed at origin.
+ * 3. Scatter/buildings sit on **foundation top** (cube height), never y=0 inside cubes.
+ */
+
 import * as THREE from "three";
 import type { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import {
@@ -7,9 +17,12 @@ import {
   type TileablePlacement,
   type TileableScaleMode,
 } from "../data/tileablePixelPack";
+import { loadGLTFCached } from "./assets";
 
 export interface TileablePackHandle {
   group: THREE.Group;
+  /** World Y of the walkable foundation top (props place at this height). */
+  foundationTopY: number;
   dispose: () => void;
 }
 
@@ -66,12 +79,15 @@ function measureBox(root: THREE.Object3D) {
   return { box, size, center };
 }
 
+/**
+ * Scale + center XZ + feet to local y=0 on a hierarchy (for non-instanced scatter).
+ */
 function normalizeClone(
   clone: THREE.Object3D,
   scaleMode: TileableScaleMode,
   scaleTarget: number,
 ): void {
-  const { box, size, center } = measureBox(clone);
+  const { size } = measureBox(clone);
   let scale = 1;
   if (scaleMode === "cell" || scaleMode === "footprint") {
     const footprint = Math.max(size.x, size.z) || 1;
@@ -79,7 +95,9 @@ function normalizeClone(
   } else if (scaleMode === "height") {
     scale = scaleTarget / (size.y || 1);
   }
-  if (scaleMode !== "native" && scale > 0) clone.scale.multiplyScalar(scale);
+  if (scaleMode !== "native" && scale > 0 && Number.isFinite(scale)) {
+    clone.scale.multiplyScalar(scale);
+  }
 
   clone.updateMatrixWorld(true);
   const b2 = new THREE.Box3().setFromObject(clone);
@@ -88,6 +106,45 @@ function normalizeClone(
   clone.position.x -= c2.x;
   clone.position.z -= c2.z;
   clone.position.y -= b2.min.y;
+  clone.updateMatrixWorld(true);
+}
+
+/**
+ * Bake Object3D world matrix into BufferGeometry so InstancedMesh placement is honest.
+ * Geometry ends feet-at-origin, XZ centered, scaled to target footprint/height.
+ */
+function bakeNormalizedGeometry(
+  clone: THREE.Object3D,
+  scaleMode: TileableScaleMode,
+  scaleTarget: number,
+): { geometry: THREE.BufferGeometry; material: THREE.Material; height: number } | null {
+  normalizeClone(clone, scaleMode, scaleTarget);
+  clone.updateMatrixWorld(true);
+
+  let mesh: THREE.Mesh | null = null;
+  clone.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!mesh && m.isMesh && m.geometry) mesh = m;
+  });
+  if (!mesh) return null;
+
+  const m = mesh as THREE.Mesh;
+  m.updateWorldMatrix(true, false);
+  let geometry = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+  geometry.applyMatrix4(m.matrixWorld);
+
+  // Re-center after bake (world bake can leave residual offset)
+  geometry.computeBoundingBox();
+  const bb = geometry.boundingBox!;
+  const cx = (bb.min.x + bb.max.x) * 0.5;
+  const cz = (bb.min.z + bb.max.z) * 0.5;
+  const minY = bb.min.y;
+  geometry.translate(-cx, -minY, -cz);
+  geometry.computeBoundingBox();
+  const h = geometry.boundingBox!.max.y - geometry.boundingBox!.min.y;
+
+  const material = Array.isArray(m.material) ? m.material[0]! : m.material;
+  return { geometry, material, height: Math.max(0.05, h) };
 }
 
 function placeClone(
@@ -97,37 +154,24 @@ function placeClone(
   rotY = 0,
   scaleMode: TileableScaleMode = "native",
   scaleTarget = 2,
+  foundationTopY = 0,
 ): THREE.Group {
   if (scaleMode !== "native") normalizeClone(clone, scaleMode, scaleTarget);
+  else {
+    // Still drop feet to local 0 so foundation offset is predictable
+    clone.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(clone);
+    clone.position.y -= b.min.y;
+  }
 
   const holder = new THREE.Group();
-  holder.position.set(x, 0, z);
+  // Sit ON the cube foundation top — not meshed through the cube volume
+  holder.position.set(x, foundationTopY, z);
   holder.rotation.y = rotY;
   holder.add(clone);
   applyPixelTextures(holder);
+  holder.userData.foundationTopY = foundationTopY;
   return holder;
-}
-
-function extractInstancedSource(
-  scene: THREE.Object3D,
-  meshName: string,
-): { geometry: THREE.BufferGeometry; material: THREE.Material } | null {
-  const clone = cloneMeshBaked(scene, meshName);
-  if (!clone) return null;
-
-  let geometry: THREE.BufferGeometry | null = null;
-  let material: THREE.Material | null = null;
-  clone.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (!m.isMesh || geometry) return;
-    geometry = m.geometry;
-    material = Array.isArray(m.material) ? m.material[0] : m.material;
-  });
-  if (!geometry || !material) return null;
-
-  normalizeClone(clone, "cell", 2);
-  clone.updateMatrixWorld(true);
-  return { geometry, material };
 }
 
 function buildFloorGrid(
@@ -136,7 +180,7 @@ function buildFloorGrid(
   config: TileableFloorConfig,
   geoms: Set<THREE.BufferGeometry>,
   mats: Set<THREE.Material>,
-) {
+): number {
   const cell = config.cell ?? 2;
   const half = config.bounds - cell * 0.5;
   const cols = Math.floor((half * 2) / cell);
@@ -145,14 +189,44 @@ function buildFloorGrid(
   const stoneMesh = config.stoneMesh ?? "StoneTile_Tiles2_0";
   const ring = config.stoneRingCells ?? 2;
 
-  const grassSrc = extractInstancedSource(scene, grassMesh);
-  const stoneSrc = extractInstancedSource(scene, stoneMesh);
-  if (!grassSrc) return;
+  const grassClone = cloneMeshBaked(scene, grassMesh);
+  if (!grassClone) return 0;
+  const grassBaked = bakeNormalizedGeometry(grassClone, "cell", cell);
+  if (!grassBaked) return 0;
+
+  let stoneBaked: ReturnType<typeof bakeNormalizedGeometry> = null;
+  if (stoneMesh) {
+    const sc = cloneMeshBaked(scene, stoneMesh);
+    if (sc) stoneBaked = bakeNormalizedGeometry(sc, "cell", cell);
+  }
+
+  // Foundation top = max cube height (stone often thicker). Keep modest so camp
+  // isn't a cliff — clamp visual cube height for walkability.
+  const rawH = Math.max(grassBaked.height, stoneBaked?.height ?? 0);
+  // Prefer a low foundation pad look (0.18–0.55 m) instead of full voxel pillars
+  const foundationH = THREE.MathUtils.clamp(rawH > 1.2 ? 0.28 : rawH, 0.12, 0.55);
+
+  // If author cubes are taller than our pad, squash geometry Y so top is foundationH
+  const squashY = (geo: THREE.BufferGeometry, h: number) => {
+    if (h < 1e-4) return;
+    const s = foundationH / h;
+    if (Math.abs(s - 1) < 0.02) return;
+    geo.scale(1, s, 1);
+    geo.computeBoundingBox();
+  };
+  squashY(grassBaked.geometry, grassBaked.height);
+  if (stoneBaked) squashY(stoneBaked.geometry, stoneBaked.height);
 
   const grassCount = cols * rows;
-  const grassInst = new THREE.InstancedMesh(grassSrc.geometry, grassSrc.material, grassCount);
-  geoms.add(grassSrc.geometry);
-  mats.add(grassSrc.material);
+  const grassInst = new THREE.InstancedMesh(
+    grassBaked.geometry,
+    grassBaked.material,
+    grassCount,
+  );
+  grassInst.name = "campFloor_grass";
+  grassInst.userData.campFoundation = true;
+  geoms.add(grassBaked.geometry);
+  mats.add(grassBaked.material);
 
   const stonePositions: THREE.Matrix4[] = [];
   const m = new THREE.Matrix4();
@@ -196,8 +270,9 @@ function buildFloorGrid(
         }
       }
 
-      const isStone = stoneSrc && (isRoad || (dist <= ring && dist > 0));
+      const isStone = stoneBaked && (isRoad || (dist <= ring && dist > 0));
 
+      // Instance origin is cube FEET; top is foundationH. Place feet at y=0.
       p.set(wx, 0, wz);
       m.compose(p, q, s);
 
@@ -211,29 +286,38 @@ function buildFloorGrid(
   grassInst.count = gi;
   grassInst.instanceMatrix.needsUpdate = true;
   grassInst.receiveShadow = true;
+  grassInst.castShadow = false;
   applyPixelTextures(grassInst);
   parent.add(grassInst);
 
-  if (stoneSrc && stonePositions.length) {
+  if (stoneBaked && stonePositions.length) {
     const stoneInst = new THREE.InstancedMesh(
-      stoneSrc.geometry,
-      stoneSrc.material,
+      stoneBaked.geometry,
+      stoneBaked.material,
       stonePositions.length,
     );
-    geoms.add(stoneSrc.geometry);
-    mats.add(stoneSrc.material);
+    stoneInst.name = "campFloor_stone";
+    stoneInst.userData.campFoundation = true;
+    geoms.add(stoneBaked.geometry);
+    mats.add(stoneBaked.material);
     stonePositions.forEach((mat, i) => stoneInst.setMatrixAt(i, mat));
     stoneInst.instanceMatrix.needsUpdate = true;
     stoneInst.receiveShadow = true;
+    stoneInst.castShadow = false;
     applyPixelTextures(stoneInst);
     parent.add(stoneInst);
   }
+
+  parent.userData.foundationTopY = foundationH;
+  parent.userData.floorCell = cell;
+  return foundationH;
 }
 
 function placeScatter(
   scene: THREE.Object3D,
   parent: THREE.Group,
   placements: TileablePlacement[],
+  foundationTopY: number,
 ) {
   for (const place of placements) {
     const meshName = resolveMeshName(place.mesh);
@@ -244,6 +328,9 @@ function placeScatter(
       }
       continue;
     }
+    // Extra lift for walls so they sit on the pad lip cleanly
+    const cat = TILEABLE_MESH_BY_ID.get(place.mesh)?.category;
+    const yBoost = cat === "wall" || cat === "corner" ? foundationTopY : foundationTopY;
     parent.add(
       placeClone(
         clone,
@@ -252,14 +339,15 @@ function placeScatter(
         place.rotY ?? 0,
         place.scaleMode ?? "native",
         place.scaleTarget ?? 2,
+        yBoost,
       ),
     );
   }
 }
 
 /**
- * Load the tileable pixel atlas and build a modular camp environment:
- * instanced grass/stone floor grid plus scattered trees, rocks, walls, and buildings.
+ * Load the tileable pack as a **graphed** camp floor (roads + rings) with props
+ * on foundation tops — never stacked atlas origin.
  */
 export function buildTileableCamp(
   loader: GLTFLoader,
@@ -268,6 +356,7 @@ export function buildTileableCamp(
     url?: string;
     floor?: TileableFloorConfig;
     scatter?: TileablePlacement[];
+    onReady?: (group: THREE.Group, foundationTopY: number) => void;
   } = {},
 ): TileablePackHandle {
   const group = new THREE.Group();
@@ -276,6 +365,7 @@ export function buildTileableCamp(
 
   const geoms = new Set<THREE.BufferGeometry>();
   const mats = new Set<THREE.Material>();
+  let foundationTopY = 0.22;
 
   const disposeTree = (root: THREE.Object3D) => {
     root.traverse((c) => {
@@ -299,27 +389,34 @@ export function buildTileableCamp(
     });
   };
 
-  loader.load(
-    opts.url ?? TILEABLE_PACK_URL,
+  loadGLTFCached(loader, opts.url ?? TILEABLE_PACK_URL).then(
     (gltf) => {
       if (group.userData.disposed) {
-        disposeTree(gltf.scene);
         return;
       }
       gltf.scene.updateMatrixWorld(true);
       applyPixelTextures(gltf.scene);
 
-      if (opts.floor) buildFloorGrid(gltf.scene, group, opts.floor, geoms, mats);
-      if (opts.scatter?.length) placeScatter(gltf.scene, group, opts.scatter);
+      if (opts.floor) {
+        foundationTopY = buildFloorGrid(gltf.scene, group, opts.floor, geoms, mats) || foundationTopY;
+      }
+      if (opts.scatter?.length) {
+        placeScatter(gltf.scene, group, opts.scatter, foundationTopY);
+      }
+      group.userData.foundationTopY = foundationTopY;
+      opts.onReady?.(group, foundationTopY);
     },
-    undefined,
     (err) => {
       if (import.meta.env.DEV) console.warn("[TileablePack] load failed:", err);
+      opts.onReady?.(group, foundationTopY);
     },
   );
 
   return {
     group,
+    get foundationTopY() {
+      return (group.userData.foundationTopY as number) ?? foundationTopY;
+    },
     dispose: () => {
       group.userData.disposed = true;
       scene.remove(group);

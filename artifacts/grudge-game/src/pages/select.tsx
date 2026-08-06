@@ -8,13 +8,11 @@ import {
   setActiveFighterId,
   DEFAULT_FIGHTER_ID,
   RACALVIN_ID,
+  SCOURGE_ID,
+  JOHN_WAYNE_ID,
   type FighterDef,
   type AttrKey,
 } from "@/data/fighters";
-import {
-  ANNIHILATE_FIGHTERS,
-  isAnnihilateHeroId,
-} from "@/data/annihilateHeroes";
 import {
   evolutionFamilyIds,
   getEvolutionMeta,
@@ -29,6 +27,7 @@ import {
   type FighterAssetTuning,
 } from "@/data/fighterAssetTuning";
 import { RACALVIN_ANIMS } from "@/game/racalvinHero";
+import { SCOURGE_ANIMS, JOHN_ANIMS } from "@/game/crewHeroes";
 import { useToast } from "@/hooks/use-toast";
 import {
   GBUX_PER_TOKEN,
@@ -36,6 +35,7 @@ import {
   getFighterLevel,
   isOwned,
   isPlayable,
+  isStarterFree,
   isWeeklyFree,
   unlockWithToken,
 } from "@/data/flareEconomy";
@@ -102,6 +102,7 @@ function FighterCard({
   const evo = getEvolutionMeta(f.id);
   const owned = isOwned(f.id);
   const weekly = isWeeklyFree(f.id);
+  const starter = isStarterFree(f.id);
   const locked = !isPlayable(f.id);
   return (
     <button
@@ -125,7 +126,10 @@ function FighterCard({
         <div className="flex items-center gap-1">
           {locked && <Lock className="h-3 w-3 text-muted-foreground" />}
           {owned && <Unlock className="h-3 w-3 text-[#c5a059]" />}
-          {weekly && !owned && (
+          {starter && !owned && (
+            <span className="text-[8px] font-mono uppercase text-amber-300/90">Crew</span>
+          )}
+          {weekly && !owned && !starter && (
             <span className="text-[8px] font-mono uppercase text-emerald-400/90">Free</span>
           )}
           <TierBadge fighterId={f.id} />
@@ -157,6 +161,7 @@ export default function Select() {
   const selectedEvo = getEvolutionMeta(selected.id);
   const selectedOwned = isOwned(selected.id);
   const selectedWeekly = isWeeklyFree(selected.id);
+  const selectedStarter = isStarterFree(selected.id);
   const selectedPlayable = isPlayable(selected.id);
   const selectedLevel = getFighterLevel(selected.id);
   const previewRef = useRef<FighterPreviewHandle>(null);
@@ -170,7 +175,9 @@ export default function Select() {
   const [previewSpin, setPreviewSpin] = useState(true);
   const [handBoneName, setHandBoneName] = useState<string | null>(null);
 
-  const { evolutionGroups, standalone, grudge24 } = useMemo(() => {
+  const CREW_IDS = useMemo(() => new Set([RACALVIN_ID, SCOURGE_ID, JOHN_WAYNE_ID]), []);
+
+  const { evolutionGroups, standalone, racalvinCrew } = useMemo(() => {
     const inFamily = new Set<string>();
     const groups: { familyId: string; familyName: string; fighters: FighterDef[] }[] = [];
     for (const familyId of evolutionFamilyIds()) {
@@ -183,20 +190,21 @@ export default function Select() {
         groups.push({ familyId, familyName: tiers[0]!.familyName, fighters });
       }
     }
-    // Warlords 24 first — 6 races × 4 classes, CDN Toon-RTS + baked anims
-    const grudge24 = ANNIHILATE_FIGHTERS;
-    const g6Ids = new Set(grudge24.map((f) => f.id));
+    const crew = FIGHTERS.filter((f) => CREW_IDS.has(f.id));
     const solo = FIGHTERS.filter(
-      (f) => !inFamily.has(f.id) && !isEvolutionFighter(f.id) && !g6Ids.has(f.id) && !isAnnihilateHeroId(f.id),
+      (f) => !inFamily.has(f.id) && !isEvolutionFighter(f.id) && !CREW_IDS.has(f.id),
     );
-    return { evolutionGroups: groups, standalone: solo, grudge24 };
-  }, []);
+    return { evolutionGroups: groups, standalone: solo, racalvinCrew: crew };
+  }, [CREW_IDS]);
 
   const onSelectFighter = (id: string) => {
     setSelectedId(id);
     setAssetTuning(getFighterAssetTuning(id));
     setMeshNames([]);
-    setClipNames(id === RACALVIN_ID ? [...RACALVIN_ANIMS] : []);
+    if (id === RACALVIN_ID) setClipNames([...RACALVIN_ANIMS]);
+    else if (id === SCOURGE_ID) setClipNames([...SCOURGE_ANIMS]);
+    else if (id === JOHN_WAYNE_ID) setClipNames([...JOHN_ANIMS]);
+    else setClipNames([]);
     setWeaponPreview("swordHeld");
     setHandBoneName(null);
   };
@@ -215,7 +223,9 @@ export default function Select() {
       title: `${selected.name} chosen`,
       description: selectedOwned
         ? `${selected.title} — owned. Level ${selectedLevel} saves to account.`
-        : `${selected.title} — weekly free test. Levels will NOT save until owned.`,
+        : selectedStarter
+          ? `${selected.title} — Racalvin crew free play. Levels save after token unlock.`
+          : `${selected.title} — weekly free test. Levels will NOT save until owned.`,
     });
     navigate("/");
   };
@@ -251,7 +261,7 @@ export default function Select() {
             Choose Fighter
           </h1>
           <p className="mt-1 text-[11px] font-mono text-muted-foreground">
-            All locked by default · 1 Flare Grudge Token unlock · 3 free weekly · Grudge Warlords 24 · Toon-RTS baked anims
+            Racalvin crew free to play · others 1 Flare Grudge Token or weekly free · levels save only if owned
           </p>
         </div>
         <div className="text-right">
@@ -272,7 +282,12 @@ export default function Select() {
               pauseRotation={!previewSpin}
               freezePose={tunerOpen}
               onMeshesReady={setMeshNames}
-              onClipsReady={(clips) => setClipNames(clips.length ? clips : [...RACALVIN_ANIMS])}
+              onClipsReady={(clips) => {
+                if (clips.length) setClipNames(clips);
+                else if (selected.id === RACALVIN_ID) setClipNames([...RACALVIN_ANIMS]);
+                else if (selected.id === SCOURGE_ID) setClipNames([...SCOURGE_ANIMS]);
+                else if (selected.id === JOHN_WAYNE_ID) setClipNames([...JOHN_ANIMS]);
+              }}
               onHandBoneReady={setHandBoneName}
             />
             <button
@@ -393,25 +408,23 @@ export default function Select() {
         </div>
 
         <div className="max-h-[calc(100vh-12rem)] space-y-4 overflow-y-auto pr-1 self-start">
-          <div>
-            <p className="mb-2 font-serif text-[10px] uppercase tracking-[0.25em] text-[#c5a059]">
-              Grudge Warlords 24 — Toon RTS
-            </p>
-            <p className="mb-2 text-[10px] text-muted-foreground font-mono">
-              6 races × Warrior / Mage / Ranger / Worge · CDN meshes · class wardrobe · baked Bip001 clips
-            </p>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {grudge24.map((f) => (
-                <FighterCard
-                  key={f.id}
-                  f={f}
-                  active={f.id === selectedId}
-                  onSelect={() => onSelectFighter(f.id)}
-                />
-              ))}
+          {racalvinCrew.length > 0 && (
+            <div>
+              <p className="mb-2 font-serif text-[10px] uppercase tracking-[0.25em] text-[#c5a059]/80">
+                Racalvin&apos;s Crew — Pirate King
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {racalvinCrew.map((f) => (
+                  <FighterCard
+                    key={f.id}
+                    f={f}
+                    active={f.id === selectedId}
+                    onSelect={() => onSelectFighter(f.id)}
+                  />
+                ))}
+              </div>
             </div>
-          </div>
-
+          )}
           {evolutionGroups.map((g) => (
             <div key={g.familyId}>
               <p className="mb-2 font-serif text-[10px] uppercase tracking-[0.25em] text-[#c5a059]/80">

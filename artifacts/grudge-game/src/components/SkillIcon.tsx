@@ -29,6 +29,10 @@ export function SkillIcon({
 }: SkillIconProps) {
   const [errored, setErrored] = useState(false);
   const src = skillIconSrc(icon);
+  // CraftPix spellbook tiles are nearest-neighbor 128px — keep pixel crispness.
+  const isPixel =
+    !!icon &&
+    (icon.includes("craftpix/spellbook") || icon.includes("ui/craftpix/spellbook"));
 
   if (src && !errored) {
     return (
@@ -38,7 +42,14 @@ export function SkillIcon({
         draggable={false}
         onError={() => setErrored(true)}
         className={className}
-        style={{ width: size, height: size, objectFit: "cover", borderRadius: radius, display: "block" }}
+        style={{
+          width: size,
+          height: size,
+          objectFit: "cover",
+          borderRadius: radius,
+          display: "block",
+          imageRendering: isPixel ? "pixelated" : undefined,
+        }}
       />
     );
   }

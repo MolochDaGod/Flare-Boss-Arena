@@ -1,6 +1,11 @@
 /**
- * Tileable pixel art asset pack — mesh catalog and camp placement layouts.
- * Source: `public/models/tileable/tilable_pixel_asset_pack.glb` (101-mesh atlas).
+ * Tileable pixel art pack — floor foundations + graphed scatter for /camp.
+ * Source: `public/models/tileable/tilable_pixel_asset_pack.glb`
+ *
+ * Layout rules:
+ * - Floor = cube foundations (grass + stone roads), graphed spokes/rings
+ * - Scatter = nature + walls + landmarks only — NO voxel homes meshed with fishing_town
+ * - Props always place on foundation top (see TileablePackLoader)
  */
 
 export const TILEABLE_PACK_FILE = "tilable_pixel_asset_pack.glb";
@@ -95,84 +100,73 @@ export interface TileableFloorConfig {
   roads?: TileableRoadConfig;
 }
 
-/** Floor grid + scatter for the training-yard camp (bounds ≈ 36, 2× original yard). */
+/** Graphed foundation floor — spokes to station angles, ring roads, plaza. */
 export const CAMP_TILEABLE_FLOOR: TileableFloorConfig = {
   bounds: 36,
   cell: TILEABLE_CELL,
   grassMesh: "Grass_Tiles2_0",
   stoneMesh: "StoneTile_Tiles2_0",
-  stoneRingCells: 3,
+  stoneRingCells: 2,
   roads: {
+    // Match CampScene STATION_DEFS angleDeg (doorway bearings)
     spokeAnglesDeg: [-90, -38.6, 12.9, 64.3, 115.7, 167.1, 218.6],
-    spokeHalfWidth: 0.22,
-    ringCells: [3, 6, 9],
+    spokeHalfWidth: 0.2,
+    ringCells: [4, 8],
     crossAxes: true,
   },
 };
 
-/** Trees, rocks, modular buildings, and town-upgrade props (2× yard spread). */
+/**
+ * Graphed scatter — perimeter nature + walls + plaza props only.
+ * Voxel homes removed (fishing_town.glb owns buildings on foundation tops).
+ */
 export const CAMP_TILEABLE_SCATTER: TileablePlacement[] = [
-  // Perimeter trees
-  { mesh: "tree_pine", x: 28, z: 12, rotY: 0.4, scaleMode: "height", scaleTarget: 4.8 },
-  { mesh: "tree_pine", x: -26, z: 18, rotY: 1.1, scaleMode: "height", scaleTarget: 4.4 },
-  { mesh: "tree_bush", x: 24, z: -20, rotY: 0.2, scaleMode: "height", scaleTarget: 2.8 },
-  { mesh: "tree_bare", x: -28, z: -10, rotY: 2.4, scaleMode: "height", scaleTarget: 5.2 },
-  { mesh: "tree_log", x: 16, z: 26, rotY: -0.6, scaleMode: "footprint", scaleTarget: 3.6 },
-  { mesh: "tree_pine", x: -20, z: -24, rotY: 0.9, scaleMode: "height", scaleTarget: 4.0 },
-  { mesh: "tree_bush", x: 30, z: -6, rotY: 1.8, scaleMode: "height", scaleTarget: 2.6 },
-  { mesh: "tree_pine", x: -32, z: 4, rotY: 0.5, scaleMode: "height", scaleTarget: 4.6 },
-  { mesh: "tree_bush", x: 32, z: 22, rotY: 2.2, scaleMode: "height", scaleTarget: 2.4 },
-  { mesh: "herb", x: 8, z: 14, rotY: 0, scaleMode: "footprint", scaleTarget: 1.4 },
-  { mesh: "herb", x: -12, z: 6, rotY: 0.8, scaleMode: "footprint", scaleTarget: 1.2 },
+  // Plaza landmark (centre-south of campfire)
+  { mesh: "fountain", x: 0, z: -4, rotY: 0, scaleMode: "footprint", scaleTarget: 2.8 },
+  { mesh: "pillar", x: -5, z: -3, rotY: 0, scaleMode: "height", scaleTarget: 2.6 },
+  { mesh: "pillar", x: 5, z: -3, rotY: 0, scaleMode: "height", scaleTarget: 2.6 },
 
-  // Perimeter rocks
-  { mesh: "rock", x: 30, z: -18, rotY: 0.5, scaleMode: "footprint", scaleTarget: 2.2 },
-  { mesh: "rock_b", x: -30, z: 8, rotY: 1.2, scaleMode: "footprint", scaleTarget: 2.5 },
-  { mesh: "rock_c", x: 20, z: 28, rotY: 2.0, scaleMode: "footprint", scaleTarget: 2.0 },
-  { mesh: "rock_rubble", x: -24, z: -26, rotY: 0.3, scaleMode: "footprint", scaleTarget: 1.8 },
-  { mesh: "rock", x: -12, z: 30, rotY: 1.7, scaleMode: "footprint", scaleTarget: 2.4 },
-  { mesh: "rock_b", x: 32, z: 4, rotY: 0.8, scaleMode: "footprint", scaleTarget: 2.1 },
+  // Perimeter trees (outside wall ring, not on station pads)
+  { mesh: "tree_pine", x: 30, z: 10, rotY: 0.4, scaleMode: "height", scaleTarget: 4.6 },
+  { mesh: "tree_pine", x: -28, z: 16, rotY: 1.1, scaleMode: "height", scaleTarget: 4.2 },
+  { mesh: "tree_bare", x: -30, z: -12, rotY: 2.4, scaleMode: "height", scaleTarget: 4.8 },
+  { mesh: "tree_pine", x: 28, z: -16, rotY: 0.9, scaleMode: "height", scaleTarget: 4.0 },
+  { mesh: "tree_bush", x: 22, z: 26, rotY: 0.2, scaleMode: "height", scaleTarget: 2.4 },
+  { mesh: "tree_bush", x: -22, z: 28, rotY: 1.8, scaleMode: "height", scaleTarget: 2.2 },
+  { mesh: "tree_log", x: 18, z: -28, rotY: -0.6, scaleMode: "footprint", scaleTarget: 3.2 },
+  { mesh: "herb", x: 10, z: 16, rotY: 0, scaleMode: "footprint", scaleTarget: 1.2 },
+  { mesh: "herb", x: -14, z: 12, rotY: 0.8, scaleMode: "footprint", scaleTarget: 1.1 },
 
-  // Town-upgrade homes near station ring
-  { mesh: "home_blue", x: 22, z: 6, rotY: -2.2, scaleMode: "footprint", scaleTarget: 5.4 },
-  { mesh: "home_green", x: -18, z: 20, rotY: 2.6, scaleMode: "footprint", scaleTarget: 5.0 },
-  { mesh: "home_red", x: -14, z: -22, rotY: 0.9, scaleMode: "footprint", scaleTarget: 5.2 },
-  { mesh: "home_parts", x: 26, z: -12, rotY: -1.4, scaleMode: "footprint", scaleTarget: 3.6 },
-  { mesh: "home_blue", x: -24, z: -8, rotY: 1.1, scaleMode: "footprint", scaleTarget: 4.8 },
+  // Rocks at corners (graph nodes)
+  { mesh: "rock", x: 30, z: -24, rotY: 0.5, scaleMode: "footprint", scaleTarget: 2.0 },
+  { mesh: "rock_b", x: -30, z: 22, rotY: 1.2, scaleMode: "footprint", scaleTarget: 2.2 },
+  { mesh: "rock_c", x: 26, z: 28, rotY: 2.0, scaleMode: "footprint", scaleTarget: 1.8 },
+  { mesh: "rock_rubble", x: -26, z: -26, rotY: 0.3, scaleMode: "footprint", scaleTarget: 1.6 },
 
-  // District props
-  { mesh: "fountain", x: 3, z: -5, rotY: 0, scaleMode: "footprint", scaleTarget: 3.2 },
-  { mesh: "hedge", x: 12, z: 14, rotY: 0.7, scaleMode: "footprint", scaleTarget: 6 },
-  { mesh: "hedge_long", x: -10, z: 24, rotY: 1.2, scaleMode: "footprint", scaleTarget: 9 },
-  { mesh: "pillar", x: -6, z: -8, rotY: 0, scaleMode: "height", scaleTarget: 3 },
-  { mesh: "pillar", x: 14, z: -4, rotY: 0.4, scaleMode: "height", scaleTarget: 2.8 },
-  { mesh: "log_bridge", x: 10, z: -24, rotY: Math.PI / 2, scaleMode: "footprint", scaleTarget: 6 },
+  // Hedge borders along market / guild edges (not through plaza)
+  { mesh: "hedge", x: 14, z: 10, rotY: 0.7, scaleMode: "footprint", scaleTarget: 5 },
+  { mesh: "hedge_long", x: -16, z: 20, rotY: 1.0, scaleMode: "footprint", scaleTarget: 7 },
 
-  // Modular perimeter walls
-  { mesh: "wall", x: 0, z: 32, rotY: 0, scaleMode: "native" },
-  { mesh: "wall", x: -12, z: 32, rotY: 0, scaleMode: "native" },
-  { mesh: "wall", x: 12, z: 32, rotY: 0, scaleMode: "native" },
-  { mesh: "wall", x: -24, z: 30, rotY: 0, scaleMode: "native" },
-  { mesh: "wall", x: 24, z: 30, rotY: 0, scaleMode: "native" },
-  { mesh: "wall_corner", x: -20, z: 28, rotY: 0, scaleMode: "native" },
-  { mesh: "wall_corner", x: 20, z: 28, rotY: -Math.PI / 2, scaleMode: "native" },
-  { mesh: "stone_wall", x: 0, z: -32, rotY: Math.PI, scaleMode: "native" },
-  { mesh: "stone_wall", x: -14, z: -30, rotY: Math.PI, scaleMode: "native" },
-  { mesh: "stone_wall", x: 14, z: -30, rotY: Math.PI, scaleMode: "native" },
-  { mesh: "stone_wall_corner", x: -16, z: -28, rotY: Math.PI / 2, scaleMode: "native" },
-  { mesh: "stone_wall_corner", x: 16, z: -28, rotY: -Math.PI / 2, scaleMode: "native" },
+  // N/S perimeter walls on outer ring (graphed, not random)
+  { mesh: "wall", x: 0, z: 33, rotY: 0, scaleMode: "footprint", scaleTarget: 4 },
+  { mesh: "wall", x: -10, z: 33, rotY: 0, scaleMode: "footprint", scaleTarget: 4 },
+  { mesh: "wall", x: 10, z: 33, rotY: 0, scaleMode: "footprint", scaleTarget: 4 },
+  { mesh: "wall_corner", x: -18, z: 31, rotY: 0, scaleMode: "footprint", scaleTarget: 3.5 },
+  { mesh: "wall_corner", x: 18, z: 31, rotY: -Math.PI / 2, scaleMode: "footprint", scaleTarget: 3.5 },
+  { mesh: "stone_wall", x: 0, z: -33, rotY: Math.PI, scaleMode: "footprint", scaleTarget: 4 },
+  { mesh: "stone_wall", x: -12, z: -32, rotY: Math.PI, scaleMode: "footprint", scaleTarget: 4 },
+  { mesh: "stone_wall", x: 12, z: -32, rotY: Math.PI, scaleMode: "footprint", scaleTarget: 4 },
+  { mesh: "stone_wall_corner", x: -16, z: -30, rotY: Math.PI / 2, scaleMode: "footprint", scaleTarget: 3.5 },
+  { mesh: "stone_wall_corner", x: 16, z: -30, rotY: -Math.PI / 2, scaleMode: "footprint", scaleTarget: 3.5 },
 ];
 
-/** Harbor-scale scatter (5× camp) — for future full Grudge Harbor migration. */
+/** Harbor-scale scatter (nature only) — no voxel homes. */
 export const HARBOR_TILEABLE_SCATTER: TileablePlacement[] = [
   { mesh: "tree_pine", x: 72, z: 28, rotY: 0.3, scaleMode: "height", scaleTarget: 5 },
   { mesh: "tree_pine", x: -68, z: -32, rotY: 1.4, scaleMode: "height", scaleTarget: 4.8 },
   { mesh: "tree_bare", x: 58, z: -60, rotY: 2.1, scaleMode: "height", scaleTarget: 5.2 },
   { mesh: "rock", x: 80, z: 10, rotY: 0.6, scaleMode: "footprint", scaleTarget: 2.5 },
   { mesh: "rock_c", x: -78, z: -20, rotY: 1.0, scaleMode: "footprint", scaleTarget: 2.8 },
-  { mesh: "home_blue", x: 48, z: 14, rotY: -2.0, scaleMode: "footprint", scaleTarget: 6 },
-  { mesh: "home_green", x: 28, z: -34, rotY: 2.4, scaleMode: "footprint", scaleTarget: 5.5 },
-  { mesh: "home_red", x: -38, z: -12, rotY: 0.8, scaleMode: "footprint", scaleTarget: 5.8 },
   { mesh: "fountain", x: 10, z: 8, rotY: 0, scaleMode: "footprint", scaleTarget: 4 },
   { mesh: "hedge_long", x: 52, z: -8, rotY: 0.5, scaleMode: "footprint", scaleTarget: 10 },
 ];

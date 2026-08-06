@@ -14,7 +14,8 @@ No parallel “another character loader” — everything party/codex/allies-sha
 | Loader + wardrobe | `src/game/grudge6/Grudge6Character.ts` |
 | Ally AI | `src/game/grudge6/AllyBrain.ts` |
 | Party UI | `/party` |
-| Race CDN fallback | `assets.grudge-studio.com/.../toon-rts-characters/glb/characters/<race>.glb` |
+| Race CDN ★ PLAY | `assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters/<race>.glb` |
+| Legacy races bake | `models/grudge6/races/{PREFIX}_Characters.glb` — fallback only, not primary |
 
 ## The 30 heroes
 
@@ -50,10 +51,18 @@ Do **not** add a second wardrobe system. Extend `characterMeshes.ts` classifiers
 | bodyguard | Formation follow; attack player RMB focus |
 | healer | Heal player under ~72% HP; light damage otherwise |
 | skirmish | Ranged kit; kite if too close |
-| gatherer | Chop/mine when no combat focus |
+| gatherer | Chop/mine when no combat focus; interrupt to defend player if threats &lt; 8 m |
+| bodyguard | Tight formation defend; attack RMB focus; light harvest when idle |
 | assassin | Prefer low-HP% enemies |
 
 Allies share player **RMB target** (`attackHeld` / `targetEnemy`).
+
+### AI HUD (`/game` Party panel)
+
+- **Defend** — all allies → bodyguard (hold + fight near player)
+- **Harvest** — all allies → gatherer (auto wood/stone)
+- **Auto** — clear override, use role brain from roster
+- Per-ally Def / Harv / Auto buttons call `GameEngine.setAllyBrain`
 
 ## Codex world (`codex.grudge-studio.com/game/world`)
 

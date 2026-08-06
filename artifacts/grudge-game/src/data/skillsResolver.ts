@@ -11,6 +11,7 @@ import { RACALVIN_ID } from "./fighters";
 import type { ClassSkill, ClassSkillSet } from "./classSkills";
 import { getActiveFighterId } from "./fighters";
 import type { WeaponSlot } from "@/game/weaponSkills";
+import { pickSpellbookIconForSkill } from "./spellbookAssets";
 
 export type { WeaponSlot };
 
@@ -68,27 +69,40 @@ function weaponAsType(w: GameWeapon, fighterId?: string): WeaponTypeDef {
 }
 
 function kitAsClassSet(loadout: GameLoadout): ClassSkillSet {
-  const skills: ClassSkill[] = loadout.skills.map((s) => ({
-    id: s.id,
-    name: s.name,
-    description: s.description,
-    glyph: s.glyph,
-    type: s.element === "physical" ? "physical" : "magical",
-    damage: s.damageMult,
-    manaCost: s.manaCost,
-    cooldown: Math.round(s.cooldown),
-    target: s.targeting === "self" ? "self" : "enemy",
-    effects: [
-      s.targeting === "ground_aoe" ? "Ground AoE (1-5 then LMB)" : s.targeting === "slash_wave" ? "Slash wave" : String(s.shape),
-      s.element,
-    ],
-  }));
+  const skills: ClassSkill[] = loadout.skills.map((s) => {
+    const sb = pickSpellbookIconForSkill({
+      skillId: s.id,
+      skillName: s.name,
+      element: s.element,
+    });
+    return {
+      id: s.id,
+      name: s.name,
+      description: s.description,
+      glyph: s.glyph,
+      icon: sb ? `ui/craftpix/spellbook/${sb.file}` : undefined,
+      type: s.element === "physical" ? "physical" : "magical",
+      damage: s.damageMult,
+      manaCost: s.manaCost,
+      cooldown: Math.round(s.cooldown),
+      target: s.targeting === "self" ? "self" : "enemy",
+      effects: [
+        s.targeting === "ground_aoe" ? "Ground AoE (1-5 then LMB)" : s.targeting === "slash_wave" ? "Slash wave" : String(s.shape),
+        s.element,
+      ],
+    };
+  });
   // Surface special as signature for UI pages.
+  const spIcon = pickSpellbookIconForSkill({
+    skillName: loadout.special.name,
+    element: loadout.special.element,
+  });
   skills.push({
     id: "special_" + loadout.special.name,
     name: loadout.special.name + " [R]",
     description: loadout.special.description,
     glyph: "★",
+    icon: spIcon ? `ui/craftpix/spellbook/${spIcon.file}` : undefined,
     type: loadout.special.element === "physical" ? "physical" : "magical",
     damage: loadout.special.damageMult,
     manaCost: loadout.special.manaCost,

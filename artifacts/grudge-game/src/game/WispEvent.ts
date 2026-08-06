@@ -289,13 +289,17 @@ export function spawnWisp(
   return w;
 }
 
-/** Spawn several wisps around the map (deterministic from map seed). */
+/** Max world-event wisps per map (sky beams get noisy past this). */
+export const WISP_MAX_PER_MAP = 1;
+
+/** Spawn wisps around the map (deterministic from map seed). Caps at WISP_MAX_PER_MAP. */
 export function spawnWispEventPack(
   field: WispEventField,
   mapSeed: number,
   anchors: THREE.Vector3[],
 ): void {
-  for (let i = 0; i < anchors.length; i++) {
+  const n = Math.min(WISP_MAX_PER_MAP, anchors.length);
+  for (let i = 0; i < n; i++) {
     const s = hashString(`wisp|${mapSeed}|${i}`);
     spawnWisp(field, anchors[i]!, s);
   }

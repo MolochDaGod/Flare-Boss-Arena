@@ -37,22 +37,24 @@ export interface FighterAssetTuning {
 const STORAGE_KEY = "grudge:fighter-asset-tuning";
 
 /**
- * Mixamo RightHand grip — Brothers' Keeper Meshy blade (hand length ~1.15–1.25m).
- * Dual swords sheath on back in an X, release → orbit → strike → return.
+ * Mixamo RightHand grip — Brothers' Keeper greatsword (SI metres).
+ * Blade author axis ≈ +Y after grip normalize; Euler aligns edge-forward for combat.
+ * targetLength ≈ 1.35 m full Brothers' Keeper prop.
  */
 export const MIXAMO_SWORD_HELD: WeaponMountTuning = {
-  targetLength: 1.2,
-  position: [0.035, 0.05, -0.015],
-  rotation: [92, 4, 88],
-  gripYOffset: 0.04,
+  targetLength: 1.35,
+  position: [0.04, 0.08, 0.02],
+  /** degrees — blade extends out of palm, edge roughly world-forward */
+  rotation: [-8, 95, -92],
+  gripYOffset: 0.06,
 };
 
-/** Same hand bone, blade lowered for idle / walk (small delta from held). */
+/** Same hand bone, blade lowered for idle / walk (still readable, not into body). */
 export const MIXAMO_SWORD_REST: WeaponMountTuning = {
-  targetLength: 1.2,
-  position: [0.04, -0.015, 0.025],
-  rotation: [75, 4, 96],
-  gripYOffset: 0.04,
+  targetLength: 1.35,
+  position: [0.05, 0.04, 0.05],
+  rotation: [12, 100, -78],
+  gripYOffset: 0.05,
 };
 
 export const DEFAULT_PISTOL_WEAPON: WeaponMountTuning = {

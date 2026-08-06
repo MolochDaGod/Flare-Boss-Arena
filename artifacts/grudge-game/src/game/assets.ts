@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { FBXLoader } from "three/examples/jsm/loaders/FBXLoader.js";
 import type { GLTF, GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
+import { createGltfLoader } from "@/game/threeSetup";
 
 const BASE = (import.meta.env.BASE_URL ?? "/").replace(/\/$/, "");
 
@@ -23,13 +25,16 @@ export function loadFBX(path: string): Promise<THREE.Group> {
 
 /**
  * Load a GLTF once and reuse the parsed result. Callers must clone `gltf.scene`
- * (and re-bind skins) before mutating — the cached root is shared.
+ * via {@link cloneGltfScene} (or re-bind skins) before mutating — the cached root is shared.
+ *
+ * When `loader` is omitted, uses the production shared GLTFLoader (Draco/Meshopt/SpecGloss).
  */
-export function loadGLTFCached(loader: GLTFLoader, url: string): Promise<GLTF> {
+export function loadGLTFCached(loader: GLTFLoader | undefined, url: string): Promise<GLTF> {
+  const active = loader ?? createGltfLoader();
   let p = gltfCache.get(url);
   if (!p) {
     p = new Promise<GLTF>((resolve, reject) => {
-      loader.load(url, resolve, undefined, reject);
+      active.load(url, resolve, undefined, reject);
     }).catch((err) => {
       gltfCache.delete(url);
       throw err;
@@ -44,18 +49,32 @@ export function invalidateGLTFCache(url: string) {
   gltfCache.delete(url);
 }
 
+/**
+ * Clone a glTF scene graph correctly for skinned characters.
+ * Prefer SkeletonUtils over Object3D.clone for any SkinnedMesh hierarchy.
+ */
+export function cloneGltfScene(src: THREE.Object3D): THREE.Object3D {
+  return SkeletonUtils.clone(src);
+}
+
 function cloneSkinned(src: THREE.Group): THREE.Group {
-  const clone = src.clone(true) as THREE.Group;
-  const boneMap = new Map<string, THREE.Bone>();
-  clone.traverse((o) => { if ((o as THREE.Bone).isBone) boneMap.set(o.name, o as THREE.Bone); });
-  clone.traverse((o) => {
-    const sk = o as THREE.SkinnedMesh;
-    if (sk.isSkinnedMesh) {
-      const newBones = sk.skeleton.bones.map((b) => boneMap.get(b.name) ?? b);
-      sk.skeleton = new THREE.Skeleton(newBones, sk.skeleton.boneInverses);
-    }
-  });
-  return clone;
+  try {
+    return SkeletonUtils.clone(src) as THREE.Group;
+  } catch {
+    const clone = src.clone(true) as THREE.Group;
+    const boneMap = new Map<string, THREE.Bone>();
+    clone.traverse((o) => {
+      if ((o as THREE.Bone).isBone) boneMap.set(o.name, o as THREE.Bone);
+    });
+    clone.traverse((o) => {
+      const sk = o as THREE.SkinnedMesh;
+      if (sk.isSkinnedMesh) {
+        const newBones = sk.skeleton.bones.map((b) => boneMap.get(b.name) ?? b);
+        sk.skeleton = new THREE.Skeleton(newBones, sk.skeleton.boneInverses);
+      }
+    });
+    return clone;
+  }
 }
 
 const RIGHT_HAND_EXACT = [

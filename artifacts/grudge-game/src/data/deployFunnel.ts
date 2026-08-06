@@ -93,11 +93,12 @@ export function getDeployReadiness(): DeployReadiness {
   const blockers = steps.filter((s) => s.status === "done" && !s.done);
   const recommended = steps.find((s) => !s.done && s.id !== "skills") ?? null;
 
+  // Production capital start: Grudge Harbor (/camp). Resume open-world cull only when mid-run.
   const deployLabel = resume
     ? run.phase === "victory"
-      ? `Return — Sail from Cove (R${run.round})`
+      ? `Return — Sail from Harbor (R${run.round})`
       : `Resume Island — Round ${run.round}`
-    : "Deploy to Island";
+    : "Enter Capital Harbor";
 
   return {
     steps,
@@ -105,7 +106,7 @@ export function getDeployReadiness(): DeployReadiness {
     recommended,
     canDeploy: blockers.length === 0,
     deployLabel,
-    deployHref: "/game",
+    deployHref: resume ? "/game" : "/camp",
     islandRound: run.round,
     islandPhase: run.phase,
     resume,

@@ -1,20 +1,39 @@
 /**
- * Canonical Grudge6 D1 asset URLs for flare-boss-arena (no /cdn proxy).
- * Meshes + atlases on R2; baked Bip001 clips on assets.grudge-studio.com
- * (manifest: anims/baked/manifest.json). Paths below are verified 200s.
+ * Canonical Grudge6 / Toon RTS asset URLs (STONE SSOT).
+ *
+ * ★ PLAY MESH (only):
+ *   assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters/{raceId}.glb
+ *
+ * Atlas:
+ *   assets.grudge-studio.com/textures/grudge6/{folder}/{file}.webp
+ *
+ * LEGACY (fallback only — wrong bake / compare):
+ *   models/grudge6/races/{PREFIX}_Characters.glb · metaverse/*
+ *
+ * @see skill grudge6-cdn-ssot · ObjectStore grudge6-kit loadRaceKit(toonRts)
  */
 
 import type { RaceId } from "./characterMeshes";
 import type { AllyRole } from "./grudge6Roster";
+import {
+  colorAtlasPublicUrl,
+  type ToonColorSet,
+} from "./toonRtsColorSets";
 
-const ARENA_CDN = "https://assets.grudge-studio.com/arena/assets/characters";
-/** Primary: assets CDN mirror (reliable). Fallback: grudge-arena API. */
-export const BAKED_ANIM_BASES = [
-  "https://assets.grudge-studio.com/anims/baked",
-  "https://grudge-arena.grudge-studio.com/api/assets/anims/baked",
-] as const;
-/** @deprecated use BAKED_ANIM_BASES — kept for callers that import a single base. */
-const BAKED_ANIM_BASE = BAKED_ANIM_BASES[0];
+const ASSETS_CDN = "https://assets.grudge-studio.com";
+/** Baked Bip001 rotation-only packs (fleet combat runtime). */
+const BAKED_ANIM_BASE = "https://grudge-arena.grudge-studio.com/api/assets/anims/baked";
+/** Open same-origin mirror often more reliable than raw arena for baked JSON. */
+const BAKED_ANIM_FALLBACK = "https://open.grudge-studio.com/anims/baked";
+
+export const RACE_KIT_PREFIX: Record<RaceId, string> = {
+  human: "WK",
+  barbarian: "BRB",
+  elf: "ELF",
+  dwarf: "DWF",
+  orc: "ORC",
+  undead: "UD",
+};
 
 export const RACE_GLB_FILES: Record<RaceId, string> = {
   human: "WK_Characters.glb",
@@ -25,13 +44,24 @@ export const RACE_GLB_FILES: Record<RaceId, string> = {
   undead: "UD_Characters.glb",
 };
 
+/** Verified 200 atlas webp paths (grudge6-cdn-ssot). */
+export const RACE_ATLAS_PATHS: Record<RaceId, string> = {
+  human: "textures/grudge6/western-kingdoms/WK_Standard_Units.webp",
+  barbarian: "textures/grudge6/barbarians/BRB_StandardUnits_texture.webp",
+  elf: "textures/grudge6/elves/ELF_HighElves_Texture.webp",
+  dwarf: "textures/grudge6/dwarves/DWF_Standard_Units.webp",
+  orc: "textures/grudge6/orcs/ORC_StandardUnits.webp",
+  undead: "textures/grudge6/undead/UD_Standard_Units.webp",
+};
+
+/** @deprecated Use RACE_ATLAS_PATHS — kept for log labels only. */
 export const RACE_ATLAS_FILES: Record<RaceId, string> = {
-  human: "Map__9.png",
-  barbarian: "Map__9.png",
-  elf: "Map__9.png",
-  dwarf: "Map__12.png",
-  orc: "Map__11.png",
-  undead: "Map__11.png",
+  human: "WK_Standard_Units.webp",
+  barbarian: "BRB_StandardUnits_texture.webp",
+  elf: "ELF_HighElves_Texture.webp",
+  dwarf: "DWF_Standard_Units.webp",
+  orc: "ORC_StandardUnits.webp",
+  undead: "UD_Standard_Units.webp",
 };
 
 export type BakedAnimPack =
@@ -40,24 +70,19 @@ export type BakedAnimPack =
   | "sword_shield"
   | "longbow"
   | "rifle"
-  | "pistol"
-  | "greatsword_samurai";
+  | "pistol";
 
-/** Ally role → baked locomotion/combat pack (paths that exist on CDN). */
+/** Ally role → baked locomotion/combat pack. */
 export const ROLE_TO_BAKED_PACK: Record<AllyRole, BakedAnimPack> = {
   unarmed: "unarmed",
   healer: "magic",
-  tank: "greatsword_samurai",
-  ranger: "rifle",
-  bruiser: "greatsword_samurai",
-  fighter: "greatsword_samurai",
-  skirmisher: "unarmed",
+  tank: "sword_shield",
+  ranger: "longbow",
+  bruiser: "sword_shield",
+  fighter: "sword_shield",
+  skirmisher: "sword_shield",
 };
 
-/**
- * Clip rels without `.json` — only paths confirmed on assets.grudge-studio.com.
- * Missing specialty clips fall back in bakedAnimLoader to locomotion/unarmed.
- */
 export const ANIM_PACK_CLIPS: Record<
   BakedAnimPack,
   { idle: string; walk: string; run: string; attack: string }
@@ -65,188 +90,212 @@ export const ANIM_PACK_CLIPS: Record<
   unarmed: {
     idle: "unarmed/fight_idle",
     walk: "locomotion/walking",
-    run: "locomotion/running",
+    run: "uploads_2026_06/locomotion/torch run forward",
     attack: "unarmed/punching",
   },
   magic: {
-    idle: "locomotion/idle",
+    idle: "magic/standing idle",
     walk: "locomotion/walking",
-    run: "locomotion/running",
-    attack: "unarmed/lead_jab",
+    run: "magic/Standing Run Forward",
+    attack: "magic/standing 1h cast spell 01",
   },
   sword_shield: {
-    idle: "greatsword_samurai/gs_samurai_idle_sword",
-    walk: "greatsword_samurai/gs_samurai_walk_sword",
-    run: "greatsword_samurai/gs_samurai_run_sword",
-    attack: "greatsword_samurai/gs_samurai_combo_a",
+    idle: "sword_shield/sword and shield idle",
+    walk: "locomotion/walking",
+    run: "sword_shield/sword and shield run",
+    attack: "sword_shield/sword and shield attack",
   },
   longbow: {
-    idle: "locomotion/idle",
+    idle: "longbow/standing idle 01",
     walk: "locomotion/walking",
-    run: "locomotion/running",
-    attack: "rifle/firing",
+    run: "longbow/standing run forward",
+    attack: "longbow/standing aim recoil",
   },
   rifle: {
     idle: "rifle/idle",
-    walk: "locomotion/walking",
-    run: "locomotion/running",
+    walk: "rifle/walk forward",
+    run: "rifle/run forward",
     attack: "rifle/firing",
   },
   pistol: {
-    idle: "locomotion/idle",
-    walk: "locomotion/walking",
-    run: "locomotion/running",
+    idle: "pistol/pistol idle",
+    walk: "pistol/pistol walk",
+    run: "pistol/pistol run",
     attack: "pistol/gunplay",
-  },
-  greatsword_samurai: {
-    idle: "greatsword_samurai/gs_samurai_idle_sword",
-    walk: "greatsword_samurai/gs_samurai_walk_sword",
-    run: "greatsword_samurai/gs_samurai_run_sword",
-    attack: "greatsword_samurai/gs_samurai_combo_a",
   },
 };
 
-/** Universal locomotion fallbacks (always present on CDN). */
-export const LOCO_FALLBACK = {
-  idle: "locomotion/idle",
-  walk: "locomotion/walking",
-  run: "locomotion/running",
-  attack: "unarmed/punching",
-  dodge: "locomotion/dodging",
-  jump: "locomotion/jump",
-} as const;
-
-/** Cardinal locomotion fallbacks — use working locomotion paths only. */
+/** Cardinal locomotion fallbacks per baked pack (4-way). */
 export const BAKED_DIR_RELS: Record<
   BakedAnimPack,
   { walkBack: string; runBack: string; strafeLeft: string; strafeRight: string }
 > = {
   unarmed: {
-    walkBack: "locomotion/walking",
-    runBack: "locomotion/running",
-    strafeLeft: "locomotion/walking",
-    strafeRight: "locomotion/walking",
+    walkBack: "longbow/standing walk back",
+    runBack: "longbow/standing aim walk back",
+    strafeLeft: "locomotion/left strafe walking",
+    strafeRight: "locomotion/right strafe walking",
   },
   magic: {
-    walkBack: "locomotion/walking",
-    runBack: "locomotion/running",
-    strafeLeft: "locomotion/walking",
-    strafeRight: "locomotion/walking",
+    walkBack: "longbow/standing walk back",
+    runBack: "longbow/standing aim walk back",
+    strafeLeft: "locomotion/left strafe walking",
+    strafeRight: "locomotion/right strafe walking",
   },
   sword_shield: {
-    walkBack: "greatsword_samurai/gs_samurai_walk_sword",
-    runBack: "greatsword_samurai/gs_samurai_run_sword",
-    strafeLeft: "locomotion/walking",
-    strafeRight: "locomotion/walking",
+    walkBack: "longbow/standing walk back",
+    runBack: "longbow/standing aim walk back",
+    strafeLeft: "locomotion/left strafe walking",
+    strafeRight: "locomotion/right strafe walking",
   },
   longbow: {
-    walkBack: "locomotion/walking",
-    runBack: "locomotion/running",
-    strafeLeft: "locomotion/walking",
-    strafeRight: "locomotion/walking",
+    walkBack: "longbow/standing walk back",
+    runBack: "longbow/standing run back",
+    strafeLeft: "longbow/standing walk left",
+    strafeRight: "longbow/standing walk right",
   },
   rifle: {
-    walkBack: "locomotion/walking",
-    runBack: "locomotion/running",
-    strafeLeft: "locomotion/walking",
-    strafeRight: "locomotion/walking",
+    walkBack: "rifle/walk backward",
+    runBack: "rifle/run backward",
+    strafeLeft: "rifle/walk forward",
+    strafeRight: "rifle/walk forward",
   },
   pistol: {
-    walkBack: "locomotion/walking",
-    runBack: "locomotion/running",
-    strafeLeft: "locomotion/walking",
-    strafeRight: "locomotion/walking",
-  },
-  greatsword_samurai: {
-    walkBack: "greatsword_samurai/gs_samurai_walk_sword",
-    runBack: "greatsword_samurai/gs_samurai_run_sword",
-    strafeLeft: "locomotion/walking",
-    strafeRight: "locomotion/walking",
+    walkBack: "pistol/pistol walk backward",
+    runBack: "pistol/pistol run backward",
+    strafeLeft: "pistol/pistol strafe",
+    strafeRight: "pistol/pistol strafe",
   },
 };
 
 /**
- * Extra one-shot clips for triggerNamed() — only CDN-verified paths.
- * Unknown names fall back to attack/punch in the loader.
+ * Extra one-shot clips keyed for triggerNamed().
+ * Expanded for uMMORPG weapon skills (sword/axe/bow/staff/gun) + Warlords T0 kits.
+ * Paths: warlord-genesis + boxanimations baked on grudge-arena CDN.
  */
 export const BAKED_SKILL_CLIPS: Record<string, string> = {
-  cast: "unarmed/lead_jab",
-  cast2H: "unarmed/punching",
-  cast2h: "unarmed/punching",
-  fireball: "unarmed/lead_jab",
-  ice_spike: "unarmed/lead_jab",
-  chain: "unarmed/punching",
-  nova: "unarmed/punching",
-  aoe: "unarmed/punching",
-  barrier: "locomotion/idle",
-  bolt: "unarmed/lead_jab",
-  charged: "unarmed/punching",
-  slash: "greatsword_samurai/gs_samurai_combo_a",
-  slash2: "greatsword_samurai/gs_samurai_combo_b",
-  thrust: "greatsword_samurai/gs_samurai_combo_a",
-  power_strike: "greatsword_samurai/gs_samurai_combo_b",
-  cleave: "greatsword_samurai/gs_samurai_combo_a",
-  block: "locomotion/idle",
-  block_idle: "locomotion/idle",
-  power_up: "greatsword_samurai/gs_samurai_idle_sword",
-  draw: "greatsword_samurai/gs_samurai_idle_sword",
-  sheath: "greatsword_samurai/gs_samurai_idle",
-  combo: "greatsword_samurai/gs_samurai_combo_a",
-  combo2h: "greatsword_samurai/gs_samurai_combo_b",
-  great_slash: "greatsword_samurai/gs_samurai_combo_a",
-  dual_combo: "greatsword_samurai/gs_samurai_combo_b",
-  chop: "unarmed/punching",
-  hack: "greatsword_samurai/gs_samurai_combo_a",
-  wild_swing: "greatsword_samurai/gs_samurai_combo_b",
-  whirlwind: "greatsword_samurai/gs_samurai_combo_a",
-  smash: "unarmed/punching",
-  slam: "greatsword_samurai/gs_samurai_combo_b",
-  aimed: "rifle/firing",
-  quick_shot: "rifle/firing",
-  volley: "rifle/firing",
-  aim_idle: "rifle/idle",
-  draw_arrow: "rifle/idle",
-  dodge_left: "locomotion/dodging",
-  dodge_right: "locomotion/dodging",
-  dodge_back: "locomotion/dodging",
+  // Magic
+  cast: "magic/standing 1h cast spell 01",
+  cast2H: "magic/standing 2h cast spell 01",
+  cast2h: "magic/standing 2h cast spell 01",
+  fireball: "magic/standing 2h cast spell 01",
+  ice_spike: "magic/standing 2h magic attack 01",
+  chain: "magic/standing 2h magic attack 03",
+  nova: "magic/standing 2h magic area attack 01",
+  aoe: "magic/Standing 2H Magic Area Attack 02",
+  barrier: "magic/spell casting",
+  bolt: "magic/standing 1h cast spell 01",
+  charged: "magic/Standing 1H Magic Attack 01",
+  // Sword / shield melee
+  slash: "sword_shield/sword and shield slash",
+  slash2: "sword_shield/sword and shield slash 1",
+  thrust: "sword_shield/sword and shield attack (1)",
+  power_strike: "sword_shield/sword and shield attack (2)",
+  cleave: "sword_shield/sword and shield attack (3)",
+  block: "sword_shield/sword and shield block",
+  block_idle: "sword_shield/sword and shield block idle",
+  power_up: "sword_shield/sword and shield power up",
+  draw: "sword_shield/draw sword 1",
+  sheath: "sword_shield/sheath sword 1",
+  // 1H/2H sword + dual
+  combo: "sword/one hand sword combo",
+  combo2h: "sword/two hand sword combo",
+  great_slash: "sword/great sword slash",
+  dual_combo: "dual/dual weapon combo",
+  // Club / axe / mace / hammer proxies
+  chop: "club/one hand club combo",
+  hack: "club/two hand club combo",
+  wild_swing: "club/two hand club combo",
+  whirlwind: "sword/two hand sword combo",
+  smash: "club/one hand club combo",
+  slam: "club/two hand club combo",
+  // Bow
+  aimed: "longbow/standing aim recoil",
+  quick_shot: "longbow/standing aim recoil",
+  volley: "longbow/standing aim recoil",
+  aim_idle: "boxanimations/longbow/Standing Aim Idle 02 Looking",
+  draw_arrow: "boxanimations/longbow/Standing Draw Arrow (1)",
+  dodge_left: "longbow/standing dodge left",
+  dodge_right: "longbow/standing dodge right",
+  dodge_back: "longbow/standing dodge backward",
+  // Gun
   fire: "pistol/gunplay",
   burst: "rifle/firing",
-  sniper: "rifle/firing",
+  sniper: "rifle/firing 2",
   reload: "rifle/reloading",
+  // Mobility / reaction
   dodge: "locomotion/dodging",
-  combat_roll: "locomotion/dodging",
-  hit: "locomotion/idle",
-  death: "locomotion/idle",
+  combat_roll: "boxanimations/locomotion/Quick Roll To Run (1)",
+  hit: "boxanimations/reactions/Hit Reaction",
+  death: "boxanimations/reactions/Dying",
   jump: "locomotion/jump",
+  // Unarmed / worge
   jab: "unarmed/lead_jab",
   punch: "unarmed/punching",
   claw: "unarmed/punching",
-  dash: "greatsword_samurai/gs_samurai_dash_opener",
-  teleport: "greatsword_samurai/gs_samurai_dash_opener",
 };
 
+/**
+ * Production play URL — Toon RTS ★ race kit (human.glb, orc.glb, …).
+ * Never metaverse or PREFIX_Characters as primary.
+ */
 export function raceGlbUrl(race: RaceId): string {
-  return `${ARENA_CDN}/${race}/${RACE_GLB_FILES[race]}`;
+  return `${ASSETS_CDN}/asset-packs/toon-rts-characters/glb/characters/${race}.glb`;
 }
 
-export function raceAtlasUrl(race: RaceId): string {
-  return `${ARENA_CDN}/${race}/textures/${RACE_ATLAS_FILES[race]}`;
+/** Load order: Toon CDN ★ → same-origin public mirror → legacy races bake. */
+export function raceGlbUrlCandidates(race: RaceId): string[] {
+  const file = RACE_GLB_FILES[race];
+  return [
+    raceGlbUrl(race),
+    `/models/races/${race}.glb`,
+    `${ASSETS_CDN}/models/grudge6/races/${file}`,
+  ];
 }
 
-/** Encode each path segment for spaces in clip names. */
-export function bakedAnimUrl(rel: string, baseIndex = 0): string {
-  const p = rel.replace(/\.json$/i, "").replace(/^\//, "");
-  const base = BAKED_ANIM_BASES[baseIndex] ?? BAKED_ANIM_BASES[0];
-  const enc = p
-    .split("/")
-    .map((s) => encodeURIComponent(s))
-    .join("/");
-  return `${base}/${enc}.json`;
+/** @deprecated Wrong play path — use raceGlbUrl. Kept for scripts that purge/compare. */
+export function legacyRaceGlbUrl(race: RaceId): string {
+  return `${ASSETS_CDN}/models/grudge6/races/${RACE_GLB_FILES[race]}`;
 }
 
-/** All candidate URLs for a clip (primary + mirrors). */
-export function bakedAnimUrls(rel: string): string[] {
-  return BAKED_ANIM_BASES.map((_, i) => bakedAnimUrl(rel, i));
+/**
+ * Race atlas URL. When `colorSet` is a Toon RTS Materials/Colors variant and a
+ * local webp exists, prefer that (team/outfit dye). Otherwise CDN standard.
+ * @see toonRtsColorSets.ts
+ */
+export function raceAtlasUrl(race: RaceId, colorSet: ToonColorSet = "standard"): string {
+  if (colorSet !== "standard") {
+    const local = colorAtlasPublicUrl(race, colorSet);
+    if (local) return local;
+  }
+  return `${ASSETS_CDN}/${RACE_ATLAS_PATHS[race]}`;
+}
+
+export type { ToonColorSet };
+
+export function bakedAnimUrl(rel: string): string {
+  const p = rel.startsWith("/") ? rel.slice(1) : rel.replace(/\.json$/i, "");
+  return `${BAKED_ANIM_BASE}/${p}.json`;
+}
+
+/** Prefer Open baked mirror when arena API is cold. */
+export function bakedAnimUrlCandidates(rel: string): string[] {
+  const p = rel.startsWith("/") ? rel.slice(1) : rel.replace(/\.json$/i, "");
+  return [
+    `${BAKED_ANIM_BASE}/${p}.json`,
+    `${BAKED_ANIM_FALLBACK}/${p}.json`,
+  ];
+}
+
+/** Class string → ally combat role → anim pack. */
+export function roleForClass(classId: string): AllyRole {
+  const c = (classId || "").toLowerCase();
+  if (c === "mage" || c === "healer" || c.includes("magic")) return "healer";
+  if (c === "ranger" || c === "archer" || c.includes("bow")) return "ranger";
+  if (c === "worge" || c === "barbarian" || c === "bruiser") return "bruiser";
+  if (c === "tank" || c === "guardian") return "tank";
+  if (c === "skirmisher" || c === "rogue") return "skirmisher";
+  return "fighter";
 }
 
 export function animPackForRole(role: AllyRole): BakedAnimPack {
@@ -339,16 +388,19 @@ export function toonAdventureUrl(rel: keyof typeof TOON_ADVENTURE_CLIPS): string
   return bakedAnimUrl(TOON_ADVENTURE_CLIPS[rel]);
 }
 
-/** Base human height (m) - multiplied by per-race scale (grudge-arena RaceConfig). */
-export const GRUDGE6_BASE_HEIGHT = 1.75;
+/**
+ * SI yardstick (grudge-world-scale / character-correctness):
+ * human ~1.8 m · orc ~2.0 m · dwarf shorter · never 100× giants.
+ */
+export const GRUDGE6_BASE_HEIGHT = 1.8;
 
 export const RACE_HEIGHT_SCALE: Record<RaceId, number> = {
-  human: 1.0,
-  barbarian: 1.12,
-  elf: 1.05,
-  dwarf: 0.85,
-  orc: 1.08,
-  undead: 0.95,
+  human: 1.0, // 1.80 m
+  barbarian: 1.11, // ~2.00 m
+  elf: 1.03, // ~1.85 m
+  dwarf: 0.83, // ~1.50 m
+  orc: 1.11, // ~2.00 m
+  undead: 0.97, // ~1.75 m
 };
 
 export function targetHeightForRace(race: RaceId): number {

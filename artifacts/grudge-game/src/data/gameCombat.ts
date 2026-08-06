@@ -3,7 +3,16 @@
  * Fighter stats + signature weapon + equipped attribute stones.
  */
 
-import { getActiveFighter, getFighter, type FighterDef, RACALVIN_ID, type AttrKey, ATTR_ORDER } from "./fighters";
+import {
+  getActiveFighter,
+  getFighter,
+  type FighterDef,
+  RACALVIN_ID,
+  SCOURGE_ID,
+  JOHN_WAYNE_ID,
+  type AttrKey,
+  ATTR_ORDER,
+} from "./fighters";
 import {
   getFighterKit,
   type FighterKit,
@@ -24,7 +33,9 @@ export type WeaponStyle =
   | "blade"
   | "claw"
   | "jitte"
-  | "staff";
+  | "staff"
+  | "chain"
+  | "rifle";
 
 export interface GameWeapon {
   id: string;
@@ -59,6 +70,26 @@ const WEAPONS_BY_FIGHTER: Record<string, GameWeapon> = {
     critBonus: 0.04,
     range: 3.4,
     description: "Greatsword melee — swap to pistol for psymic skills (Mind Shot).",
+  },
+  [SCOURGE_ID]: {
+    id: "wpn_cryoshard_chain",
+    name: "Cryoshard Chain-Anchor",
+    glyph: "⚓",
+    style: "chain",
+    damageBonus: 16,
+    critBonus: 0.03,
+    range: 7.5,
+    description: "Boat-anchor warpick on chain — throw mid-range, reel prey back into slam range.",
+  },
+  [JOHN_WAYNE_ID]: {
+    id: "wpn_pathfinder_kit",
+    name: "Pathfinder Field Kit",
+    glyph: "🔧",
+    style: "rifle",
+    damageBonus: 12,
+    critBonus: 0.08,
+    range: 14,
+    description: "Engineer longarm + gadgets — snipe, mines, and portable turrets.",
   },
   nightmare_luffy: {
     id: "wpn_rubber_fists",

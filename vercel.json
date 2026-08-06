@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "pnpm install",
+  "installCommand": "corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile",
   "buildCommand": "pnpm --filter @workspace/grudge-game run build",
   "outputDirectory": "artifacts/grudge-game/dist/public",
   "framework": "vite",

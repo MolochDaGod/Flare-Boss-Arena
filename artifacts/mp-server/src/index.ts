@@ -255,7 +255,7 @@ io.on("connection", (socket: Socket) => {
   const p: NetPlayer = {
     id: socket.id,
     name: "Player",
-    modelUrl: "https://assets.grudge-studio.com/models/grudge6/races/WK_Characters.glb",
+    modelUrl: "https://assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters/human.glb",
     room: null,
     kind: null,
     instanceId: "arena_flat",

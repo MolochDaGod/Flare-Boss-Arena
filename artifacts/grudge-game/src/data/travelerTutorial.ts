@@ -15,7 +15,7 @@ export const TRAVELER_NPC = {
   voiceId: "sean-lenhart",
   /** CDN dialogue pack */
   audioBase: "https://assets.grudge-studio.com/audio/dialogue/super-pack",
-  modelUrl: "https://assets.grudge-studio.com/models/grudge6/races/WK_Characters.glb",
+  modelUrl: "https://assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters/human.glb",
 } as const;
 
 export type TravelerStepKind =

@@ -53,8 +53,9 @@ function Router() {
   return (
     <Switch>
       <Route path="/auth/callback" component={AuthCallback} />
-      <Route path="/game" component={Game} />
+      {/* Fullscreen play scenes — Capital Harbor is production start island */}
       <Route path="/camp" component={Camp} />
+      <Route path="/game" component={Game} />
       <Route path="/boss" component={Boss} />
       <Route path="/moba" component={Moba} />
       <Route>

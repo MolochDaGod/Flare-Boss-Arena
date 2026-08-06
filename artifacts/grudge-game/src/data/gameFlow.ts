@@ -45,8 +45,7 @@ export type NavHref =
   | "/game"
   | "/pvp"
   | "/leaderboards"
-  | "/connections"
-  | "/moba";
+  | "/connections";
 
 export interface NavItem {
   label: string;
@@ -82,7 +81,7 @@ export const NAV_SECTIONS: NavSection[] = [
     blurb: "Fighter, party, power",
     items: [
       { label: "Choose Fighter", href: "/select", icon: Users, description: "Active champion skin & kit" },
-      { label: "Party Allies", href: "/party", icon: UserPlus, description: "Up to 2 Grudge6 allies", badge: "NEW" },
+      { label: "Party Allies", href: "/party", icon: UserPlus, description: "Earn recruits · rank · spellbook skills", badge: "NEW" },
       { label: "Unit Roster", href: "/units", icon: PawPrint, description: "Champion compendium" },
       { label: "Stone Sockets", href: "/equipment", icon: Gem, description: "8 attribute stones & rarities" },
       { label: "Grimoire", href: "/skills", icon: Book, description: "Skill ranks & cooldowns" },
@@ -94,12 +93,18 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "World & Combat",
     blurb: "Deploy into live scenes",
     items: [
-      { label: "Enter World", href: "/game", icon: Swords, description: "Dungeon islands, fog map, open water, co-op", primary: true },
-      { label: "Boss Arena", href: "/boss", icon: Skull, description: "Boss fight + Arena PvP", primary: true },
-      { label: "PvP Arena", href: "/pvp", icon: Crosshair, description: "Fleet Socket.IO multiplayer", badge: "LIVE", primary: true },
+      {
+        label: "Capital Harbor",
+        href: "/camp",
+        icon: Tent,
+        description: "Starting capital island — train, stations, portals",
+        primary: true,
+        badge: "START",
+      },
+      { label: "Enter World", href: "/game", icon: Swords, description: "Dungeon islands & rounds", primary: true },
+      { label: "Boss Arena", href: "/boss", icon: Skull, description: "Standalone boss fight", primary: true },
+      { label: "PvP Arena", href: "/pvp", icon: Crosshair, description: "Fleet Socket.IO multiplayer", badge: "LIVE" },
       { label: "Leaderboards", href: "/leaderboards", icon: Trophy, description: "Boss · island · arena ranks" },
-      { label: "MOBA Lanes", href: "/moba", icon: Flame, description: "Three-lane skirmish mode" },
-      { label: "Sanctuary Camp", href: "/camp", icon: Tent, description: "Training ground & stations" },
       { label: "Bestiary", href: "/enemies", icon: Shield, description: "Enemy units" },
     ],
   },
@@ -108,14 +113,19 @@ export const NAV_SECTIONS: NavSection[] = [
 /** Flat list for command palette / search. */
 export const ALL_NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap((s) => s.items);
 
+/** Production play loop — capital harbor is the player start island. */
 export const PLAY_LOOP: { step: number; label: string; route: NavHref; note: string }[] = [
   { step: 1, label: "Choose fighter", route: "/select", note: "Pick your champion" },
   { step: 2, label: "Form a party", route: "/party", note: "Up to 2 Grudge6 allies" },
   { step: 3, label: "Socket stones", route: "/equipment", note: "Attribute stones & procs" },
   { step: 4, label: "Rank skills & perks", route: "/skills", note: "Grimoire + perk machines" },
-  { step: 5, label: "Enter world", route: "/game", note: "Cull hostiles → Island Colossus → sail onward" },
-  { step: 6, label: "Boss & rewards", route: "/boss", note: "Standalone arena · claim rewards" },
+  { step: 5, label: "Capital Harbor", route: "/camp", note: "Starting capital island — train & gear" },
+  { step: 6, label: "Enter world", route: "/game", note: "Cull hostiles → Island Colossus → sail onward" },
+  { step: 7, label: "Boss & rewards", route: "/boss", note: "Standalone arena · claim rewards" },
 ];
+
+/** Default production entry after login (capital island). */
+export const PRODUCTION_START_HREF: NavHref = "/camp";
 
 /** Keyboard: open systems hub (also used by Escape in fullscreen modes). */
 export const SYSTEMS_HOTKEY = "KeyM";

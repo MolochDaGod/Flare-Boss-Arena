@@ -232,6 +232,36 @@ const BASE_COMBAT_PROFILES: CombatProfile[] = [
     ],
     true,
   ),
+  P(
+    "scourge_faithbearer",
+    "tank",
+    "physical",
+    "mon_dante_beast",
+    5,
+    [
+      ab("anchor_throw", "Anchor Throw", ["skill1", "attack"], "physical", "line", 2.4, 7.5, "Chain warpick mid-range"),
+      ab("chain_yank", "Chain Yank", ["skill2", "combo"], "physical", "cone", 3.2, 6.0, "Reel prey back"),
+      ab("reaping_swing", "Reaping Swing", ["combo", "slash"], "physical", "cone", 4.0, 6.0, "Wide chain arc"),
+      ab("ground_slam", "Harbor Slam", ["slam", "skill3"], "physical", "circle", 5.5, 5.0, "Anchor slam"),
+      ab("reef_crush", "Reef Crush", ["slam", "skill3"], "physical", "nova", 9.0, 5.5, "Ultimate reel-crush"),
+    ],
+    true,
+  ),
+  P(
+    "capt_john_wayne",
+    "gunner",
+    "lightning",
+    "kit_skel_mage",
+    5,
+    [
+      ab("field_snipe", "Field Snipe", ["attack", "cast"], "physical", "line", 1.6, 14.0, "Engineer long shot"),
+      ab("gadget_mine", "Gadget Mine", ["cast", "combo"], "fire", "circle", 4.5, 11.0, "Place mine"),
+      ab("turret_burst", "Turret Burst", ["combo2", "slash"], "lightning", "cone", 3.5, 5.5, "Portable turret"),
+      ab("path_charge", "Path Charge", ["charge", "combo"], "lightning", "line", 4.0, 8.0, "Forward charge"),
+      ab("pathfinder_barrage", "Pathfinder Barrage", ["special", "charge"], "lightning", "slash", 9.0, 6.0, "Ultimate spin volley"),
+    ],
+    true,
+  ),
 ];
 
 /** One Piece kits + full Annihilate 24 skill-creation profiles. */

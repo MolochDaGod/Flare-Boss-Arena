@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import type { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { PlayerAnimator, buildSkinAnim } from "./PlayerAnimator";
 import { RootMotion } from "./rootMotion";
 import { getActiveFighter, RACALVIN_ID } from "../data/fighters";
@@ -7,6 +7,7 @@ import { getFighterAssetTuning } from "../data/fighterAssetTuning";
 import { getSkin, skinUrl } from "../data/skins";
 import { setupFighterMeshVisibility } from "./assetVisibility";
 import { loadRacalvinBase, loadRacalvinClips, syncRacalvinSwordPose } from "./racalvinHero";
+import { loadGLTFCached } from "./assets";
 
 /**
  * Shared KayKit hero utilities used by the real-time 3D scenes (`/camp`,
@@ -89,20 +90,14 @@ export function loadKayKitAnimLibrary(loader: GLTFLoader): Promise<THREE.Animati
   animPromise = (async () => {
     const all: THREE.AnimationClip[] = [];
     await Promise.all(
-      ANIM_FILES.map(
-        (f) =>
-          new Promise<void>((resolve) => {
-            loader.load(
-              `${KIT_BASE}/${f}`,
-              (g) => {
-                for (const clip of g.animations) all.push(clip);
-                resolve();
-              },
-              undefined,
-              () => resolve(),
-            );
-          }),
-      ),
+      ANIM_FILES.map(async (f) => {
+        try {
+          const g = await loadGLTFCached(loader, `${KIT_BASE}/${f}`);
+          for (const clip of g.animations) all.push(clip);
+        } catch {
+          /* soft-fail missing anim pack */
+        }
+      }),
     );
     animCache = all;
     return all;
@@ -513,10 +508,11 @@ export class SkinHeroAdapter implements HeroLike {
 }
 
 /**
- * Load the globally-selected fighter's skin GLB, fit it to `targetHeight` (feet
- * at the wrapper origin, XZ-centred), and hand back a `HeroLike` adapter. Calls
- * `onMiss` when no skin resolves or the GLB fails to load so the caller can fall
- * back to the KayKit hero path.
+ * Load the active fighter for camp/boss:
+ *  1. Racalvin (bespoke)
+ *  2. g6_{race}_{class} → production Toon RTS kit + Bip001 baked packs
+ *  3. Named champion skins (One Piece etc.)
+ *  4. onMiss → caller may use capsule (KayKit is NPCs only, not player SSOT)
  */
 export function loadActiveFighterModel(
   loader: GLTFLoader,
@@ -524,11 +520,108 @@ export function loadActiveFighterModel(
   onReady: (root: THREE.Group, anim: HeroLike) => void,
   onMiss: () => void,
 ) {
-  if (getActiveFighter().id === RACALVIN_ID) {
+  const fighter = getActiveFighter();
+  if (fighter.id === RACALVIN_ID) {
     loadRacalvinHero(loader, targetHeight, onReady, onMiss);
     return;
   }
-  const skin = getSkin(getActiveFighter().skinId);
+
+  // Racalvin crew bipeds (Scourge / Cap'n John Wayne) — shared HeroAnimator + role map
+  if (fighter.id === "scourge_faithbearer" || fighter.id === "capt_john_wayne") {
+    void import("./crewHeroes").then(
+      ({ loadCrewHero, isCrewFighterId, SCOURGE_ID, syncScourgeWeaponForClip }) => {
+        if (!isCrewFighterId(fighter.id)) {
+          onMiss();
+          return;
+        }
+        loadCrewHero(
+          loader,
+          fighter.id,
+          targetHeight > 2.4 ? 2.0 : Math.min(2.05, Math.max(1.75, targetHeight)),
+          (wrapper, root, clips) => {
+            const hero = new HeroAnimator(root, clips);
+            // Scourge: drive chain throw pose from active clip names via triggerNamed hooks
+            if (fighter.id === SCOURGE_ID) {
+              const origNamed = hero.triggerNamed.bind(hero);
+              hero.triggerNamed = (cands: string[]) => {
+                const ok = origNamed(cands);
+                const name = cands[0] ?? "attack";
+                syncScourgeWeaponForClip(wrapper, name);
+                syncScourgeWeaponForClip(root, name);
+                return ok;
+              };
+              const origTrig = hero.trigger.bind(hero);
+              hero.trigger = (state) => {
+                const ok = origTrig(state);
+                syncScourgeWeaponForClip(wrapper, state);
+                return ok;
+              };
+            }
+            onReady(wrapper, hero);
+          },
+          onMiss,
+        );
+      },
+    );
+    return;
+  }
+
+  // grudge6 / Toon RTS — primary production path
+  const g6 =
+    /^g6_(human|barbarian|elf|dwarf|orc|undead)_(warrior|mage|ranger|worge)$/.exec(
+      fighter.skinId || fighter.id,
+    ) ||
+    /^g6_(human|barbarian|elf|dwarf|orc|undead)_(warrior|mage|ranger|worge)$/.exec(fighter.id);
+  if (g6) {
+    void import("./grudge6/Grudge6Character").then(({ Grudge6Factory }) => {
+      const factory = new Grudge6Factory();
+      factory
+        .createPlayer({
+          race: g6[1] as import("../data/characterMeshes").RaceId,
+          classId: g6[2],
+          displayName: fighter.name,
+          height: targetHeight > 2.2 ? 1.8 : targetHeight,
+        })
+        .then((inst) => {
+          const anim = inst.animator;
+          if (!anim) {
+            onReady(inst.group, {
+              setMoving: () => {},
+              trigger: () => false,
+              triggerNamed: () => false,
+              update: () => {},
+              consumeRootMotion: () => false,
+              addLibraryClips: () => {},
+              dispose: () => inst.dispose(),
+            });
+            return;
+          }
+          onReady(inst.group, {
+            setMoving: (m) => anim.setMoving(m),
+            setSprinting: (s) => anim.setGaitFromSpeed?.(s ? 1 : 0.5, s),
+            trigger: (state) => {
+              if (state === "attack" || state === "cast") {
+                anim.triggerAttack();
+                return true;
+              }
+              return anim.triggerNamed([state]);
+            },
+            triggerNamed: (c) => anim.triggerNamed(c),
+            update: (d) => anim.update(d),
+            consumeRootMotion: () => false,
+            addLibraryClips: () => {},
+            dispose: () => {
+              anim.dispose();
+              inst.dispose();
+            },
+          });
+        })
+        .catch(() => onMiss());
+    });
+    return;
+  }
+
+  const skin = getSkin(fighter.skinId);
   if (!skin) {
     onMiss();
     return;
@@ -560,7 +653,7 @@ export function loadActiveFighterModel(
       model.position.y -= box2.min.y;
       wrapper.add(model);
       const { actions, pool, attackBlend } = buildSkinAnim(gltf.animations, skin.scheme);
-      const fighterId = getActiveFighter().id;
+      const fighterId = fighter.id;
       const idleClip = actions.idle?.name ?? actions.walk?.name;
       setupFighterMeshVisibility(model, fighterId, getFighterAssetTuning(fighterId).hiddenMeshes, idleClip);
       onReady(wrapper, new SkinHeroAdapter(new PlayerAnimator(model, actions, pool, { attackBlend })));

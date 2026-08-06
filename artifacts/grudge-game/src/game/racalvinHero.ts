@@ -61,7 +61,8 @@ export type BrothersFlight =
 
 export const RACALVIN_BASE_URL = base;
 
-const SWORD_HELD_CLIP = /attack|combo|hammer|punch|cast|slash|chop|stab/i;
+/** Combat grip for strikes; hammer/punch also "held" so harvest swings look armed. */
+const SWORD_HELD_CLIP = /attack|combo|hammer|punch|cast|slash|chop|stab|mine|harvest/i;
 
 const USERDATA_KEY = "racalvinWeapons";
 
@@ -461,6 +462,8 @@ export function syncRacalvinSwordPose(root: THREE.Object3D, clipName: string) {
   const rig = getRacalvinWeapons(root);
   if (!rig || rig.getMode() !== "sword") return;
   rig.setSwordPose(racalvinSwordPoseForClip(clipName));
+  // Keep mounts parented after skeleton pose advances (Mixamo hand scale)
+  refreshRacalvinWeaponMounts(root);
 }
 
 export function applyRacalvinAssetTuning(root: THREE.Object3D, tuning: FighterAssetTuning) {
@@ -469,7 +472,16 @@ export function applyRacalvinAssetTuning(root: THREE.Object3D, tuning: FighterAs
 }
 
 export function getRacalvinWeapons(root: THREE.Object3D): RacalvinWeapons | null {
-  return (root.userData[USERDATA_KEY] as RacalvinWeapons | undefined) ?? null;
+  const direct = root.userData[USERDATA_KEY] as RacalvinWeapons | undefined;
+  if (direct) return direct;
+  // Mixer root is often the skinned model; wrapper is parent — search tree
+  let found: RacalvinWeapons | null = null;
+  root.traverse((o) => {
+    if (found) return;
+    const w = o.userData[USERDATA_KEY] as RacalvinWeapons | undefined;
+    if (w) found = w;
+  });
+  return found;
 }
 
 /** Drive psychic sword flight from the game loop. */
@@ -509,7 +521,10 @@ export function racalvinWeaponModeForSkill(skill: FighterSkillDef | FighterSpeci
   return "sword";
 }
 
-export function loadRacalvinClips(loader: GLTFLoader): Promise<THREE.AnimationClip[]> {
+export function loadRacalvinClips(
+  loader: GLTFLoader,
+  bindRoot?: THREE.Object3D,
+): Promise<THREE.AnimationClip[]> {
   return Promise.all(
     RACALVIN_ANIMS.map(
       (name) =>
@@ -518,8 +533,19 @@ export function loadRacalvinClips(loader: GLTFLoader): Promise<THREE.AnimationCl
             animUrl(name),
             (gltf) => {
               const clip = gltf.animations[0];
-              if (clip) clip.name = name;
-              resolve(clip ?? null);
+              if (!clip) {
+                resolve(null);
+                return;
+              }
+              // Meshy best practice: strip root travel on loco; rebind bone paths
+              void import("./crewHeroes").then(({ prepareCrewClip, isStaticBindClip }) => {
+                const prepared = prepareCrewClip(clip, name, bindRoot);
+                if (isStaticBindClip(prepared)) resolve(null);
+                else resolve(prepared);
+              }).catch(() => {
+                clip.name = name;
+                resolve(clip);
+              });
             },
             undefined,
             () => resolve(null),
@@ -614,11 +640,21 @@ function steelMaterial(mesh: THREE.Object3D) {
     for (const mat of mats) {
       const sm = mat as THREE.MeshStandardMaterial;
       if (!sm) continue;
-      if (sm.emissive) sm.emissive.setRGB(0, 0, 0);
-      sm.emissiveIntensity = 0;
-      if (!sm.map) sm.color.setHex(0xc2c7d2);
-      sm.metalness = 0.55;
-      sm.roughness = 0.35;
+      // Brothers' Keeper — cool steel + psychic green edge glow
+      if (sm.map) {
+        sm.map.colorSpace = THREE.SRGBColorSpace;
+        sm.map.needsUpdate = true;
+        sm.color.setHex(0xffffff);
+      } else {
+        sm.color.setHex(0xb8c4d4);
+      }
+      if (sm.emissive) {
+        sm.emissive.setHex(RACALVIN_PSYCHIC_COLOR);
+        sm.emissiveIntensity = 0.22;
+      }
+      sm.metalness = 0.72;
+      sm.roughness = 0.28;
+      sm.envMapIntensity = 0.55;
       sm.needsUpdate = true;
     }
   });
@@ -674,7 +710,10 @@ function handCompensation(hand: THREE.Object3D, root: THREE.Object3D): number {
   const rootSc = new THREE.Vector3();
   hand.getWorldScale(handSc);
   root.getWorldScale(rootSc);
-  // Counter only the root uniform scale so mounts stay in hand-local units.
+  // Counter full world scale of the hand (root + bone chain) so Brothers' Keeper
+  // stays SI metres in palm space — Mixamo hands often inherit non-1 scale.
+  const handUniform = (Math.abs(handSc.x) + Math.abs(handSc.y) + Math.abs(handSc.z)) / 3;
+  if (handUniform > 1e-6 && handUniform < 1000) return 1 / handUniform;
   const rootUniform = rootSc.x > 1e-6 ? rootSc.x : 1;
   return 1 / rootUniform;
 }
@@ -812,25 +851,65 @@ export function loadRacalvinForDungeon(
     base(),
     (gltf) => {
       const model = gltf.scene;
+      // Improved character mesh pass — SI shadows, atlas color space, matte cloth/skin
       model.traverse((c) => {
         const m = c as THREE.Mesh;
-        if (m.isMesh) {
-          m.castShadow = true;
-          m.receiveShadow = true;
-          m.frustumCulled = false;
+        if (!m.isMesh) return;
+        m.castShadow = true;
+        m.receiveShadow = true;
+        m.frustumCulled = false;
+        const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
+        for (const mat of mats) {
+          const sm = mat as THREE.MeshStandardMaterial;
+          if (!sm) continue;
+          if (sm.map) {
+            sm.map.colorSpace = THREE.SRGBColorSpace;
+            sm.map.anisotropy = 4;
+            sm.map.needsUpdate = true;
+          }
+          // Avoid plastic shine on body; weapons re-styled in attachRacalvinWeapons
+          if (typeof sm.metalness === "number") sm.metalness = Math.min(sm.metalness, 0.25);
+          if (typeof sm.roughness === "number") sm.roughness = Math.max(sm.roughness ?? 0.5, 0.55);
+          sm.vertexColors = false;
+          sm.needsUpdate = true;
         }
       });
+      // SI height first so hand world-scale is stable before weapon mount
       const wrapper = fitWrapper(model, targetHeight);
-      const weapons = attachRacalvinWeapons(model, loader, {
-        tuning: getFighterAssetTuning(RACALVIN_ID),
-      });
-      loadRacalvinClips(loader).then((clips) => {
+      wrapper.name = "RacalvinPlayer";
+      wrapper.userData.importPipeline = "racalvin-mixamo";
+      const tuning = getFighterAssetTuning(RACALVIN_ID);
+      const weapons = attachRacalvinWeapons(model, loader, { tuning });
+      // Mirror rig on wrapper for GameEngine / pose sync
+      if (weapons) wrapper.userData[USERDATA_KEY] = weapons;
+      loadRacalvinClips(loader, model).then((clips) => {
         const by = (n: string) => clips.find((c) => c.name === n);
-        const anim = new PlayerAnimator(model, {
-          idle: by("idle"),
-          walk: by("walk") ?? by("run"),
-          attack: by("attack") ?? by("combo"),
-        }, clips);
+        // Pool includes hammer + punch for harvest/mine; weightLoco = Meshy mixer blend
+        const anim = new PlayerAnimator(
+          model,
+          {
+            idle: by("idle"),
+            walk: by("walk") ?? by("run"),
+            run: by("run"),
+            // Simple combat: prefer short attack; combo for specials via triggerNamed
+            attack: by("attack") ?? by("combo") ?? by("punch"),
+            cast: by("cast"),
+            dodge: by("dodge"),
+            jump: by("jump"),
+            hit: by("hit"),
+          },
+          clips, // full pool: hammer, punch, combo for harvest + skills
+          { weightLoco: true },
+        );
+        // Sample idle once → re-seat Brothers' Keeper grip on animated hand
+        try {
+          anim.update(1 / 30);
+          model.updateMatrixWorld(true);
+          refreshRacalvinWeaponMounts(model);
+          syncRacalvinSwordPose(model, "idle");
+        } catch {
+          /* non-fatal */
+        }
         onReady(wrapper, anim, weapons);
       });
     },

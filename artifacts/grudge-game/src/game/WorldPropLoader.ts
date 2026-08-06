@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { WORLD_PROP_BY_ID, type WorldPropDef } from "../data/worldProps";
-import { loadGLTFCached } from "./assets";
+import { cloneGltfScene, loadGLTFCached } from "./assets";
 
 export interface LoadedWorldProp {
   holder: THREE.Group;
@@ -18,6 +18,18 @@ function applyShadows(root: THREE.Object3D) {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) mesh.frustumCulled = false;
+      // Fantasy-props trim sheets — ensure color space on albedo
+      const mats = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : [];
+      for (const mat of mats) {
+        const m = mat as THREE.MeshStandardMaterial;
+        if (m.map) {
+          m.map.colorSpace = THREE.SRGBColorSpace;
+          m.map.needsUpdate = true;
+        }
+        if (typeof m.metalness === "number") m.metalness = Math.min(m.metalness, 0.45);
+        if (typeof m.roughness === "number") m.roughness = Math.max(m.roughness ?? 0.5, 0.45);
+        m.needsUpdate = true;
+      }
     }
   });
 }
@@ -105,8 +117,8 @@ export function loadWorldProp(
     (gltf) => {
       if (holder.userData.disposed) return;
 
-      // Cached template is shared — clone before normalize / scene attach.
-      const root = gltf.scene.clone(true);
+      // Cached template is shared — SkeletonUtils clone before normalize / scene attach.
+      const root = cloneGltfScene(gltf.scene);
       normalizeRoot(root, def);
       applyShadows(root);
       holder.add(root);

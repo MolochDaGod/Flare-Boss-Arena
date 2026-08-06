@@ -148,7 +148,11 @@ function buildLoadout(race: AnnihilateRace, classId: AnnihilateClass): WarlordsL
         offCategory: swordShield ? undefined : "daggers",
         hasOffhand: true,
         offhandIsShield: swordShield,
-        hasShoulder: true,
+        hasShoulder: armor.variants.shoulders,
+        bodyLetter: armor.variants.body,
+        armsLetter: armor.variants.arms,
+        legsLetter: armor.variants.legs,
+        headLetter: armor.variants.head,
       },
       blurb: swordShield
         ? "Metal plate · sword & shield (faction primary)"
@@ -174,7 +178,11 @@ function buildLoadout(race: AnnihilateRace, classId: AnnihilateClass): WarlordsL
       portrait: {
         mainCategory: w.category,
         hasOffhand: false,
-        hasShoulder: false,
+        hasShoulder: armor.variants.shoulders,
+        bodyLetter: armor.variants.body,
+        armsLetter: armor.variants.arms,
+        legsLetter: armor.variants.legs,
+        headLetter: armor.variants.head,
       },
       blurb: `Leather · ${w.name}`,
     };
@@ -198,7 +206,11 @@ function buildLoadout(race: AnnihilateRace, classId: AnnihilateClass): WarlordsL
       portrait: {
         mainCategory: s.category,
         hasOffhand: false,
-        hasShoulder: false,
+        hasShoulder: armor.variants.shoulders,
+        bodyLetter: armor.variants.body,
+        armsLetter: armor.variants.arms,
+        legsLetter: armor.variants.legs,
+        headLetter: armor.variants.head,
       },
       blurb: `Cloth · ${s.name}`,
     };
@@ -222,7 +234,11 @@ function buildLoadout(race: AnnihilateRace, classId: AnnihilateClass): WarlordsL
     portrait: {
       mainCategory: w.category,
       hasOffhand: false,
-      hasShoulder: false,
+      hasShoulder: armor.variants.shoulders,
+      bodyLetter: armor.variants.body,
+      armsLetter: armor.variants.arms,
+      legsLetter: armor.variants.legs,
+      headLetter: armor.variants.head,
     },
     blurb: `Leather/cloth · 2H ${w.name}`,
   };

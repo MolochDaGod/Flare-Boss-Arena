@@ -23,13 +23,15 @@ import { RootMotion } from "./rootMotion";
  * exporter's per-bone axis convention.
  */
 
-type PAction = "idle" | "walk" | "attack" | "dodge" | "jump" | "hit";
+type PAction = "idle" | "walk" | "run" | "attack" | "cast" | "dodge" | "jump" | "hit";
 
 export class PlayerAnimator {
   private mixer: THREE.AnimationMixer;
   private actions: Partial<Record<PAction, THREE.AnimationAction>> = {};
   private current: PAction = "idle";
   private attacking = false;
+  private wantMoving = false;
+  private wantSprint = false;
   /** All clips available for skill playback, keyed by lowercased name. */
   private pool = new Map<string, THREE.AnimationClip>();
   /** The one-shot action currently playing (attack or a named skill clip). */
@@ -40,18 +42,47 @@ export class PlayerAnimator {
   private attackBlend: THREE.AnimationClip[] = [];
   /** Extracts in-clip root translation so the world position follows the anim. */
   private rm: RootMotion;
+  /**
+   * Meshy / pirate crew best practice: keep idle+walk+run scheduled and blend
+   * by weight from speed (no hard cut). Falls back to crossFade when only one
+   * locomotion clip exists.
+   */
+  private weightLoco: boolean;
+  private gait = 0;
+  private gaitTarget = 0;
+  /** Optional weapon / mesh sync after every clip change. */
+  onClipChange?: (clipName: string) => void;
 
   constructor(
     root: THREE.Object3D,
     clips: Partial<Record<PAction, THREE.AnimationClip>>,
     pool?: THREE.AnimationClip[],
-    opts?: { attackBlend?: THREE.AnimationClip[] },
+    opts?: { attackBlend?: THREE.AnimationClip[]; weightLoco?: boolean },
   ) {
     this.mixer = new THREE.AnimationMixer(root);
     this.rm = new RootMotion(root);
+    this.weightLoco = opts?.weightLoco ?? !!(clips.idle && clips.walk);
     (Object.keys(clips) as PAction[]).forEach((key) => {
       const clip = clips[key];
-      if (clip) this.actions[key] = this.mixer.clipAction(clip);
+      if (!clip) return;
+      // Meshy packs: drop redundant keys once
+      try {
+        clip.optimize();
+      } catch {
+        /* optional */
+      }
+      const action = this.mixer.clipAction(clip);
+      // Loop locomotion; one-shots configured on trigger
+      if (key === "idle" || key === "walk" || key === "run") {
+        action.setLoop(THREE.LoopRepeat, Infinity);
+        action.clampWhenFinished = false;
+        if (this.weightLoco) {
+          action.enabled = true;
+          action.setEffectiveWeight(key === "idle" ? 1 : 0);
+          action.play();
+        }
+      }
+      this.actions[key] = action;
     });
     for (const c of pool ?? []) {
       const key = c.name.toLowerCase();
@@ -59,9 +90,12 @@ export class PlayerAnimator {
     }
     this.attackBlend = opts?.attackBlend?.filter(Boolean) ?? [];
 
-    const idle = this.actions.idle ?? this.actions.walk;
-    if (idle) idle.reset().play();
-    this.current = this.actions.idle ? "idle" : "walk";
+    const idle = this.actions.idle ?? this.actions.walk ?? this.actions.run;
+    if (idle && !this.weightLoco) {
+      idle.reset().fadeIn(0.12).play();
+      if (this.actions.idle === idle) idle.timeScale = 1;
+    }
+    this.current = this.actions.idle ? "idle" : this.actions.walk ? "walk" : "run";
     this.syncMeshVisibility(idle?.getClip().name);
 
     this.mixer.addEventListener("finished", (e) => {
@@ -73,17 +107,25 @@ export class PlayerAnimator {
       }
       this.attacking = false;
       this.rm.end();
-      this.oneShot?.fadeOut(0.18);
+      this.oneShot?.fadeOut(0.16);
       this.oneShot = null;
-      for (const a of this.oneShotBlend) a.fadeOut(0.18);
+      for (const a of this.oneShotBlend) a.fadeOut(0.16);
       this.oneShotBlend = [];
-      // Smooth return to locomotion (crossFade preserves weight continuity).
-      this.resumeLocomotion(0.2);
+      // Smooth return to locomotion (crossFade / weight restore).
+      this.resumeLocomotion(0.18);
     });
   }
 
-  /** Cross-fade into current idle/walk without a hard cut. */
+  /** Cross-fade / weight-restore into current idle/walk without a hard cut. */
   private resumeLocomotion(fade = 0.18) {
+    if (this.weightLoco) {
+      this.applyWeightLoco(fade);
+      const name =
+        this.actions[this.current]?.getClip().name ??
+        this.actions.idle?.getClip().name;
+      if (name) this.syncMeshVisibility(name);
+      return;
+    }
     const cur = this.actions[this.current];
     if (!cur) return;
     cur.enabled = true;
@@ -94,44 +136,176 @@ export class PlayerAnimator {
 
   private syncMeshVisibility(clipName?: string) {
     const root = this.mixer.getRoot() as THREE.Object3D;
-    if (!root.userData.assetVisibilityRules?.length) return;
     const name =
       clipName ??
       this.oneShot?.getClip().name ??
       this.oneShotBlend[0]?.getClip().name ??
       this.actions[this.current]?.getClip().name;
-    if (name) {
+    if (!name) return;
+    // Clip-driven mesh hide rules (OP skins) — optional
+    if (root.userData.assetVisibilityRules?.length) {
       syncHiddenMeshesForClip(root, name);
-      syncRacalvinSwordPose(root, name);
     }
+    // Brothers' Keeper held/rest grip — always, even when no hide rules
+    syncRacalvinSwordPose(root, name);
+    this.onClipChange?.(name);
+  }
+
+  /** Resolve idle / walk / run from move + sprint intent. */
+  private locomotion(): PAction {
+    if (!this.wantMoving) return this.actions.idle ? "idle" : this.actions.walk ? "walk" : "run";
+    if (this.wantSprint && this.actions.run) return "run";
+    if (this.actions.walk) return "walk";
+    if (this.actions.run) return "run";
+    return "idle";
   }
 
   /**
-   * Best-practice locomotion blend: `crossFadeTo` so idle↔walk never pops.
-   * Fade duration scales slightly with gait change so stop/start feels soft
-   * without lagging the run cycle.
+   * Best-practice locomotion blend: weight mix (Meshy) or `crossFadeTo`.
    * Skipped while a one-shot owns the mixer.
    */
   setMoving(moving: boolean) {
-    const next: PAction = moving && this.actions.walk ? "walk" : "idle";
+    this.wantMoving = moving;
+    this.gaitTarget = moving ? (this.wantSprint ? 1 : 0.45) : 0;
+    if (this.weightLoco) this.applyWeightLoco(0.2);
+    else this.applyLocomotion(0.2);
+  }
+
+  /** Sprint intent when a run clip exists (crew / skins with run packs). */
+  setSprinting(sprinting: boolean) {
+    this.wantSprint = sprinting;
+    if (this.wantMoving) this.gaitTarget = sprinting ? 1 : 0.45;
+    if (!this.wantMoving) return;
+    if (this.weightLoco) this.applyWeightLoco(0.14);
+    else this.applyLocomotion(0.14);
+  }
+
+  /** Speed 0..1 → idle / walk / run (shared gait helper — preferred for crew). */
+  setGaitFromSpeed(speed01: number, sprinting = false) {
+    this.wantMoving = speed01 > 0.08;
+    this.wantSprint = sprinting || speed01 > 0.72;
+    this.gaitTarget = !this.wantMoving
+      ? 0
+      : this.wantSprint
+        ? 1
+        : THREE.MathUtils.clamp(speed01, 0.12, 0.85);
+    if (this.weightLoco) this.applyWeightLoco(0.16);
+    else this.applyLocomotion(0.16);
+  }
+
+  /**
+   * Simultaneous idle/walk/run weight blend (Three.js AnimationAction weights).
+   * gait 0 = idle, ~0.4 walk, 1 = run/sprint.
+   */
+  private applyWeightLoco(smooth = 0.18) {
+    if (this.attacking) return;
+    const idle = this.actions.idle;
+    const walk = this.actions.walk;
+    const run = this.actions.run;
+    if (!idle && !walk && !run) return;
+
+    // Ease gait toward target each apply (caller may call often)
+    this.gait += (this.gaitTarget - this.gait) * Math.min(1, smooth * 4);
+
+    let wi = 0;
+    let ww = 0;
+    let wr = 0;
+    const g = this.gait;
+    if (g < 0.08) {
+      wi = 1;
+    } else if (g < 0.55) {
+      const t = (g - 0.08) / 0.47;
+      wi = 1 - t;
+      ww = t;
+    } else {
+      const t = Math.min(1, (g - 0.55) / 0.45);
+      ww = 1 - t;
+      wr = t;
+    }
+    // Normalize available clips
+    if (!run) {
+      ww += wr;
+      wr = 0;
+    }
+    if (!walk) {
+      if (wr > 0) {
+        /* keep run */
+      } else wi = 1;
+      ww = 0;
+    }
+    if (!idle) {
+      ww += wi;
+      wi = 0;
+    }
+
+    const setW = (a: THREE.AnimationAction | undefined, w: number) => {
+      if (!a) return;
+      a.enabled = true;
+      a.setLoop(THREE.LoopRepeat, Infinity);
+      if (!a.isRunning()) a.play();
+      // Smooth weight (Three recommended setEffectiveWeight)
+      const cur = a.getEffectiveWeight();
+      a.setEffectiveWeight(cur + (w - cur) * Math.min(1, smooth * 3));
+      a.timeScale = w > 0.02 ? 1 : a.timeScale;
+    };
+    setW(idle, wi);
+    setW(walk, ww);
+    setW(run, wr);
+
+    this.current = wr > ww && wr > wi ? "run" : ww > wi ? "walk" : "idle";
+  }
+
+  private applyLocomotion(fade: number) {
+    if (this.weightLoco) {
+      this.applyWeightLoco(fade);
+      return;
+    }
+    const next = this.locomotion();
     if (next === this.current) return;
     const prevA = this.actions[this.current];
     const nextA = this.actions[next];
     this.current = next;
     if (this.attacking) return; // resume happens on attack finish
     if (!nextA) return;
-    // Idle→walk: snappier (0.14). Walk→idle: softer settle (0.22).
-    const fade = next === "walk" ? 0.14 : 0.22;
     nextA.enabled = true;
     nextA.setEffectiveWeight(1);
+    nextA.setLoop(THREE.LoopRepeat, Infinity);
     nextA.reset().play();
     if (prevA && prevA !== nextA) {
-      // warp=false keeps time independent so walk doesn't inherit idle phase.
-      prevA.crossFadeTo(nextA, fade, false);
+      prevA.crossFadeTo(nextA, fade, true);
     } else {
-      nextA.fadeIn(fade * 0.75);
+      nextA.fadeIn(Math.min(0.16, fade));
     }
     this.syncMeshVisibility(nextA.getClip().name);
+  }
+
+  /** Merge additional skill/locomotion clips after progressive load. */
+  addLibraryClips(clips: THREE.AnimationClip[]) {
+    for (const c of clips) {
+      const key = c.name.toLowerCase();
+      if (!this.pool.has(key)) this.pool.set(key, c);
+      // Fill missing role slots from new pack
+      const roleMap: Array<[PAction, string[]]> = [
+        ["idle", ["idle"]],
+        ["walk", ["walk"]],
+        ["run", ["run"]],
+        ["attack", ["attack", "combo", "slash"]],
+        ["cast", ["cast", "special"]],
+        ["dodge", ["dodge"]],
+        ["jump", ["jump"]],
+        ["hit", ["hit"]],
+      ];
+      for (const [role, names] of roleMap) {
+        if (this.actions[role]) continue;
+        if (names.some((n) => key === n || key.includes(n))) {
+          const a = this.mixer.clipAction(c);
+          if (role === "idle" || role === "walk" || role === "run") {
+            a.setLoop(THREE.LoopRepeat, Infinity);
+          }
+          this.actions[role] = a;
+        }
+      }
+    }
   }
 
   /** Cross-fade into a one-shot role/skill clip from locomotion. */
@@ -142,8 +316,16 @@ export class PlayerAnimator {
     action.enabled = true;
     action.setEffectiveWeight(1);
     action.fadeIn(fadeIn).play();
-    const loco = this.actions[this.current];
-    if (loco && loco !== action) loco.fadeOut(fadeIn);
+    // Drop loco weights so attack pose isn't averaged with walk (Meshy)
+    if (this.weightLoco) {
+      for (const key of ["idle", "walk", "run"] as const) {
+        const a = this.actions[key];
+        if (a && a !== action) a.fadeOut(fadeIn);
+      }
+    } else {
+      const loco = this.actions[this.current];
+      if (loco && loco !== action) loco.fadeOut(fadeIn);
+    }
     this.syncMeshVisibility(action.getClip().name);
   }
 
@@ -152,38 +334,19 @@ export class PlayerAnimator {
     return !!this.actions.attack || this.attackBlend.length > 0;
   }
 
-  /**
-   * Play a one-shot role clip (dodge / jump / hit / attack).
-   * `rootMotion: false` skips travel extraction when the engine owns dash distance.
-   */
-  triggerRole(
-    role: Exclude<PAction, "idle" | "walk">,
-    opts?: { rootMotion?: boolean },
-  ): boolean {
-    // Dodge can interrupt attack recovery; other roles wait.
-    if (this.attacking && role !== "dodge" && role !== "attack") return false;
-    if (this.attacking && role === "attack") return true;
+  /** Play a one-shot role clip (dodge / jump / hit / attack). Returns false if missing. */
+  triggerRole(role: Exclude<PAction, "idle" | "walk">): boolean {
+    if (this.attacking) return role === "attack" || role === "dodge";
     if (role === "attack") {
       this.triggerAttack();
       return this.canAttack;
-    }
-    // Allow dodge to cut an in-progress attack one-shot.
-    if (this.attacking && role === "dodge") {
-      this.oneShot?.fadeOut(0.06);
-      for (const a of this.oneShotBlend) a.fadeOut(0.06);
-      this.oneShotBlend = [];
-      this.rm.end();
-      this.attacking = false;
-      this.oneShot = null;
     }
     const a = this.actions[role];
     if (!a) return false;
     this.attacking = true;
     this.oneShot = a;
-    // Dodge/hit snap in faster so i-frames match the first frames of the clip.
-    const fade = role === "dodge" || role === "hit" ? 0.05 : 0.08;
-    this.playOneShot(a, fade);
-    if (opts?.rootMotion !== false) this.rm.begin();
+    this.playOneShot(a, 0.08);
+    this.rm.begin();
     return true;
   }
 
@@ -215,59 +378,72 @@ export class PlayerAnimator {
   }
 
   /**
-   * Play the first pool clip whose name includes one of `candidates` as a
-   * one-shot. Falls back to the attack clip only when `allowAttackFallback`
-   * is true (default) — dodge callers pass false so a missing roll never
-   * becomes a slash.
+   * Play the first pool clip matching `candidates` as a one-shot.
+   * Prefer exact name, then includes. Falls back to attack.
    */
-  triggerNamed(
-    candidates: string[],
-    opts?: { rootMotion?: boolean; allowAttackFallback?: boolean },
-  ): boolean {
-    const sorted = [...candidates].sort((a, b) => b.length - a.length);
-    const isEvade = sorted.some((c) => /dodge|roll|evade/.test(c.toLowerCase()));
-    // Evasion may cancel an in-flight attack; other one-shots still block.
+  triggerNamed(candidates: string[]): boolean {
     if (this.attacking) {
-      if (!isEvade) return true;
-      this.oneShot?.fadeOut(0.05);
-      for (const a of this.oneShotBlend) a.fadeOut(0.05);
-      this.oneShotBlend = [];
-      this.rm.end();
-      this.attacking = false;
-      this.oneShot = null;
+      // Allow dodge to cancel attack (best practice for combat feel)
+      const wantsDodge = candidates.some((c) => /dodge|roll|evade/i.test(c));
+      if (!wantsDodge) return true;
     }
     let clip: THREE.AnimationClip | undefined;
-    // Prefer longer / more specific candidate matches first.
+    const sorted = [...candidates].sort((a, b) => b.length - a.length);
+    // 1) Exact match
     for (const cand of sorted) {
       const lc = cand.toLowerCase();
-      for (const [name, c] of this.pool) {
-        if (name.includes(lc)) {
-          clip = c;
-          break;
-        }
+      const exact = this.pool.get(lc);
+      if (exact) {
+        clip = exact;
+        break;
       }
-      if (clip) break;
+    }
+    // 2) Includes match
+    if (!clip) {
+      for (const cand of sorted) {
+        const lc = cand.toLowerCase();
+        for (const [name, c] of this.pool) {
+          if (name === lc || name.includes(lc) || lc.includes(name)) {
+            clip = c;
+            break;
+          }
+        }
+        if (clip) break;
+      }
     }
     if (!clip) {
-      if (opts?.allowAttackFallback !== false && this.canAttack) {
+      if (this.canAttack) {
         this.triggerAttack();
         return true;
       }
       return false;
     }
+    // Fade out any prior one-shot
+    if (this.oneShot) this.oneShot.fadeOut(0.08);
+    for (const a of this.oneShotBlend) a.fadeOut(0.08);
+    this.oneShotBlend = [];
+
     const action = this.mixer.clipAction(clip);
     this.attacking = true;
     this.oneShot = action;
-    // Snappy entry for evasion clips; skills keep a slightly longer blend.
-    this.playOneShot(action, isEvade ? 0.05 : 0.1);
-    if (opts?.rootMotion !== false) this.rm.begin();
+    this.playOneShot(action, 0.09);
+    // Root motion for dodge / jump / lunging attacks only
+    const n = clip.name.toLowerCase();
+    if (/dodge|roll|jump|lunge|charge|slam|combo|slash|skill/.test(n)) {
+      this.rm.begin();
+    }
     return true;
   }
 
   update(delta: number) {
+    const d = Math.min(delta, 0.05);
+    // Keep gait weights tracking while moving (Meshy weighted loco)
+    if (this.weightLoco && !this.attacking) {
+      this.applyWeightLoco(0.12);
+    }
     // Clamp mixer steps so a long frame hitch doesn't explode root-motion travel.
-    this.mixer.update(Math.min(delta, 0.05));
-    this.rm.sample(Math.min(delta, 0.05));
+    this.mixer.update(d);
+    this.rm.sample(d);
   }
 
   /** World-space horizontal displacement banked from root motion this frame. */
@@ -479,26 +655,6 @@ export function buildAuthoredClips(root: THREE.Object3D): Partial<Record<PAction
     if (rFore) tracks.push(track(rFore, RIGHT, t, (x) => -0.5 - 0.4 * Math.sin((x / dur) * Math.PI)));
     if (spine) tracks.push(track(spine, UP, t, (x) => -0.25 * Math.sin((x / dur) * Math.PI)));
     if (tracks.length) out.attack = new THREE.AnimationClip("authored_attack", dur, tracks);
-  }
-
-  // ── Dodge: 0.38s crouch-roll pose (engine owns world travel) ──
-  {
-    const dur = 0.38;
-    const t = linspace(dur, 9);
-    const tracks: THREE.QuaternionKeyframeTrack[] = [];
-    const crouch = (x: number) => {
-      const p = x / dur;
-      // Dip into roll then spring up.
-      if (p < 0.35) return -0.55 * (p / 0.35);
-      if (p < 0.7) return -0.55;
-      return -0.55 * (1 - (p - 0.7) / 0.3);
-    };
-    if (spine) tracks.push(track(spine, RIGHT, t, crouch));
-    if (lThigh) tracks.push(track(lThigh, RIGHT, t, (x) => 0.7 * Math.sin((x / dur) * Math.PI)));
-    if (rThigh) tracks.push(track(rThigh, RIGHT, t, (x) => 0.55 * Math.sin((x / dur) * Math.PI + 0.4)));
-    if (lArm) tracks.push(track(lArm, RIGHT, t, (x) => 0.4 * Math.sin((x / dur) * Math.PI)));
-    if (rArm) tracks.push(track(rArm, RIGHT, t, (x) => 0.35 * Math.sin((x / dur) * Math.PI + 0.3)));
-    if (tracks.length) out.dodge = new THREE.AnimationClip("authored_dodge", dur, tracks);
   }
 
   return out;

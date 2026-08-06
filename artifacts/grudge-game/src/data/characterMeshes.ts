@@ -1,42 +1,33 @@
 /**
- * Toon-RTS character portrait manifest.
+ * Toon-RTS / grudge6 modular wardrobe (Polygon Blacksmith publisher 17894).
  *
- * Each race GLB at:
- *   https://assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters/<race>.glb
- * ships the FULL wardrobe baked into one skeleton:
+ * Production race kit (STONE ★ PLAY):
+ *   https://assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters/{raceId}.glb
+ * Author FBX (Desktop grudgeproduction/Toon_RTS):
+ *   WK_/BRB_/ELF_/DWF_/ORC_/UD_ Characters_customizable.FBX
  *
- *   • bodies     (e.g. WK_Units_Body_A..E)
- *   • heads      (Units_Head_A..N — count varies per race)
- *   • arms       (Units_Arms_A..E)
- *   • legs       (Units_Legs_A..D)
- *   • shoulderpads (Units_Shoulderpads_A..F)
- *   • weapons    (sword/bow/staff/axe/hammer/spear/dagger/mace/pick variants)
- *   • shields    (Shield_A..D)
- *   • xtras      (Xtra_quiver / Xtra_bag / Xtra_wood)
+ * Each kit ships the FULL wardrobe on one Bip001 skeleton:
+ *   • bodies / heads / arms / legs / shoulderpads (letter variants A…)
+ *   • weapons: sword, bow, staff, axe, hammer, spear, dagger, pick (NO "weapon_" prefix on author)
+ *   • shields · bag · wood · quiver (when present)
  *
- * ALL meshes are visible by default in the GLB — that's why an unfiltered
- * character looks like a walking armoury (every weapon at once). We therefore
- * compute the SET OF MESHES THAT SHOULD BE VISIBLE for a given race + equip
- * loadout, and the renderer hides everything else.
+ * Author names (meta SSOT) — examples:
+ *   WK_Units_Body_A · WK_Units_sword_A · WK_Units_Bow · WK_Units_shield_A
+ *   ELF_Sword_A · ELF_Bow · ELF_Units_Head_A
+ *   BRB_body_A · BRB_sword_A (no Units_ infix)
  *
- * Mesh naming is class-prefixed and not perfectly consistent across races:
- *   • human:     `WK_…`        (Units_Body_A, Units_head_A — mixed case)
- *   • elf:       `ELF_…`       (Units_Body_A, Units_Head_A)
- *   • dwarf:     `DWF_…`       (Units_Body_A, Units_Head_A)
- *   • orc:       `ORC_…`       (Units_Body_A, Units_Head_A)
- *   • undead:    `UD_…`        (Units_body_A, Units_head_A)
- *   • barbarian: `BRB_…`       (no `Units_` infix — just `body_A`, `head_A`)
- *
- * All matching here is case-insensitive and infix-tolerant.
+ * ALL meshes are visible by default — unfiltered kit = walking armoury.
+ * resolveVisibleMeshes() = one body/head/arms/legs + class weapon/shield only.
  */
 
 export type RaceId = "human" | "elf" | "dwarf" | "orc" | "undead" | "barbarian";
 
-const ROOT = "https://assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters";
+const TOON_RTS_CDN =
+  "https://assets.grudge-studio.com/asset-packs/toon-rts-characters/glb/characters";
 
-/** Canonical URL for the race's portrait GLB. */
+/** Canonical URL for the race's production kit GLB (Toon RTS ★ — keep in sync with grudge6Assets.raceGlbUrl). */
 export function PORTRAIT_URL(race: RaceId): string {
-  return `${ROOT}/${race}.glb`;
+  return `${TOON_RTS_CDN}/${race}.glb`;
 }
 
 /** Human-readable mesh prefix per race (documentation only). */
@@ -51,33 +42,42 @@ type Role =
   | "weapon_hammer" | "weapon_mace" | "weapon_spear" | "weapon_dagger" | "weapon_pick"
   | "shield" | "quiver" | "bag" | "wood";
 
-/** Categorise one mesh name. Returns `null` for skeleton bones / unknowns. */
+/**
+ * Categorise one mesh name. Returns `null` for skeleton bones / unknowns.
+ *
+ * Polygon Blacksmith Toon RTS does **not** use a `weapon_` prefix on kit parts
+ * (author: `WK_Units_sword_A`, `ELF_Bow`). Older bakes may still use `weapon_*`.
+ */
 function classify(name: string): Role | null {
   const n = name.toLowerCase();
-  // Weapons — check before generic body parts so e.g. "shoulderpads" doesn't
-  // accidentally swallow a weapon match.
-  if (/weapon.*staff/.test(n))  return "weapon_staff";
-  if (/weapon.*bow/.test(n))    return "weapon_bow";
-  if (/weapon.*sword/.test(n))  return "weapon_sword";
-  if (/weapon.*mace/.test(n))   return "weapon_mace";
-  if (/weapon.*hammer/.test(n)) return "weapon_hammer";
-  if (/weapon.*axe/.test(n))    return "weapon_axe";
-  if (/weapon.*spear/.test(n))  return "weapon_spear";
-  if (/weapon.*dagger/.test(n)) return "weapon_dagger";
-  if (/weapon.*pick/.test(n))   return "weapon_pick";
-  // Exclude scene-graph helpers like `L_shield_container` / `R_hand_container`
-  // — only true wardrobe shield meshes go in the shield bucket.
+  if (/container|auxscene|forgescene|armature/.test(n)) return null;
+
+  // Extras before body (bag/wood names are simple)
+  if (/quiver/.test(n)) return "quiver";
+  if (/(^|_)bag($|_)|xtra.*bag|units_bag/.test(n)) return "bag";
+  if (/(^|_)wood($|_)|xtra.*wood|units_wood/.test(n)) return "wood";
+  if (/shoulderpads|shoulder_pad/.test(n)) return "shoulder";
+
+  // Shields — wardrobe only (not L_shield_container)
   if (/shield/.test(n) && !/container/.test(n)) return "shield";
-  if (/xtra.*quiver/.test(n))   return "quiver";
-  if (/xtra.*bag/.test(n))      return "bag";
-  if (/xtra.*wood/.test(n))     return "wood";
-  if (/shoulderpads/.test(n))   return "shoulder";
-  // Body parts. Match `body_X`, `Units_Body_X`, etc.  Place AFTER weapons so
-  // we don't grab a sub-string like "body" inside an unrelated name.
-  if (/(^|_)body(_|$)/.test(n))     return "body";
-  if (/(^|_)head(_|$)/.test(n))     return "head";
-  if (/(^|_)arms(_|$)/.test(n))     return "arms";
-  if (/(^|_)legs(_|$)/.test(n))     return "legs";
+
+  // Weapons — author + optional weapon_ prefix
+  // Order: staff before "sword" false positives; pick before generic "axe" tools ok
+  if (/staff|weapon_staff/.test(n)) return "weapon_staff";
+  if (/\bbow\b|_bow($|_)|weapon_bow|crossbow/.test(n)) return "weapon_bow";
+  if (/dagger|weapon_dagger/.test(n)) return "weapon_dagger";
+  if (/spear|weapon_spear|lance/.test(n)) return "weapon_spear";
+  if (/hammer|weapon_hammer/.test(n)) return "weapon_hammer";
+  if (/mace|weapon_mace|club/.test(n)) return "weapon_mace";
+  if (/\bpick\b|_pick($|_)|weapon_pick|mining/.test(n)) return "weapon_pick";
+  if (/\baxe\b|_axe($|_)|weapon_axe|greataxe/.test(n)) return "weapon_axe";
+  if (/sword|weapon_sword|blade/.test(n)) return "weapon_sword";
+
+  // Body parts — `body_X`, `Units_Body_X`, `BRB_body_A`
+  if (/(^|_)body(_|$)/.test(n)) return "body";
+  if (/(^|_)head(_|$)/.test(n)) return "head";
+  if (/(^|_)arms(_|$)/.test(n)) return "arms";
+  if (/(^|_)legs(_|$)/.test(n)) return "legs";
   return null;
 }
 
@@ -187,6 +187,14 @@ export interface PortraitEquip {
   hasShoulder?: boolean;
   /** Optional armor variant seed offset for body/arms/legs picks. */
   armorSeed?: number;
+  /**
+   * Prefer mesh letter from Warlords T0 / author kit (Body_A plate, B leather, C cloth).
+   * Matches Toon RTS suffix `_A` … `_N` on Units_Body / head / arms / legs.
+   */
+  bodyLetter?: string;
+  armsLetter?: string;
+  legsLetter?: string;
+  headLetter?: string | null;
 }
 
 /** Cheap, deterministic hash for picking variants by character name. */
@@ -203,6 +211,25 @@ function seedHash(s: string): number {
 function pick(list: string[], seed: number, offset = 0): string | undefined {
   if (list.length === 0) return undefined;
   return list[(seed + offset) % list.length];
+}
+
+/** Prefer author letter suffix (`_A`, `_B`…) then fall back to seed pick. */
+function pickLetter(
+  list: string[],
+  letter: string | null | undefined,
+  seed: number,
+  offset = 0,
+): string | undefined {
+  if (list.length === 0) return undefined;
+  if (letter) {
+    const L = letter.toUpperCase();
+    const hit = list.find((n) => {
+      const m = n.match(/_([A-Za-z])$/);
+      return m != null && m[1]!.toUpperCase() === L;
+    });
+    if (hit) return hit;
+  }
+  return pick(list, seed, offset);
 }
 
 /**
@@ -222,17 +249,16 @@ export function resolveVisibleMeshes(
   seedStr: string,
 ): Set<string> {
   const b = bucket(allMeshNames);
-  const seed = seedHash(seedStr || "warlord");
+  const seed = seedHash(seedStr || "warlord") + (equip.armorSeed ?? 0);
   const visible = new Set<string>();
 
   const add = (name: string | undefined) => { if (name) visible.add(name); };
 
-  // Base avatar — pick one of each, offset by a different multiplier so the
-  // same seed doesn't always pick e.g. "A" across the board.
-  add(pick(b.body, seed, 0));
-  add(pick(b.head, seed, 1));
-  add(pick(b.arms, seed, 2));
-  add(pick(b.legs, seed, 3));
+  // Base avatar — Warlords armor letters when set (plate A / leather B / cloth C)
+  add(pickLetter(b.body, equip.bodyLetter, seed, 0));
+  add(pickLetter(b.head, equip.headLetter ?? equip.bodyLetter, seed, 1));
+  add(pickLetter(b.arms, equip.armsLetter, seed, 2));
+  add(pickLetter(b.legs, equip.legsLetter, seed, 3));
 
   if (equip.hasShoulder) add(pick(b.shoulder, seed, 4));
 

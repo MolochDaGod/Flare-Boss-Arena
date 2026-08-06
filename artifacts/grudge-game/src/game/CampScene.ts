@@ -1,10 +1,13 @@
 import * as THREE from "three";
 import {
+  bindKtx2,
   createFrameTimer,
   createGltfLoader,
   disposeRenderer,
   FLARE_SHADOW_TYPE,
+  sharedGltfLoader,
 } from "@/game/threeSetup";
+import { loadGLTFCached } from "@/game/assets";
 import {
   disposeObject3D,
   loadActiveFighterModel,
@@ -33,11 +36,6 @@ import { CAMP_PROP_PLACEMENTS } from "../data/worldProps";
 import { loadWorldProp, disposeWorldProp, type LoadedWorldProp } from "./WorldPropLoader";
 import { canDodge } from "./combatInput";
 import {
-  resolveDodge,
-  dodgeClipCandidates,
-  DODGE_IFRAME_S,
-} from "./dodgeMath";
-import {
   CAMP_STATION_BY_ID,
   campSceneCoord,
   CAMP_YARD_BOUNDS,
@@ -49,8 +47,7 @@ import {
 import { CAMP_TILEABLE_FLOOR, CAMP_TILEABLE_SCATTER } from "../data/tileablePixelPack";
 import { buildTileableCamp, type TileablePackHandle } from "./TileablePackLoader";
 import { createCampSky, type CampSkyHandle } from "./CampSky";
-import { makeGroundMaterial, makeRockField, makeTerrainSkirt } from "./proceduralTextures";
-import { buildOrcCamp, type CampHandle } from "./CampBuilder";
+import { CampSurface } from "./CampSurface";
 
 export type CampStationId =
   | "anvil"
@@ -191,8 +188,6 @@ export class CampScene {
   private playerFacing = 0;
   private playerSpeed = 6;
   private lastDodgeAt = 0;
-  /** ms timestamp — unused for camp damage but drains root-motion double-dash. */
-  private dodgeIframeUntil = 0;
 
   private stations: CampStation[] = [];
   private campfireLight!: THREE.PointLight;
@@ -206,7 +201,8 @@ export class CampScene {
 
   // ── Perk machines, collectable symbols, environment props ──
   private worldProps: LoadedWorldProp[] = [];
-  private propLoader = createGltfLoader();
+  /** One production GLTFLoader (Draco/Meshopt/KTX2) for the whole camp. */
+  private propLoader = sharedGltfLoader();
 
   // ── Combat / testing-ground ──
   private dummies: CampDummy[] = [];
@@ -251,10 +247,11 @@ export class CampScene {
   private options: CampSceneOptions;
   private _engaged = false;
   private tileableHandle: TileablePackHandle | null = null;
-  private groundMesh: THREE.Mesh | null = null;
-  private terrainMesh: THREE.Mesh | null = null;
-  private rockField: THREE.InstancedMesh | null = null;
-  private orcCamp: CampHandle | null = null;
+  /** MeshBVH terrain + optional Rapier ground — capital harbor surface. */
+  private surface: CampSurface | null = null;
+  private playerFootY = 0;
+  /** Walkable cube-foundation top (props/buildings sit here, not meshed through tiles). */
+  private foundationTopY = 0.22;
 
   constructor(options: CampSceneOptions = {}) {
     this.options = options;
@@ -277,7 +274,6 @@ export class CampScene {
 
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0x8eb8e8, 40, 160);
-    this.skillVfx = new SkillVfx(this.scene, createGltfLoader());
     this.timer.connect(document);
     this.telegraphs = new TelegraphField(this.scene);
     this.particles = new ParticleVfx(this.scene);
@@ -296,6 +292,10 @@ export class CampScene {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     container.appendChild(this.renderer.domElement);
+    // KTX2 / Basis needs a live renderer for GPU support detection — bind before asset fan-out.
+    bindKtx2(this.renderer);
+    this.propLoader = createGltfLoader({ renderer: this.renderer });
+    this.skillVfx = new SkillVfx(this.scene, this.propLoader);
     this.bloom = makeBloomComposer(this.renderer, this.scene, this.camera, w, h, {
       strength: 0.48,
       radius: 0.42,
@@ -306,9 +306,10 @@ export class CampScene {
     });
 
     this.campSky = createCampSky({ scene: this.scene, renderer: this.renderer });
-    this.buildEnvironment();
+    // Capital island surface: MeshBVH ground + Rapier slab (async)
+    this.surface = new CampSurface({ bounds: this.BOUNDS, scene: this.scene });
+    void this.surface.initRapier();
     this.buildTileableWorld();
-    this.loadOrcCampDecor();
     this.buildStations();
     this.loadTown();
     this.buildWorldProps();
@@ -316,6 +317,8 @@ export class CampScene {
     this.buildDummies();
     this.buildTownsfolk();
     this.loadPlayer();
+    // Initial collider bake (ground pad + stations + dummies)
+    this.rebuildSurfaceColliders();
     this.emitState();
 
     window.addEventListener("resize", this.onResize);
@@ -338,103 +341,68 @@ export class CampScene {
     applyOrthoFrustum(this.camera, this.isoCam.d, w / h);
   }
 
-  /**
-   * Real Three.js terrain stack (same family as dungeon / boss arena):
-   * cobble playable plane + noise heightmap skirt + instanced rock field.
-   * Tileable pixel props stream on top; this is the solid ground even if GLBs lag.
-   */
-  private buildEnvironment() {
-    const aniso = this.renderer.capabilities.getMaxAnisotropy();
-    const yard = this.BOUNDS;
-
-    // Flat cobble yard — always present, receives shadows, walkable y≈0.
-    const groundMat = makeGroundMaterial(Math.max(8, Math.round(yard / 3)), aniso);
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(yard * 2.05, yard * 2.05),
-      groundMat,
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = 0;
-    ground.receiveShadow = true;
-    ground.name = "camp_ground";
-    this.scene.add(ground);
-    this.groundMesh = ground;
-
-    // Heightmap foothills + ridge outside the walkable square (Chebyshev mask).
-    const skirt = makeTerrainSkirt(yard, Math.max(280, yard * 8), 160, -0.06);
-    skirt.name = "camp_terrain_skirt";
-    this.scene.add(skirt);
-    this.terrainMesh = skirt;
-
-    // Rocks ring the yard edge / hills (one InstancedMesh).
-    const rocks = makeRockField(200, yard * 0.72, yard + 28);
-    rocks.mesh.name = "camp_rock_field";
-    this.scene.add(rocks.mesh);
-    this.rockField = rocks.mesh;
-
-    // Edge marker stones along the walkable square (reads as a real yard).
-    const edgeGeom = new THREE.DodecahedronGeometry(0.85, 0);
-    const edgeMat = new THREE.MeshStandardMaterial({
-      color: 0x2a241c,
-      roughness: 1,
-      flatShading: true,
-    });
-    const per = 14;
-    const total = per * 4;
-    const edgeInst = new THREE.InstancedMesh(edgeGeom, edgeMat, total);
-    const m = new THREE.Matrix4();
-    const edge = yard - 0.75;
-    let idx = 0;
-    for (let side = 0; side < 4; side++) {
-      for (let i = 0; i < per; i++) {
-        const t = (i / Math.max(1, per - 1)) * 2 - 1;
-        let x = 0;
-        let z = 0;
-        if (side === 0) {
-          x = t * edge;
-          z = -edge;
-        } else if (side === 1) {
-          x = t * edge;
-          z = edge;
-        } else if (side === 2) {
-          x = -edge;
-          z = t * edge;
-        } else {
-          x = edge;
-          z = t * edge;
-        }
-        const s = 0.5 + (i % 5) * 0.14;
-        m.compose(
-          new THREE.Vector3(x, s * 0.32, z),
-          new THREE.Quaternion().setFromEuler(new THREE.Euler(i * 0.4, i * 0.9, i * 0.25)),
-          new THREE.Vector3(s, s * 0.75, s),
-        );
-        edgeInst.setMatrixAt(idx++, m);
-      }
-    }
-    edgeInst.castShadow = true;
-    edgeInst.receiveShadow = true;
-    this.scene.add(edgeInst);
-  }
-
-  /** Modular grass/stone tiles + scatter props (async) on top of real terrain. */
+  /** Graphed cube foundations + nature/walls on pad tops — rebuilds MeshBVH when ready. */
   private buildTileableWorld() {
-    const loader = createGltfLoader();
-    this.tileableHandle = buildTileableCamp(loader, this.scene, {
+    this.tileableHandle = buildTileableCamp(this.propLoader, this.scene, {
       floor: { ...CAMP_TILEABLE_FLOOR, bounds: this.BOUNDS },
       scatter: CAMP_TILEABLE_SCATTER,
+      onReady: (_group, foundationTopY) => {
+        if (this.disposed) return;
+        this.foundationTopY = foundationTopY;
+        // Lift already-placed stations / props / town buildings onto foundation tops
+        this.snapSceneToFoundations();
+        this.rebuildSurfaceColliders();
+      },
     });
   }
 
-  /** Orc RTS prop atlas (cabins, piles, palisade) as outer-camp decoration. */
-  private loadOrcCampDecor() {
-    const loader = createGltfLoader();
-    const url = `${import.meta.env.BASE_URL}models/buildings/orc_camp_set.glb`;
-    // Scale down so atlas radii fit the ~36u yard (props stay outside the inner ring).
-    this.orcCamp = buildOrcCamp(loader, this.scene, url, {
-      scale: 0.55,
-      name: "camp_orc_decor",
+  /** Raise holders that were placed at y=0 so they rest on cube foundation tops. */
+  private snapSceneToFoundations() {
+    const y = this.foundationTopY;
+    for (const s of this.stations) {
+      s.group.position.y = y;
+      s.position.y = y;
+    }
+    for (const d of this.dummies) {
+      d.group.position.y = y;
+    }
+    for (const p of this.worldProps) {
+      p.holder.position.y = y;
+    }
+    this.scene.traverse((o) => {
+      if (o.userData?.campBuildingHolder) {
+        o.position.y = y;
+      }
     });
+  }
+
+  /** Bake ground pad + tileable props + station shells into MeshBVH. */
+  private rebuildSurfaceColliders() {
+    if (!this.surface) return;
+    const roots: THREE.Object3D[] = [];
+    if (this.tileableHandle?.group) roots.push(this.tileableHandle.group);
+    for (const s of this.stations) roots.push(s.group);
+    for (const d of this.dummies) roots.push(d.group);
+    this.surface.rebuildFromRoots(roots);
+  }
+
+  /** Snap feet to BVH floor + slide off walls; clamp to harbor radius. */
+  private resolvePlayerOnSurface() {
+    if (!this.surface) {
+      const B = this.BOUNDS - 1;
+      this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x));
+      this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z));
+      this.playerFootY = 0;
+      return;
+    }
+    this.surface.clampXZ(this.playerPos, 1);
+    this.surface.collideHorizontal(this.playerPos, 0.42, 1.8);
+    this.playerFootY = this.surface.sampleFloorY(
+      this.playerPos.x,
+      this.playerPos.z,
+      this.playerFootY + 2.5,
+    );
+    this.playerPos.y = this.playerFootY;
   }
 
   private buildCampfire() {
@@ -490,7 +458,7 @@ export class CampScene {
   /** Populate the training-ground town with neutral KayKit NPCs that idle and
    *  wander. They carry no `enemyId`, so they can never be targeted or hit. */
   private buildTownsfolk() {
-    const loader = createGltfLoader();
+    const loader = this.propLoader;
     for (const a of CAMP_YARD_KAYKIT_NPCS) {
       const t = new Townsperson(loader, {
         home: new THREE.Vector3(a.x, 0, a.z),
@@ -506,7 +474,7 @@ export class CampScene {
       const pos = campSceneCoord(f.x, f.z, this.BOUNDS);
       const npc = new FighterTownsperson(loader, {
         skinId: f.skinId,
-        home: new THREE.Vector3(pos.x, 0, pos.z),
+        home: new THREE.Vector3(pos.x, this.foundationTopY, pos.z),
         wanderRadius: ((f.wanderRadius ?? 5) * this.BOUNDS) / 90,
         faceY: f.faceY,
       });
@@ -517,7 +485,7 @@ export class CampScene {
 
   private makeDummy(id: string, name: string, x: number, z: number): CampDummy {
     const group = new THREE.Group();
-    group.position.set(x, 0, z);
+    group.position.set(x, this.foundationTopY, z);
 
     const mats: THREE.MeshStandardMaterial[] = [];
     const postMat = new THREE.MeshStandardMaterial({ color: 0x4a3520, roughness: 0.9 });
@@ -574,7 +542,7 @@ export class CampScene {
       id,
       name,
       group,
-      pos: new THREE.Vector3(x, 0, z),
+      pos: new THREE.Vector3(x, this.foundationTopY, z),
       hp: 500,
       maxHp: 500,
       alive: true,
@@ -599,7 +567,7 @@ export class CampScene {
     const z = Math.sin(a) * this.STATION_RADIUS;
 
     const group = new THREE.Group();
-    group.position.set(x, 0, z);
+    group.position.set(x, this.foundationTopY, z);
 
     // Glowing ground pad (pulses) marking where to stand.
     const ringMat = new THREE.MeshBasicMaterial({
@@ -645,7 +613,7 @@ export class CampScene {
       id,
       label,
       hint,
-      position: new THREE.Vector3(x, 0, z),
+      position: new THREE.Vector3(x, this.foundationTopY, z),
       color,
       group,
       glow,
@@ -680,12 +648,13 @@ export class CampScene {
     for (const def of this.STATION_DEFS) this.addStation(def);
   }
 
-  /** Perk machines, gumball, weapon panel, trenches — from `worldProps` catalog. */
+  /** Perk machines, gumball, weapon panel, trenches — on foundation tops. */
   private buildWorldProps() {
+    const fy = this.foundationTopY;
     for (const place of CAMP_PROP_PLACEMENTS) {
       const pos = campSceneCoord(place.x, place.z, this.BOUNDS);
       const loaded = loadWorldProp(place.propId, this.propLoader, {
-        position: new THREE.Vector3(pos.x, 0, pos.z),
+        position: new THREE.Vector3(pos.x, fy, pos.z),
         rotationY: place.rotY,
       });
       this.scene.add(loaded.holder);
@@ -710,7 +679,7 @@ export class CampScene {
   ): CampStation {
     const { id, label, hint, color } = def;
     const group = new THREE.Group();
-    group.position.set(x, 0, z);
+    group.position.set(x, this.foundationTopY, z);
 
     const ringMat = new THREE.MeshBasicMaterial({
       color,
@@ -753,7 +722,7 @@ export class CampScene {
       id,
       label,
       hint,
-      position: new THREE.Vector3(x, 0, z),
+      position: new THREE.Vector3(x, this.foundationTopY, z),
       color,
       group,
       glow,
@@ -763,20 +732,15 @@ export class CampScene {
   }
 
   /**
-   * Stream the fishing-town GLB and place each named building at its
-   * interaction's angle, facing the camp centre. The town is an ATLAS — every
-   * building is modelled stacked at the origin — so each is cloned out and
-   * normalised individually. Non-fatal: if the load fails, the glowing pads +
-   * labels still mark every interaction.
+   * Stream fishing_town.glb and place each station building on foundation tops.
+   * Atlas meshes are stacked at origin — clone + normalize per building, then
+   * seat feet on cube foundation (not meshed through tiles).
    */
   private loadTown() {
-    const loader = createGltfLoader();
     const url = `${import.meta.env.BASE_URL}models/buildings/fishing_town.glb`;
-    loader.load(
-      url,
+    loadGLTFCached(this.propLoader, url).then(
       (gltf) => {
         if (this.disposed) {
-          disposeObject3D(gltf.scene);
           return;
         }
         gltf.scene.updateWorldMatrix(true, true);
@@ -793,8 +757,8 @@ export class CampScene {
           const z = Math.sin(a) * this.BUILDING_RADIUS;
           this.scene.add(this.placeBuilding(src, x, z));
         }
+        this.rebuildSurfaceColliders();
       },
-      undefined,
       () => {
         /* non-fatal — the camp still works with beacons + labels only */
       },
@@ -818,12 +782,11 @@ export class CampScene {
   }
 
   /**
-   * Clone a building subtree out of the atlas, bake its world matrix (preserving
-   * the glTF Y-up axis correction), normalise it to a fixed footprint with feet
-   * at y=0, and wrap it in a holder placed at + facing the camp centre.
+   * Clone a building from the fishing_town atlas, normalize footprint, seat feet
+   * on cube foundation tops (foundationTopY) — never stack at atlas origin.
    */
   private placeBuilding(src: THREE.Object3D, x: number, z: number): THREE.Group {
-    const TARGET = 4.2; // world-unit footprint — buildings readable, not stadium-sized
+    const TARGET = 5.5; // world-unit footprint (max of width/depth)
     src.updateWorldMatrix(true, false);
 
     const clone = src.clone(true);
@@ -840,11 +803,16 @@ export class CampScene {
     const center = box.getCenter(new THREE.Vector3());
     const footprint = Math.max(size.x, size.z) || 1;
 
-    // Recentre footprint over the origin and drop feet to the ground.
+    // Recentre footprint; feet at local y=0 under pivot
     clone.position.x -= center.x;
     clone.position.z -= center.z;
     clone.position.y -= box.min.y;
     pivot.scale.setScalar(TARGET / footprint);
+
+    // Second pass after scale — feet exact
+    pivot.updateMatrixWorld(true);
+    const b2 = new THREE.Box3().setFromObject(pivot);
+    pivot.position.y -= b2.min.y;
 
     pivot.traverse((o) => {
       const mesh = o as THREE.Mesh;
@@ -855,7 +823,10 @@ export class CampScene {
     });
 
     const holder = new THREE.Group();
-    holder.position.set(x, 0, z);
+    holder.name = `camp_building_${src.name}`;
+    holder.userData.campBuildingHolder = true;
+    // Sit ON foundation cubes, not meshed through them
+    holder.position.set(x, this.foundationTopY, z);
     holder.rotation.y = Math.atan2(-x, -z); // face camp centre
     holder.add(pivot);
     return holder;
@@ -880,10 +851,9 @@ export class CampScene {
   }
 
   private loadPlayer() {
-    const loader = createGltfLoader();
     // Prefer the globally-selected fighter skin; fall back to the KayKit hero.
     loadActiveFighterModel(
-      loader,
+      this.propLoader,
       2.6,
       (root, anim) => {
         if (this.disposed) {
@@ -970,12 +940,10 @@ export class CampScene {
       }
     }
 
-    // Otherwise move to the ground point.
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    const hit = new THREE.Vector3();
-    if (raycaster.ray.intersectPlane(plane, hit)) {
-      hit.x = Math.max(-this.BOUNDS + 1, Math.min(this.BOUNDS - 1, hit.x));
-      hit.z = Math.max(-this.BOUNDS + 1, Math.min(this.BOUNDS - 1, hit.z));
+    // MeshBVH ground pick (capital terrain) — falls back to y=0 plane inside CampSurface
+    const hit = this.surface?.floorPickFromRay(raycaster.ray) ?? null;
+    if (hit) {
+      this.surface?.clampXZ(hit, 1);
       this.playerTarget = hit;
       this.attackTarget = null;
     }
@@ -1019,40 +987,19 @@ export class CampScene {
     requestAnimationFrame(step);
   }
 
-  /**
-   * Dodge roll — WASD+Shift directional, Shift alone away from nearest dummy.
-   * Distance is engine-controlled (see dodgeMath); anim is visual only.
-   */
+  /** Dodge roll — quick dash in the facing direction + animation. */
   doDodge() {
     const now = performance.now();
     if (!canDodge(this.lastDodgeAt, now)) return;
     this.lastDodgeAt = now;
     this.playerTarget = null;
-    this.attackTarget = null;
-
-    const threats = this.dummies
-      .filter((d) => d.alive)
-      .map((d) => ({ x: d.pos.x, z: d.pos.z }));
-
-    const dash = resolveDodge({
-      keys: this.keys,
-      facingYaw: this.playerFacing,
-      playerX: this.playerPos.x,
-      playerZ: this.playerPos.z,
-      threats,
-      threatRange: 18,
-    });
-
-    this.playerFacing = Math.atan2(dash.dirX, dash.dirZ);
-    const B = this.BOUNDS - 1;
-    this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + dash.dirX * dash.distance));
-    this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + dash.dirZ * dash.distance));
-
-    const clips = dodgeClipCandidates(dash.relative);
-    if (!this.heroAnim?.triggerNamed(clips)) {
-      this.heroAnim?.trigger("dodge");
-    }
-    this.dodgeIframeUntil = now + DODGE_IFRAME_S * 1000;
+    // Dodge clips carry their own forward lunge via root motion; only dash
+    // manually when the active model has no dodge clip (e.g. fighter skins).
+    if (this.heroAnim?.trigger("dodge")) return;
+    const forward = new THREE.Vector3(Math.sin(this.playerFacing), 0, Math.cos(this.playerFacing));
+    this.playerPos.x += forward.x * 2.4;
+    this.playerPos.z += forward.z * 2.4;
+    this.resolvePlayerOnSurface();
   }
 
   /** Provide resolved HUD skills so archetypes map to real skill flavor. */
@@ -1263,9 +1210,8 @@ export class CampScene {
     let moving = false;
     if (raw.length() > 0) {
       raw.normalize();
-      const B = this.BOUNDS - 1;
-      this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + raw.x * this.playerSpeed * delta));
-      this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + raw.y * this.playerSpeed * delta));
+      this.playerPos.x += raw.x * this.playerSpeed * delta;
+      this.playerPos.z += raw.y * this.playerSpeed * delta;
       this.playerTarget = null;
       this.attackTarget = null;
       this.playerFacing = Math.atan2(raw.x, raw.y);
@@ -1295,20 +1241,20 @@ export class CampScene {
       }
     }
 
-    // Dodge distance is engine-applied; drain RM during i-frames so clips
-    // cannot double-travel. Other one-shots still contribute root motion.
-    if (this.heroAnim) {
-      const dodging = performance.now() < this.dodgeIframeUntil;
-      if (this.heroAnim.consumeRootMotion(this._rmTmp) && !dodging) {
-        const B = this.BOUNDS - 1;
-        this.playerPos.x = Math.max(-B, Math.min(B, this.playerPos.x + this._rmTmp.x));
-        this.playerPos.z = Math.max(-B, Math.min(B, this.playerPos.z + this._rmTmp.z));
-      }
+    // Root motion: let lunging/dodge/jump clips carry the logical position so
+    // the mesh moves WITH the character instead of sliding and snapping back.
+    if (this.heroAnim && this.heroAnim.consumeRootMotion(this._rmTmp)) {
+      this.playerPos.x += this._rmTmp.x;
+      this.playerPos.z += this._rmTmp.z;
     }
 
+    // MeshBVH foot height + wall slide + harbor clamp
+    this.resolvePlayerOnSurface();
+    this.surface?.stepRapier(delta);
+
     if (this.playerGroup) {
-      const targetPos = new THREE.Vector3(this.playerPos.x, 0, this.playerPos.z);
-      this.playerGroup.position.lerp(targetPos, 0.3);
+      const targetPos = new THREE.Vector3(this.playerPos.x, this.playerFootY, this.playerPos.z);
+      this.playerGroup.position.lerp(targetPos, 0.35);
       this.playerGroup.rotation.y += (this.playerFacing - this.playerGroup.rotation.y) * 0.2;
     }
 
@@ -1331,8 +1277,7 @@ export class CampScene {
     }
 
     // Resource regen.
-    // Out-of-combat style mana regen (camp is a training hub)
-    this.playerMana = Math.min(this.playerMaxMana, this.playerMana + (8 + this.playerLevel * 0.4) * delta);
+    this.playerMana = Math.min(this.playerMaxMana, this.playerMana + 14 * delta);
     this.playerHp = Math.min(this.playerMaxHp, this.playerHp + 6 * delta);
 
     // Animator state.
@@ -1607,26 +1552,8 @@ export class CampScene {
     this.worldProps = [];
     this.tileableHandle?.dispose();
     this.tileableHandle = null;
-    this.orcCamp?.dispose();
-    this.orcCamp = null;
-    const freeMesh = (mesh: THREE.Mesh | THREE.InstancedMesh | null) => {
-      if (!mesh) return;
-      mesh.geometry?.dispose();
-      const mat = mesh.material;
-      const list = Array.isArray(mat) ? mat : mat ? [mat] : [];
-      for (const m of list) {
-        for (const v of Object.values(m)) {
-          if (v && (v as THREE.Texture).isTexture) (v as THREE.Texture).dispose();
-        }
-        m.dispose();
-      }
-    };
-    freeMesh(this.groundMesh);
-    freeMesh(this.terrainMesh);
-    freeMesh(this.rockField);
-    this.groundMesh = null;
-    this.terrainMesh = null;
-    this.rockField = null;
+    this.surface?.dispose();
+    this.surface = null;
     this.embers = [];
     this.vfx = [];
     this.dummies = [];

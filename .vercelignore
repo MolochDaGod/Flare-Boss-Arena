@@ -1,0 +1,6 @@
+# Fat intermediate Meshy withSkin packs live only under prod/ during convert.
+# Deploy uses slim base + skeleton-only anim (Racalvin pattern).
+artifacts/grudge-game/public/models/crew/**/prod/**
+*.psd
+*.fbx
+node_modules

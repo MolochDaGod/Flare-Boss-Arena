@@ -146,8 +146,8 @@ function FighterStage({ fighter }: { fighter: FighterDef }) {
 
 const WAR_ROOM: { href: string; label: string; sub: string; icon: React.ElementType }[] = [
   { href: "/select", label: "Choose Fighter", sub: "Active champion", icon: Users },
-  { href: "/party", label: "Party Allies", sub: "Up to 2 Grudge6 units", icon: PawPrint },
-  { href: "/equipment", label: "Stone Sockets", sub: "8 attribute stones", icon: Sparkles },
+  { href: "/party", label: "Party Allies", sub: "Recruit · rank · ally tomes", icon: PawPrint },
+  { href: "/equipment", label: "Equipment", sub: "Sockets · status icons · frost UI", icon: Sparkles },
   { href: "/skills", label: "Grimoire", sub: "Skill ranks", icon: ScrollText },
   { href: "/perks", label: "Perks", sub: "Combat machines", icon: Flame },
   { href: "/pvp", label: "PvP Arena", sub: "Fleet multiplayer", icon: Swords },
@@ -307,18 +307,18 @@ export default function Home() {
             <Button
               variant="outline"
               className="h-auto flex-col gap-1 border-primary/40 py-4 font-serif tracking-widest text-primary hover:bg-primary/10"
-              onClick={() => setLocation("/game")}
+              onClick={() => setLocation("/camp")}
             >
-              <Swords className="h-5 w-5" />
-              <span className="text-xs">Enter World</span>
+              <Tent className="h-5 w-5" />
+              <span className="text-xs">Capital Harbor</span>
             </Button>
             <Button
               variant="outline"
               className="h-auto flex-col gap-1 border-primary/40 py-4 font-serif tracking-widest text-primary hover:bg-primary/10"
-              onClick={() => setLocation("/camp")}
+              onClick={() => setLocation("/game")}
             >
-              <Tent className="h-5 w-5" />
-              <span className="text-xs">Visit Camp</span>
+              <Swords className="h-5 w-5" />
+              <span className="text-xs">Enter World</span>
             </Button>
             <Button
               variant="outline"

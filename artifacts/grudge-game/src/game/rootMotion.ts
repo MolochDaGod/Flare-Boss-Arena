@@ -51,6 +51,8 @@ export class RootMotion {
   private active = false;
   private pendingEnd = false;
   private accum = new THREE.Vector3();
+  /** Smoothed residual applied next frames after clip end (no pop). */
+  private residual = new THREE.Vector3();
 
   constructor(root: THREE.Object3D) {
     this.bone = findRootMotionBone(root);
@@ -100,7 +102,16 @@ export class RootMotion {
    */
   sample(delta: number) {
     const b = this.bone;
-    if (!this.active || !b) return;
+    if (!this.active || !b) {
+      // Soft residual after one-shot ends (eases last step instead of hard stop)
+      if (this.residual.lengthSq() > 1e-8) {
+        const decay = 1 - Math.exp(-14 * Math.max(0.001, delta));
+        this.accum.x += this.residual.x * decay;
+        this.accum.z += this.residual.z * decay;
+        this.residual.multiplyScalar(1 - decay);
+      }
+      return;
+    }
     const cur = b.position;
     if (this.prev) {
       const dx = cur.x - this.prev.x;
@@ -108,18 +119,19 @@ export class RootMotion {
       // Guard against clip-start / cross-fade discontinuities producing a jump.
       // Scale the per-frame limit by how long this frame was vs a 60 FPS step.
       // Skill lunges can move ~1–2 m over a second; allow a generous per-frame cap.
-      const lim = 1.4 * Math.max(1, delta * 60);
+      const lim = 1.25 * Math.max(1, delta * 60);
       if (Math.abs(dx) < lim && Math.abs(dz) < lim) {
         const parent = b.parent;
         if (parent) {
           parent.updateWorldMatrix(true, false);
           parent.matrixWorld.decompose(_pos, _quat, _scl);
           _d.set(dx, 0, dz).multiply(_scl).applyQuaternion(_quat);
-          this.accum.x += _d.x;
-          this.accum.z += _d.z;
+          // Slight low-pass so mesh translation doesn't jitter on noisy tracks
+          this.accum.x += _d.x * 0.92;
+          this.accum.z += _d.z * 0.92;
         } else {
-          this.accum.x += dx;
-          this.accum.z += dz;
+          this.accum.x += dx * 0.92;
+          this.accum.z += dz * 0.92;
         }
       }
       this.prev.set(cur.x, cur.y, cur.z);
@@ -130,6 +142,9 @@ export class RootMotion {
     b.position.z = this.bindZ;
     // Disarm only after the terminal frame's delta has been banked above.
     if (this.pendingEnd) {
+      // Park remaining accum into residual for 1–2 frames of ease-out
+      this.residual.x += this.accum.x * 0.35;
+      this.residual.z += this.accum.z * 0.35;
       this.active = false;
       this.pendingEnd = false;
       this.prev = null;

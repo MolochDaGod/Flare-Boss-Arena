@@ -3,12 +3,10 @@
  * Level is account-persisted only when the fighter is owned via Flare Grudge Token.
  */
 import type { FighterDef } from "./fighters";
-import { getActiveFighter } from "./fighters";
+import { getActiveFighter, SCOURGE_ID, JOHN_WAYNE_ID, RACALVIN_ID } from "./fighters";
 import { getGameLoadout } from "./gameCombat";
 import { getFighterLevel, isOwned } from "./flareEconomy";
-import { getEquipmentLoadout } from "./equipmentLoadout";
-import { getAttributeAllocations } from "./attributePoints";
-import { ATTR_ORDER } from "./fighters";
+import { parseAnnihilateHeroId } from "./annihilateHeroes";
 
 /** Virtual character shape consumed by dungeon/camp/boss stat helpers. */
 export interface PlayableCharacter {
@@ -26,47 +24,61 @@ export interface PlayableCharacter {
 
 function fighterAttributes(fighter: FighterDef): Record<string, number> {
   const s = fighter.stats;
-  const spent = getAttributeAllocations(fighter.id);
-  const label: Record<(typeof ATTR_ORDER)[number], string> = {
-    strength: "Strength",
-    vitality: "Vitality",
-    dexterity: "Dexterity",
-    agility: "Agility",
-    endurance: "Endurance",
-    intellect: "Intellect",
-    tactics: "Tactics",
-    wisdom: "Wisdom",
+  return {
+    Strength: s.strength,
+    Vitality: s.vitality,
+    Dexterity: s.dexterity,
+    Agility: s.agility,
+    Endurance: s.endurance,
+    Intellect: s.intellect,
+    Tactics: s.tactics,
+    Wisdom: s.wisdom,
   };
-  const out: Record<string, number> = {};
-  for (const k of ATTR_ORDER) {
-    out[label[k]] = (s[k] ?? 0) + (spent[k] ?? 0);
+}
+
+/**
+ * Resolve race / class for HUD, traveler tutorial, and reticle.
+ * - g6_{race}_{class} → Warlords race + class
+ * - Racalvin crew → pirate race + combat role
+ * - One Piece / default → human + role slug
+ */
+export function resolveFighterRaceClass(fighter: FighterDef): { race: string; classId: string } {
+  const g6 = parseAnnihilateHeroId(fighter.id);
+  if (g6) {
+    return { race: g6.race, classId: g6.classId };
   }
-  return out;
+  if (fighter.id === RACALVIN_ID) {
+    return { race: "human", classId: "corsair_king" };
+  }
+  if (fighter.id === SCOURGE_ID) {
+    return { race: "human", classId: "chain_tank" };
+  }
+  if (fighter.id === JOHN_WAYNE_ID) {
+    return { race: "human", classId: "ranged_engineer" };
+  }
+  // Role label slug — feeds CombatCrosshair keyword matching (gunner, mage, …)
+  return {
+    race: "human",
+    classId: fighter.role.toLowerCase().replace(/\s+/g, "_"),
+  };
 }
 
 /** Build the active fighter as a virtual character for 3D scenes + HUD. */
 export function playableCharacterFromFighter(fighter: FighterDef): PlayableCharacter {
   const loadout = getGameLoadout(fighter.id);
   const owned = isOwned(fighter.id);
-  const gear = getEquipmentLoadout(fighter.id);
-  const equipment: Record<string, string | undefined> = {
-    mainHand: gear.Mainhand?.id ?? loadout.weapon.id,
-    offHand: gear.Offhand?.id,
-    helm: gear.Helm?.id,
-    chest: gear.Chest?.id,
-  };
+  const { race, classId } = resolveFighterRaceClass(fighter);
   return {
     id: fighter.id,
     name: fighter.name,
-    // Role label only — not a Warlords race/class creation choice.
-    class: fighter.role.toLowerCase().replace(/\s+/g, "_"),
-    race: "human",
-    // Level only from account if owned; weekly free always reads as 1.
+    class: classId,
+    race,
+    // Level only from account if owned; weekly free / starter free always reads as 1.
     level: owned ? getFighterLevel(fighter.id) : 1,
     owned,
     faction: "flare-boss-arena",
     attributes: fighterAttributes(fighter),
-    equipment,
+    equipment: { mainHand: loadout.weapon.id },
   };
 }
 

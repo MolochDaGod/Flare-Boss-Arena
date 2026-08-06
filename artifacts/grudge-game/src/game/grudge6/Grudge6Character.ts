@@ -1,17 +1,43 @@
 /**
- * Grudge6 ally prefab loader — production D1 pipeline:
- * CDN race GLB → SkeletonUtils clone → atlas texture → mesh allow-list → baked Bip001 clips.
+ * Grudge6 / Toon RTS prefab loader — STONE SSOT pipeline:
+ * production GLB → SkeletonUtils clone → **unifySkeletons** → force uniform mesh
+ * scales → race atlas (flipY=false) → mesh_ids allow-list → Box3 feet ground →
+ * art-forward +π/2 → baked Bip001 clips.
+ *
+ * Without unifySkeletons the kit has ~14 disconnected skins and looks stretched /
+ * half T-pose. See grudge-character-correctness + Open grudge/skeleton.ts.
  */
 
 import * as THREE from "three";
-import { clone as cloneSkinnedHierarchy } from "three/addons/utils/SkeletonUtils.js";
+import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import { createGltfLoader } from "@/game/threeSetup";
+import { loadGLTFCached } from "@/game/assets";
 import type { RaceId } from "../../data/characterMeshes";
+import { resolveVisibleMeshes } from "../../data/characterMeshes";
 import type { Grudge6HeroDef } from "../../data/grudge6Roster";
-import { animPackForRole, raceAtlasUrl, raceGlbUrl, targetHeightForRace } from "../../data/grudge6Assets";
+import {
+  animPackForRole,
+  raceAtlasUrl,
+  raceGlbUrl,
+  raceGlbUrlCandidates,
+  roleForClass,
+  targetHeightForRace,
+  type ToonColorSet,
+} from "../../data/grudge6Assets";
+import {
+  defaultColorSetForHero,
+  raceColorAtlasUrl,
+} from "../../data/toonRtsColorSets";
+import { getWarlordsLoadout } from "../../data/warlordsEquipment";
+import type { AnnihilateClass } from "../../data/annihilateHeroes";
 import { PlayerAnimator, buildAuthoredClips } from "../PlayerAnimator";
 import { loadBakedPackForAlly } from "./bakedAnimLoader";
 import { Grudge6AllyAnimator } from "./Grudge6AllyAnimator";
+import { forceUniformMeshScales, unifySkeletons } from "./skeleton";
+import { applyToonRtsMaterials } from "./toonRtsMaterials";
+
+/** Toon RTS FBX art faces +X; controller walks +Z — apply once on group. */
+export const GRUDGE6_ART_FORWARD_YAW = Math.PI / 2;
 
 /** Shared animator API for party allies (baked gait or authored fallback). */
 export interface AllyAnimatorLike {
@@ -29,6 +55,8 @@ export interface Grudge6PrefabDebug {
   race: RaceId;
   glbUrl: string;
   atlasUrl: string;
+  /** Toon RTS Materials/Colors set (blue/red/green…). */
+  colorSet: ToonColorSet;
   animPack: string;
   targetHeight: number;
   boneCount: number;
@@ -74,19 +102,90 @@ export function applyMeshAllowList(root: THREE.Object3D, allow: string[]) {
   });
 }
 
+/** Skinned body only — ignore hidden equip for height/feet (grudge6-full-stack). */
+function bodyBox(root: THREE.Object3D): THREE.Box3 {
+  const box = new THREE.Box3();
+  let any = false;
+  root.updateMatrixWorld(true);
+  root.traverse((o) => {
+    const m = o as THREE.SkinnedMesh;
+    if (!m.isSkinnedMesh || !m.visible) return;
+    if (!any) {
+      box.setFromObject(m, true);
+      any = true;
+    } else box.expandByObject(m);
+  });
+  if (!any) box.setFromObject(root, true);
+  return box;
+}
+
+/**
+ * Uniform SI height fit from skinned body min.y (feet) — never non-uniform
+ * axes (stretch) and never pelvis-as-feet.
+ */
 function fitFeetOrigin(model: THREE.Object3D, targetHeight: number) {
   model.updateWorldMatrix(true, true);
-  const box = new THREE.Box3().setFromObject(model);
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  if (size.y > 0.001) model.scale.setScalar(targetHeight / size.y);
+  // Force parent scale uniform before measuring
+  {
+    const sx = Math.abs(model.scale.x) || 1;
+    const sy = Math.abs(model.scale.y) || 1;
+    const sz = Math.abs(model.scale.z) || 1;
+    const base = (sx + sy + sz) / 3;
+    model.scale.setScalar(base);
+  }
+  let box = bodyBox(model);
+  const size = box.getSize(new THREE.Vector3());
+  if (size.y > 0.001) {
+    // Decade unit snap first (classic 100×) then residual fit — unclamped decade
+    const decade = Math.pow(10, Math.round(Math.log10(targetHeight / size.y)));
+    let s = decade;
+    model.scale.multiplyScalar(s);
+    model.updateWorldMatrix(true, true);
+    box = bodyBox(model);
+    const size2 = box.getSize(new THREE.Vector3());
+    if (size2.y > 0.001) {
+      const residual = targetHeight / size2.y;
+      // Aesthetic residual only — clamp so we never explode partial allow-lists
+      const clamped = THREE.MathUtils.clamp(residual, 0.35, 3.5);
+      model.scale.multiplyScalar(clamped);
+    }
+  }
   model.updateWorldMatrix(true, true);
-  const box2 = new THREE.Box3().setFromObject(model);
-  const center = new THREE.Vector3();
-  box2.getCenter(center);
+  box = bodyBox(model);
+  const center = box.getCenter(new THREE.Vector3());
   model.position.x -= center.x;
   model.position.z -= center.z;
-  model.position.y -= box2.min.y;
+  model.position.y -= box.min.y;
+  model.updateWorldMatrix(true, true);
+  // Second pass: feet exact after scale/center
+  box = bodyBox(model);
+  model.position.y += 0 - box.min.y;
+}
+
+function listAllMeshNames(root: THREE.Object3D): string[] {
+  const names: string[] = [];
+  root.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh && o.name) names.push(o.name);
+  });
+  return names;
+}
+
+/** Build mesh allow-list from Warlords T0 loadout (body/arms/legs/weapon) — not empty. */
+function meshAllowForPlayer(
+  model: THREE.Object3D,
+  race: RaceId,
+  classId: string,
+  displayName: string,
+): string[] {
+  const all = listAllMeshNames(model);
+  try {
+    const gear = getWarlordsLoadout(race as never, classId as AnnihilateClass);
+    const vis = resolveVisibleMeshes(all, race, gear.portrait, displayName);
+    if (vis.size >= 3) return [...vis];
+  } catch {
+    /* fall through */
+  }
+  return [];
 }
 
 /** Reset skinned meshes to bind pose before applying baked clips (prevents T-pose pop). */
@@ -99,7 +198,7 @@ export function resetSkeletonBindPose(scene: THREE.Object3D) {
 }
 
 function cloneGLTFScene(source: THREE.Object3D): THREE.Group {
-  const clone = cloneSkinnedHierarchy(source) as THREE.Group;
+  const clone = SkeletonUtils.clone(source) as THREE.Group;
   clone.traverse((node) => {
     const mesh = node as THREE.Mesh;
     if (!mesh.isMesh || !mesh.material) return;
@@ -110,24 +209,55 @@ function cloneGLTFScene(source: THREE.Object3D): THREE.Group {
   return clone;
 }
 
+/**
+ * Role-aware wardrobe when Warlords resolve fails — matches Polygon Blacksmith
+ * author mesh names (sword_A / Bow / staff_A, not weapon_*).
+ */
 function fallbackAllowFromRace(root: THREE.Object3D, def: Grudge6HeroDef): string[] {
   const names: string[] = [];
   root.traverse((o) => {
     if ((o as THREE.Mesh).isMesh && o.name) names.push(o.name);
   });
   const pick = (re: RegExp) => names.find((n) => re.test(n.toLowerCase()));
-  const body = pick(/body_[a-e]$|units_body/);
-  const head = pick(/head_[a-n]$|units_head/);
-  const arms = pick(/arms_[a-e]$|units_arms/);
-  const legs = pick(/legs_[a-d]$|units_legs/);
+  const body = pick(/(^|_)body(_[a-z])?$/i) ?? pick(/body/);
+  const head = pick(/(^|_)head(_[a-z])?$/i) ?? pick(/head/);
+  const arms = pick(/(^|_)arms(_[a-z])?$/i) ?? pick(/arms/);
+  const legs = pick(/(^|_)legs(_[a-z])?$/i) ?? pick(/legs/);
   const out = [body, head, arms, legs].filter(Boolean) as string[];
+
+  const addWeapon = (re: RegExp) => {
+    const w = names.find((n) => re.test(n.toLowerCase()) && !/container/i.test(n));
+    if (w && !out.includes(w)) out.push(w);
+  };
+
   if (def.weaponMesh) {
     const w =
       names.find((n) => n.toLowerCase() === def.weaponMesh!.toLowerCase()) ??
-      names.find((n) => n.toLowerCase().includes(def.weaponMesh!.toLowerCase().replace(/^[^_]+_/, "")));
+      names.find((n) =>
+        n.toLowerCase().includes(def.weaponMesh!.toLowerCase().replace(/^[^_]+_/, "")),
+      );
     if (w) out.push(w);
+  } else {
+    // Class / role → author weapon (Toon RTS meta names)
+    switch (def.role) {
+      case "ranger":
+        addWeapon(/\bbow\b|_bow($|_)|crossbow/);
+        break;
+      case "healer":
+        addWeapon(/staff/);
+        break;
+      case "bruiser":
+        addWeapon(/\baxe\b|_axe|hammer|mace|club/);
+        break;
+      case "tank":
+      case "fighter":
+      case "skirmisher":
+      default:
+        addWeapon(/sword|blade/);
+        break;
+    }
   }
-  if (def.role === "tank") {
+  if (def.role === "tank" || def.role === "fighter") {
     const sh = names.find((n) => /shield/i.test(n) && !/container/i.test(n));
     if (sh) out.push(sh);
   }
@@ -155,71 +285,85 @@ function listVisibleMeshes(root: THREE.Object3D): string[] {
   return out;
 }
 
-const atlasCache = new Map<RaceId, THREE.Texture>();
+/** Cache by race + color set (color atlases are full recolored textures). */
+const atlasCache = new Map<string, THREE.Texture>();
 const raceSceneCache = new Map<RaceId, { scene: THREE.Group; loading?: Promise<THREE.Group> }>();
-
-function loadGltf(url: string, loader: ReturnType<typeof createGltfLoader>): Promise<THREE.Group> {
-  return new Promise((resolve, reject) => {
-    loader.load(url, (g) => resolve(g.scene), undefined, (e) => reject(e));
-  });
-}
 
 async function loadRaceScene(race: RaceId, loader: ReturnType<typeof createGltfLoader>): Promise<THREE.Group> {
   const hit = raceSceneCache.get(race);
   if (hit?.scene && !hit.loading) return hit.scene;
   if (hit?.loading) return hit.loading;
 
-  const p = loadGltf(raceGlbUrl(race), loader).then((scene) => {
-    raceSceneCache.set(race, { scene });
-    return scene;
-  });
+  const p = (async () => {
+    const urls = raceGlbUrlCandidates(race);
+    let lastErr: unknown;
+    for (const url of urls) {
+      try {
+        const gltf = await loadGLTFCached(loader, url);
+        const scene = gltf.scene as THREE.Group;
+        raceSceneCache.set(race, { scene });
+        return scene;
+      } catch (e) {
+        lastErr = e;
+        if (import.meta.env.DEV) {
+          console.warn(`[grudge6] race GLB fail ${url}`, e);
+        }
+      }
+    }
+    throw lastErr ?? new Error(`No Toon RTS race GLB for ${race}`);
+  })();
   raceSceneCache.set(race, { scene: new THREE.Group(), loading: p });
   return p;
 }
 
-async function loadRaceAtlas(race: RaceId): Promise<THREE.Texture | null> {
-  const cached = atlasCache.get(race);
-  if (cached) return cached;
+async function loadRaceAtlas(
+  race: RaceId,
+  colorSet: ToonColorSet = "standard",
+): Promise<{ tex: THREE.Texture; tint: number; url: string } | null> {
+  const cacheKey = `${race}:${colorSet}`;
+  const cached = atlasCache.get(cacheKey);
+  if (cached) {
+    const meta = raceColorAtlasUrl(race, colorSet);
+    return { tex: cached, tint: meta.tint, url: raceAtlasUrl(race, colorSet) };
+  }
 
-  const url = raceAtlasUrl(race);
+  const url = raceAtlasUrl(race, colorSet);
+  const meta = raceColorAtlasUrl(race, colorSet);
+  // If color set has no local atlas, use CDN standard + soft tint
+  const finalUrl = url || raceAtlasUrl(race, "standard");
+  const tint = meta.source === "local_color" ? 0xffffff : meta.tint;
+
   return new Promise((resolve) => {
     const loader = new THREE.TextureLoader();
     loader.setCrossOrigin("anonymous");
     loader.load(
-      url,
+      finalUrl,
       (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.flipY = true;
-        atlasCache.set(race, tex);
-        resolve(tex);
+        atlasCache.set(cacheKey, tex);
+        resolve({ tex, tint, url: finalUrl });
       },
       undefined,
-      () => resolve(null),
+      () => {
+        // Fallback: standard CDN if color atlas 404 (one hop only)
+        if (colorSet !== "standard") {
+          const stdUrl = raceAtlasUrl(race, "standard");
+          loader.load(
+            stdUrl,
+            (tex) => {
+              atlasCache.set(`${race}:standard`, tex);
+              resolve({
+                tex,
+                tint: raceColorAtlasUrl(race, colorSet).tint,
+                url: stdUrl,
+              });
+            },
+            undefined,
+            () => resolve(null),
+          );
+        } else resolve(null);
+      },
     );
   });
-}
-
-function applyAtlasToScene(scene: THREE.Object3D, atlas: THREE.Texture): number {
-  let patched = 0;
-  scene.traverse((child) => {
-    const mesh = child as THREE.Mesh;
-    if (!mesh.isMesh || !mesh.material || !mesh.geometry?.attributes?.uv) return;
-    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    for (const mat of mats) {
-      if (!mat) continue;
-      const m = mat as THREE.MeshStandardMaterial & { isMeshBasicMaterial?: boolean };
-      m.map = atlas;
-      if (m.color) m.color.set(0xffffff);
-      if (m.isMeshBasicMaterial) {
-        m.toneMapped = false;
-      }
-      if (typeof m.metalness === "number") m.metalness = Math.min(m.metalness, 0.3);
-      if (typeof m.roughness === "number") m.roughness = Math.max(m.roughness, 0.5);
-      m.needsUpdate = true;
-      patched++;
-    }
-  });
-  return patched;
 }
 
 async function buildAnimator(
@@ -265,21 +409,26 @@ async function buildAnimator(
 
 /**
  * Spawn a Grudge6 hero instance with proper mesh, texture, and animation prefab.
+ * Applies Toon RTS color sets + author material recipe (metal 0 / gloss 0).
  */
 export async function createGrudge6Character(
   def: Grudge6HeroDef,
   loader: ReturnType<typeof createGltfLoader>,
-  opts: { height?: number } = {},
+  opts: { height?: number; colorSet?: ToonColorSet } = {},
 ): Promise<Grudge6Instance> {
   const t0 = performance.now();
   const height = opts.height ?? targetHeightForRace(def.race);
+  const colorSet =
+    opts.colorSet ??
+    defaultColorSetForHero({ race: def.race, role: def.role, faction: def.faction });
   const group = new THREE.Group();
   group.name = def.id;
 
   const debug: Grudge6PrefabDebug = {
     race: def.race,
     glbUrl: raceGlbUrl(def.race),
-    atlasUrl: raceAtlasUrl(def.race),
+    atlasUrl: raceAtlasUrl(def.race, colorSet),
+    colorSet,
     animPack: animPackForRole(def.role),
     targetHeight: height,
     boneCount: 0,
@@ -294,6 +443,7 @@ export async function createGrudge6Character(
 
   const raceScene = await loadRaceScene(def.race, loader);
   const model = cloneGLTFScene(raceScene);
+  model.userData.importPipeline = "fbx-atlas";
   model.traverse((child) => {
     const mesh = child as THREE.Mesh;
     if (mesh.isMesh) {
@@ -303,24 +453,109 @@ export async function createGrudge6Character(
     }
   });
 
-  const allow = def.meshSample.length >= 3 ? def.meshSample : fallbackAllowFromRace(model, def);
-  applyMeshAllowList(model, allow);
+  // 1) Unify ~14 disconnected skins onto one Bip001 chain (CRITICAL — stretch/T-pose)
+  const unified = unifySkeletons(model);
+  if (!unified) {
+    debug.errors.push("unifySkeletons failed — multi-skin kit may not animate");
+  }
 
-  const atlas = await loadRaceAtlas(def.race);
-  if (atlas) {
-    debug.texturedSlots = applyAtlasToScene(model, atlas);
+  // 2) Kill non-uniform mesh scales (heads ship 2.41×2.54×2.54 → stretch)
+  const fixedScales = forceUniformMeshScales(model);
+  if (fixedScales > 0) {
+    debug.errors.push(`normalized ${fixedScales} non-uniform mesh scale(s)`);
+  }
+
+  // 3) Mesh allow-list: roster sample → Warlords class loadout → race fallback
+  let allow =
+    def.meshSample.length >= 3 ? [...def.meshSample] : [];
+  if (allow.length < 3) {
+    const classId =
+      (def as Grudge6HeroDef & { classId?: string }).classId ??
+      def.id.replace(/^player_[^_]+_/, "") ??
+      "warrior";
+    allow = meshAllowForPlayer(model, def.race, classId, def.displayName);
+  }
+  if (allow.length < 3) {
+    allow = fallbackAllowFromRace(model, def);
+  }
+  // Always force at least one body + one weapon when role expects it (Toon RTS SSOT)
+  if (allow.length) {
+    const allNames = listAllMeshNames(model);
+    const hasBody = allow.some((n) => /body/i.test(n));
+    if (!hasBody) {
+      const b = allNames.find((n) => /body/i.test(n));
+      if (b) allow.push(b);
+    }
+    const hasWeapon = allow.some((n) =>
+      /sword|bow|staff|axe|hammer|spear|dagger|mace|shield/i.test(n),
+    );
+    if (!hasWeapon && def.role !== "unarmed") {
+      const fb = fallbackAllowFromRace(model, def);
+      for (const n of fb) {
+        if (/sword|bow|staff|axe|hammer|spear|dagger|mace|shield/i.test(n) && !allow.includes(n)) {
+          allow.push(n);
+        }
+      }
+    }
+  }
+  applyMeshAllowList(model, allow);
+  // Re-show any allow-list mesh that ended hidden (equip exclusivity bugs)
+  model.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || !o.name) return;
+    const want = allow.some(
+      (a) =>
+        o.name.toLowerCase() === a.toLowerCase() ||
+        o.name.toLowerCase().endsWith(a.toLowerCase()) ||
+        a.toLowerCase().endsWith(o.name.toLowerCase()),
+    );
+    if (want) {
+      m.visible = true;
+      m.frustumCulled = false;
+    }
+  });
+
+  // 4) Toon RTS color set atlas + author material (metal 0 · gloss 0 · white plate)
+  const atlasPack = await loadRaceAtlas(def.race, colorSet);
+  if (atlasPack) {
+    debug.atlasUrl = atlasPack.url;
+    debug.texturedSlots = applyToonRtsMaterials(model, {
+      atlas: atlasPack.tex,
+      tintHex: atlasPack.tint,
+      forceStandard: true,
+    });
   } else {
     debug.errors.push(`Atlas failed: ${debug.atlasUrl}`);
   }
 
+  // 5) Uniform height fit + feet ground (skinned body only)
   fitFeetOrigin(model, height);
   group.add(model);
+  // Art-forward once on GROUP (Toon RTS art +X → controller walks +Z) — never double-yaw model+group
+  group.rotation.y = GRUDGE6_ART_FORWARD_YAW;
+  group.userData.artForwardSet = true;
+  group.userData.artForwardYaw = GRUDGE6_ART_FORWARD_YAW;
+  model.userData.artForwardSet = true;
 
   debug.boneCount = countBones(model);
   debug.visibleMeshes = listVisibleMeshes(model);
+  if (debug.boneCount < 10) {
+    debug.errors.push(`Low bone count (${debug.boneCount}) — expect Bip001 skeleton`);
+  }
 
   resetSkeletonBindPose(model);
   const animator = await buildAnimator(model, def, debug);
+  // Re-ground feet after first idle sample (position tracks stripped in baked path)
+  if (animator) {
+    try {
+      animator.update(1 / 30);
+      model.updateWorldMatrix(true, true);
+      const box = bodyBox(model);
+      model.position.y += 0 - box.min.y;
+    } catch {
+      /* non-fatal */
+    }
+  }
   debug.loadMs = Math.round(performance.now() - t0);
 
   const dispose = () => {
@@ -341,9 +576,49 @@ export async function createGrudge6Character(
 export class Grudge6Factory {
   private loader = createGltfLoader();
 
-  async create(def: Grudge6HeroDef, height?: number) {
+  async create(def: Grudge6HeroDef, height?: number, colorSet?: ToonColorSet) {
     return createGrudge6Character(def, this.loader, {
       height: height ?? targetHeightForRace(def.race),
+      colorSet,
     });
+  }
+
+  /**
+   * Player spawn from race + class (camp / dungeon / boss).
+   * Uses production race kit + Bip001 baked pack + Toon RTS color set.
+   * Never KayKit/Mixamo player path.
+   */
+  async createPlayer(opts: {
+    race: RaceId;
+    classId: string;
+    displayName?: string;
+    height?: number;
+    colorSet?: ToonColorSet;
+  }) {
+    const role = roleForClass(opts.classId);
+    const def: Grudge6HeroDef & { classId: string } = {
+      id: `player_${opts.race}_${opts.classId}`,
+      index: 0,
+      rootIndex: 0,
+      race: opts.race,
+      faction: "player",
+      role,
+      displayName: opts.displayName ?? `${opts.race} ${opts.classId}`,
+      weaponMesh: null,
+      // Filled after clone via resolveVisibleMeshes (Warlords T0) in createGrudge6Character
+      meshSample: [],
+      meshCount: 0,
+      brain: "bodyguard",
+      classId: opts.classId,
+      kit: {
+        damage: 18,
+        attackRange: role === "ranger" ? 18 : role === "healer" ? 14 : 2.6,
+        attackCd: 1.0,
+        healAmount: role === "healer" ? 40 : 0,
+        healCd: 6,
+        skillMult: 1.15,
+      },
+    };
+    return this.create(def, opts.height, opts.colorSet);
   }
 }

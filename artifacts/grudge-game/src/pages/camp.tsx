@@ -492,11 +492,11 @@ function Camp() {
             className="absolute top-14 left-1/2 -translate-x-1/2 z-10 pointer-events-none"
           >
             <div className="bg-black/75 border border-white/10 rounded px-5 py-3 text-center backdrop-blur-sm space-y-1">
-              <p className="text-[10px] font-serif text-primary uppercase tracking-widest mb-1">Grudge Harbor</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Explore the town — WASD / Arrows</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">SE Yard — spar dummies · F to attack</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">West Sigil — Boss Arena · South — Dungeon</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">E — Engage stations · C — War Panel</p>
+              <p className="text-[10px] font-serif text-primary uppercase tracking-widest mb-1">Capital Harbor · Start Island</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">WASD / click ground (MeshBVH) · Wheel zoom</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">SE Yard — spar dummies · F attack · Shift dodge</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">West Sigil — Boss · South portal — Dungeon islands</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">E — Stations · C — War Panel</p>
             </div>
           </motion.div>
         )}

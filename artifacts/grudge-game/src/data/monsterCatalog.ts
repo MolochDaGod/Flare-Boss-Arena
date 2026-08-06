@@ -11,7 +11,7 @@ import type { Archetype } from "../game/EnemyFactory";
 import { ANIMATED_MONSTER_TEMPLATES, MONSTER_TEMPLATES } from "../game/MonsterModels";
 import { CDN_ANIMATED_TEMPLATES, CDN_MONSTER_TEMPLATES } from "./cdnMonsters";
 
-export type MonsterFaction = "undead" | "dark_elf" | "arachnid" | "beast" | "orc" | "void" | "neutral";
+export type MonsterFaction = "undead" | "dark_elf" | "arachnid" | "beast" | "orc" | "void" | "neutral" | "voxel";
 export type MonsterSource = "ummorpg" | "local_glb" | "cdn" | "procedural";
 
 export interface CatalogEntry {
@@ -154,11 +154,36 @@ index(DARK_ELF_TEMPLATES);
 index(SPIDER_TEMPLATES);
 index(SKELETON_TEMPLATES);
 
+/** Voxel / pixel humanoid roster (local GLB multi-clip). */
+export const VOXEL_TEMPLATES: CatalogEntry[] = [
+  {
+    id: "mon_pixel_morocc",
+    name: "Pixel Morocc",
+    type: "voxel",
+    tier: 2,
+    hp: 240,
+    damage: 18,
+    faction: "voxel",
+    source: "local_glb",
+    archetype: "humanoid",
+  },
+];
+
+index(VOXEL_TEMPLATES);
+
 for (const t of MONSTER_TEMPLATES) {
   if (!CATALOG_BY_ID.has(t.id)) {
+    const faction: MonsterFaction =
+      t.type === "arachnid"
+        ? "arachnid"
+        : t.type === "undead"
+          ? "undead"
+          : t.type === "voxel"
+            ? "voxel"
+            : "beast";
     CATALOG_BY_ID.set(t.id, {
       ...t,
-      faction: t.type === "arachnid" ? "arachnid" : t.type === "undead" ? "undead" : "beast",
+      faction,
       source: "local_glb",
       archetype: (t.type === "arachnid" ? "arachnid" : "humanoid") as Archetype,
     });
@@ -205,6 +230,7 @@ export function catalogAsTemplates(
 export const DARK_ELF_SPAWN_TEMPLATES = catalogAsTemplates(DARK_ELF_TEMPLATES);
 export const SPIDER_SPAWN_TEMPLATES = catalogAsTemplates(SPIDER_TEMPLATES);
 export const SKELETON_SPAWN_TEMPLATES = catalogAsTemplates(SKELETON_TEMPLATES);
+export const VOXEL_SPAWN_TEMPLATES = catalogAsTemplates(VOXEL_TEMPLATES);
 /** Prefer animated local mon packs that still have clips. */
 export const UMMORPG_ANIMATED_SPAWN = ANIMATED_MONSTER_TEMPLATES.filter(
   (t) => !t.id.startsWith("kit_"),

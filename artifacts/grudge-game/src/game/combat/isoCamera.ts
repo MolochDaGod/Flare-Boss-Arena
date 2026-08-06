@@ -47,9 +47,19 @@ export function createIsoCameraState(opts: {
 /** Wheel handler: scroll up zooms in (smaller frustum). Shift = larger step. */
 export function isoCameraWheel(state: IsoCameraState, e: WheelEvent, step = 0.8, fast = 1.6) {
   e.preventDefault();
+  // Normalize pixel/line/page deltas so trackpads and mice feel similar
+  let lines = e.deltaY;
+  if (e.deltaMode === 0) lines = e.deltaY / 40;
+  else if (e.deltaMode === 2) lines = Math.sign(e.deltaY) * 16;
   const s = e.shiftKey ? fast : step;
-  const dir = Math.sign(e.deltaY);
-  state.dTarget = THREE.MathUtils.clamp(state.dTarget + dir * s, state.dMin, state.dMax);
+  // Fractional zoom for smooth trackpad; clamp step so one notch isn't huge
+  const amount = THREE.MathUtils.clamp(lines * (s * 0.55), -s * 2.2, s * 2.2);
+  state.dTarget = THREE.MathUtils.clamp(state.dTarget + amount, state.dMin, state.dMax);
+}
+
+/** Snap zoom target back to default ortho half-height (MMB). */
+export function isoCameraResetZoom(state: IsoCameraState, defaultD = 16) {
+  state.dTarget = THREE.MathUtils.clamp(defaultD, state.dMin, state.dMax);
 }
 
 export function applyOrthoFrustum(camera: THREE.OrthographicCamera, d: number, aspect: number) {

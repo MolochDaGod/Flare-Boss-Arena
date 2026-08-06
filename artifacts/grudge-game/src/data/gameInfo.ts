@@ -111,7 +111,7 @@ export const UPGRADES_GUIDE = {
     {
       label: "Party allies",
       route: "/party" as const,
-      detail: "Bring up to 2 Grudge6 allies into the dungeon.",
+      detail: "Recruit with gold, rank kits, bind spellbook ally skills — up to 2 in the field.",
     },
     {
       label: "Rewards",
@@ -128,19 +128,23 @@ export const CONTROLS_GUIDE = {
       heading: "Movement & camera",
       rows: [
         { keys: "WASD / Arrows", action: "Move (isometric)" },
-        { keys: "Click ground", action: "Move to point" },
-        { keys: "Mouse wheel", action: "Zoom in / out" },
+        { keys: "LMB click ground", action: "Move to point" },
+        { keys: "LMB hold", action: "Drag-move under cursor" },
+        { keys: "Mouse wheel", action: "Zoom in / out (smooth)" },
         { keys: "Shift + wheel", action: "Fast zoom" },
+        { keys: "MMB", action: "Reset zoom" },
+        { keys: "Ctrl + move", action: "Sprint gait (run clip)" },
       ],
     },
     {
       heading: "Combat",
       rows: [
-        { keys: "LMB", action: "Select / move" },
-        { keys: "RMB hold", action: "Attack (world)" },
+        { keys: "LMB on enemy", action: "Select target" },
+        { keys: "RMB hold", action: "Attack / chase (world)" },
         { keys: "F", action: "Basic attack (boss arena)" },
-        { keys: "1–5", action: "Skills" },
-        { keys: "Shift / Q", action: "Dodge" },
+        { keys: "1–5", action: "Skills (AoE: then LMB place)" },
+        { keys: "Shift", action: "Dodge 4m" },
+        { keys: "Q", action: "Block" },
         { keys: "Space", action: "Jump" },
         { keys: "R", action: "Special (fighter kit)" },
         { keys: "E", action: "Interact (cove, harvest)" },

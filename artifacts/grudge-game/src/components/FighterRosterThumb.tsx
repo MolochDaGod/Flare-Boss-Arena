@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { FighterPreview } from "@/components/FighterPreview";
 import type { FighterDef } from "@/data/fighters";
+import { SCOURGE_ID, JOHN_WAYNE_ID, RACALVIN_ID } from "@/data/fighters";
 import { getEvolutionMeta } from "@/data/fighterEvolutions";
 
 /** Browsers cap active WebGL contexts (~8–16). Queue roster previews instead of one per card. */
 const MAX_LIVE_PREVIEWS = 6;
+
+const CREW_PREVIEW_IDS = new Set([SCOURGE_ID, JOHN_WAYNE_ID, RACALVIN_ID]);
 let livePreviews = 0;
 const previewWaiters: Array<{ priority: number; grant: () => void }> = [];
 
@@ -34,6 +37,8 @@ function releasePreviewSlot() {
 
 const ROLE_ACCENT: Record<string, string> = {
   "Corsair King": "#c5a059",
+  "Chain Tank": "#88ccee",
+  "Ranged Engineer": "#ffaa44",
   Emperor: "#e85d5d",
   Swordsman: "#7eb8ff",
   Swordmaster: "#9ad4ff",
@@ -123,7 +128,9 @@ export function FighterRosterThumb({ fighter }: { fighter: FighterDef }) {
     }
 
     let cancelled = false;
-    acquirePreviewSlot(visibleRatio).then(() => {
+    // Prefer Racalvin crew slots so /units always shows live idle/walk first
+    const priority = visibleRatio + (CREW_PREVIEW_IDS.has(fighter.id) ? 1.5 : 0);
+    acquirePreviewSlot(priority).then(() => {
       if (cancelled) {
         releasePreviewSlot();
         return;
@@ -140,12 +147,19 @@ export function FighterRosterThumb({ fighter }: { fighter: FighterDef }) {
       }
       setHasSlot(false);
     };
-  }, [inView, visibleRatio]);
+  }, [inView, visibleRatio, fighter.id]);
+
+  const isCrew = CREW_PREVIEW_IDS.has(fighter.id);
 
   return (
     <div ref={rootRef} className="absolute inset-0">
       {hasSlot ? (
-        <FighterPreview skinId={fighter.skinId} fighterId={fighter.id} pauseRotation />
+        <FighterPreview
+          skinId={fighter.skinId}
+          fighterId={fighter.id}
+          pauseRotation
+          showcaseLocomotion={isCrew}
+        />
       ) : (
         <StaticThumb fighter={fighter} waiting={inView && visibleRatio >= 0.08} />
       )}

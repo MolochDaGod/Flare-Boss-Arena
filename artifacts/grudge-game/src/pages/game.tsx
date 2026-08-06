@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, Component, useMemo, type Reac
 import { useLocation } from "wouter";
 import { useGetEnemies, useGetClasses, useGetWeapons } from "@workspace/api-client-react";
 import { GameEngine, type GameState, type EnemyTemplate, type PlayerInitStats } from "@/game/GameEngine";
-import { Loader2, ArrowLeft, Zap, Crosshair, LayoutGrid } from "lucide-react";
+import { Loader2, ArrowLeft, Swords, Zap, Shield, Crosshair, LayoutGrid } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MainPanel, useMainPanelHotkeys, MAIN_PANEL_KEYS, type CharSummary, type PanelKey } from "@/components/MainPanel";
 import { getSelectedSkin } from "@/data/skins";
@@ -23,17 +23,17 @@ import { getGameLoadout, loadoutSkillBar } from "@/data/gameCombat";
 import { toast } from "sonner";
 import { useSystemsHotkey } from "@/hooks/useSystemsHotkey";
 import { GameEscapeMenu, SystemHub } from "@/components/SystemHub";
-import { UnifiedCombatHud } from "@/components/UnifiedCombatHud";
-import { fromIslandGameState, skillsFromBar } from "@/data/combatHudAdapters";
-import { TravelerTutorialHUD } from "@/components/TravelerTutorialHUD";
-import type { RaceId as TutorialRaceId } from "@/data/travelerTutorial";
-import { FogMinimap } from "@/components/FogMinimap";
+import { GameCombatHud } from "@/components/GameCombatHud";
+import { CombatCrosshair, reticleShapeForClass } from "@/components/CombatCrosshair";
 import { PartyHud } from "@/components/PartyHud";
-import { IslandBeatOverlay } from "@/components/IslandBeatOverlay";
-import { MultiplayerPanel } from "@/components/MultiplayerPanel";
-import { WorldMapPanel } from "@/components/WorldMapPanel";
-import { OpenWaterHud } from "@/components/OpenWaterHud";
-import type { MultiplayerClient } from "@/net/MultiplayerClient";
+import { GameBagHud } from "@/components/GameBagHud";
+import { getHeroEnemyTemplates, heroEnemyAsTemplate } from "@/data/heroEnemyLibrary";
+import { ANIMATED_MONSTER_TEMPLATES } from "@/game/MonsterModels";
+import {
+  SKELETON_SPAWN_TEMPLATES,
+  DARK_ELF_SPAWN_TEMPLATES,
+  SPIDER_SPAWN_TEMPLATES,
+} from "@/data/monsterCatalog";
 
 // ─── Error Boundary ────────────────────────────────────────────────────────────
 class GameErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; message: string }> {
@@ -86,6 +86,28 @@ function buildEnemyTemplates(enemiesData: unknown): EnemyTemplate[] {
     }
   }
   return templates;
+}
+
+/**
+ * Offline / fail-open enemy pool — same local mon packs the engine already spawns.
+ * Used when R2 gamedata/enemies is empty, slow, or failed so /game never hangs.
+ */
+function offlineEnemyTemplates(): EnemyTemplate[] {
+  const locals: EnemyTemplate[] = [
+    ...ANIMATED_MONSTER_TEMPLATES,
+    ...SKELETON_SPAWN_TEMPLATES,
+    ...DARK_ELF_SPAWN_TEMPLATES,
+    ...SPIDER_SPAWN_TEMPLATES,
+  ].map((t) => ({
+    id: t.id,
+    name: t.name,
+    type: t.type,
+    tier: t.tier,
+    hp: t.hp,
+    damage: t.damage,
+  }));
+  const rivals = getHeroEnemyTemplates().map(heroEnemyAsTemplate);
+  return [...locals, ...rivals];
 }
 
 /** Compute real player stats from class data + character attributes + equipped weapon */
@@ -251,10 +273,13 @@ function Game() {
     setGameState(state);
   }, []);
 
-  // Build enemy templates from real R2 data
-  const enemyTemplates = useMemo(() => buildEnemyTemplates(enemiesData), [enemiesData]);
+  // R2 enemies when available; offline mon + rival pool so /game never blocks.
+  const enemyTemplates = useMemo(() => {
+    const fromApi = buildEnemyTemplates(enemiesData);
+    return fromApi.length > 0 ? fromApi : offlineEnemyTemplates();
+  }, [enemiesData]);
 
-  // Compute player stats from real class/weapon data
+  // Compute player stats from class/weapon APIs (fail-open defaults inside helper).
   const playerStats = useMemo(() => {
     return computePlayerStats(
       char as unknown as Record<string, unknown>,
@@ -267,8 +292,8 @@ function Game() {
   const loadout = useMemo(() => getGameLoadout(getActiveFighter().id), [bagTick]);
   const skillBar = useMemo(() => loadoutSkillBar(loadout), [loadout]);
 
-  const combatStats = useMemo((): PlayerInitStats | null => {
-    if (!playerStats) return null;
+  // Always derive combat stats from fighter loadout — never wait on network.
+  const combatStats = useMemo((): PlayerInitStats => {
     return {
       ...playerStats,
       hp: loadout.combat.maxHp,
@@ -281,10 +306,11 @@ function Game() {
     };
   }, [playerStats, loadout]);
 
-  const ready = enemyTemplates.length > 0 && !!combatStats;
+  // Ready as soon as we have a fighter loadout (offline enemies always available).
+  const ready = enemyTemplates.length > 0;
 
   useEffect(() => {
-    if (!mountRef.current || !ready || !combatStats) return;
+    if (!mountRef.current || !ready) return;
 
     const c = char as unknown as Record<string, unknown>;
     const charId = c.id as string | number;
@@ -296,7 +322,6 @@ function Game() {
     const engine = new GameEngine();
     engine.onStateUpdate = handleStateUpdate;
     engine.onOpenVendor = () => setVendorOpen(true);
-    engine.onOpenTraveler = () => setTravelerForceOpen(true);
     engine.onMapReseed = (seed) => {
       toast.message("Next island — tougher round", {
         description: `Seed #${seed.toString(16)}. Enemies scale up each sail. Equip perks on /perks.`,
@@ -340,32 +365,10 @@ function Game() {
 
   const [menuOpen, setMenuOpen] = useSystemsHotkey({ alsoEscape: true });
   const [hubOpen, setHubOpen] = useState(false);
-  const [travelerForceOpen, setTravelerForceOpen] = useState(false);
-  const [mapExpanded, setMapExpanded] = useState(false);
-  const mpClientRef = useRef<MultiplayerClient | null>(null);
-
-  // Co-op: stream local movement + fire hitscans to mp-server when connected.
-  useEffect(() => {
-    let last = 0;
-    let raf = 0;
-    const tick = (now: number) => {
-      raf = requestAnimationFrame(tick);
-      const client = mpClientRef.current;
-      const eng = engineRef.current;
-      if (!client || !eng || now - last < 50) return;
-      last = now;
-      // Approximate axes from engine keys via last notified state movement is internal —
-      // send zero axes; position still updates when client implements input trust.
-      // Prefer fire on attack if engine exposes; keep alive heartbeat.
-      client.sendInput({ ax: 0, az: 0, yaw: 0 });
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, []);
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col" style={{ zIndex: 50 }}>
-      {/* 3D canvas */}
+      {/* 3D canvas — OS mouse restored; GameEngine sets contextual cursor (crosshair/pointer/move/cell) */}
       <div ref={mountRef} className="absolute inset-0" style={{ cursor: "crosshair" }} />
       <GameEscapeMenu open={menuOpen} onOpenChange={setMenuOpen} />
       <SystemHub open={hubOpen} onOpenChange={setHubOpen} />
@@ -430,138 +433,103 @@ function Game() {
         </div>
       </div>
 
-      {/* Unified combat HUD — island + systems rail */}
+      {/* Optimized combat HUD — bars 120ms CSS, state badge, log, world HP ticks */}
       {gameState && gameState.loaded && gameState.mapReady && (
-        <UnifiedCombatHud
-          state={fromIslandGameState(gameState, {
-            charName: String(char.name ?? "Fighter"),
-            raceClass: `${playerStats?.charRace ?? ""} ${playerStats?.charClass ?? ""}`.trim(),
-            skills: skillsFromBar(
-              skillBar.map((s) => ({ id: s.id, name: s.name, glyph: s.glyph })),
-              undefined,
-              gameState.pendingSkillIdx,
-            ),
-            specialReadyPct: gameState.specialReadyPct,
-          })}
-          onSkill={(idx) => engineRef.current?.selectSkill(idx)}
-          onSpecial={() => engineRef.current?.useSpecial()}
-          onAttack={() => engineRef.current?.attackNearest()}
-          rightRail={
-            <>
-              <OpenWaterHud
-                playDomain={gameState.playDomain ?? "land"}
-                boatHeading={gameState.boatHeading}
-                boatSpeed={gameState.boatSpeed}
-                nearbyIslandName={gameState.nearbyIslandName}
-                nearbyHarborStation={gameState.nearbyHarborStation}
-                canEmbark={gameState.canEmbark}
-                canLand={gameState.canLand}
-                onBoard={() => engineRef.current?.tryToggleEmbark()}
-                onLand={() => engineRef.current?.tryToggleEmbark()}
-              />
-              <WorldMapPanel
-                zones={gameState.worldZones ?? []}
-                playerX={gameState.playerMapX ?? 0}
-                playerZ={gameState.playerMapZ ?? 0}
-                halfExtent={gameState.playDomain === "open_water" ? 180 : 90}
-                currentZone={gameState.currentZone}
-                nearbyClaim={gameState.nearbyClaimZone}
-                claimsOwned={gameState.claimsOwned ?? 0}
-                exploredPct={gameState.exploredPct ?? 0}
-                expanded={mapExpanded}
-                onToggleExpand={() => setMapExpanded((v) => !v)}
-                onWaypoint={(x, z) => {
-                  if (gameState.playDomain === "open_water") {
-                    toast.message("Sea mark", {
-                      description: `Chart ${x.toFixed(0)}, ${z.toFixed(0)} — helm toward it`,
-                    });
-                    return;
-                  }
-                  engineRef.current?.setPlayerTarget(x, z);
-                  toast.message("Waypoint marked", {
-                    description: `Map mark ${x.toFixed(0)}, ${z.toFixed(0)}`,
-                  });
-                }}
-              />
-              <FogMinimap
-                snapshot={gameState.fogMinimap}
-                exploredPct={gameState.exploredPct ?? 0}
-              />
-              <div className="w-[200px]">
+        <>
+          {/* Soft centre reticle — OS cursor is primary aim (not cursor:none) */}
+          <CombatCrosshair
+            visible
+            shape={reticleShapeForClass(playerStats?.charClass, loadout?.weapon?.name)}
+            hitMarker={gameState.combatLog?.[0] ? gameState.combatLog[0].length : 0}
+            rangeState={gameState.enemies.length ? "optimal" : "none"}
+            className="opacity-55"
+          />
+          <GameCombatHud
+            state={gameState}
+            charName={String(char.name ?? "Fighter")}
+            raceClass={`${playerStats?.charRace ?? ""} ${playerStats?.charClass ?? ""}`.trim()}
+            skillBar={skillBar.map((s) => ({
+              id: s.id,
+              name: s.name,
+              glyph: s.glyph,
+              pending: gameState.pendingSkillIdx === s.index,
+            }))}
+            specialReadyPct={gameState.specialReadyPct}
+            onSkill={(idx) => {
+              if (idx < 0) engineRef.current?.useSpecial();
+              else engineRef.current?.selectSkill(idx);
+            }}
+          />
+          {/* Codex party + 10-slot bag — real HUD assets (craftpix slots / status icons) */}
+          <div className="absolute top-14 left-3 z-20 flex flex-col gap-2 max-w-[min(280px,92vw)]">
+            {gameState.allies && gameState.allies.length > 0 && (
+              <div className="w-full pointer-events-auto">
                 <PartyHud
-                  allies={gameState.allies ?? []}
-                  loadErrors={gameState.partyLoadErrors ?? []}
+                  allies={gameState.allies}
+                  loadErrors={[]}
+                  onStance={(s) => engineRef.current?.setAlliesStance(s)}
+                  onAllyBrain={(id, br) => engineRef.current?.setAllyBrain(id, br)}
                 />
               </div>
-              <div className="w-[200px]">
-                <MultiplayerPanel
-                  mode="pve"
-                  roomKey="dark_elf_camp"
-                  compact
-                  onClient={(c) => {
-                    mpClientRef.current = c;
-                    engineRef.current?.setMpRoom(c?.room ?? null);
-                  }}
-                  onSnapshots={(_t, snaps, localId) => {
-                    engineRef.current?.syncRemotePlayers(snaps, localId);
-                  }}
-                />
-              </div>
-            </>
-          }
-          bottomActions={
-            <>
-              <button
-                type="button"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] tracking-widest uppercase"
-                style={{ border: "1px solid rgba(140,191,221,0.3)", background: "rgba(13,18,24,0.7)", color: "#9ab0c6" }}
-                onClick={() => setPanelOpen(true)}
-              >
-                <LayoutGrid className="w-3.5 h-3.5" /> C
-              </button>
-              <button
-                type="button"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] tracking-widest uppercase"
-                style={{ border: "1px solid rgba(59,130,246,0.4)", background: "rgba(13,18,24,0.7)", color: "#72bbff" }}
-                onClick={() => setLocation("/boss")}
-              >
-                <Zap className="w-3.5 h-3.5" /> Boss
-              </button>
-            </>
-          }
-        />
+            )}
+            <GameBagHud
+              tick={(gameState.resources?.wood ?? 0) + (gameState.resources?.stone ?? 0) + (gameState.gold ?? 0)}
+            />
+          </div>
+        </>
       )}
 
-      {/* Island beat cards (boss alert / victory / sail / events / death) */}
-      {gameState && gameState.loaded && (
-        <IslandBeatOverlay
-          beat={gameState.beat}
-          playerDead={!!gameState.playerDead}
-          canSail={!!gameState.canSail}
-          coveBearing={gameState.coveBearing ?? null}
-          onRespawn={() => engineRef.current?.respawnAtCove()}
-          onSail={() => {
-            const ok = engineRef.current?.sailToNextIsland();
-            if (ok) {
-              toast.success("Sailing to the next island…");
-              setBagTick((t) => t + 1);
-            }
-          }}
-          onDismiss={() => engineRef.current?.dismissBeat()}
-        />
-      )}
-
-      {/* Dock Quest Traveler — E at jetty NPC opens panel; T also works */}
-      {gameState && gameState.loaded && (
-        <TravelerTutorialHUD
-          raceId={(playerStats?.charRace as TutorialRaceId | undefined) ?? "human"}
-          forceOpen={travelerForceOpen}
-          onForceOpenConsumed={() => setTravelerForceOpen(false)}
-          onComplete={() => {
-            toast.success("Traveler opener complete — reported to your faction commander.");
-          }}
-        />
-      )}
+      {/* Single combat action strip — no dock-quest / duplicate skill bars */}
+      <div
+        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-2 px-3 py-1.5 rounded-xl pointer-events-auto"
+        style={{
+          background: "rgba(5,10,16,0.72)",
+          border: "1px solid rgba(120,190,230,0.28)",
+          backdropFilter: "blur(4px)",
+          boxShadow: "0 0 16px rgba(80,160,200,0.12)",
+        }}
+      >
+        <button
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] tracking-widest uppercase text-[#c5a059] hover:-translate-y-0.5 transition-transform"
+          style={{ border: "1px solid rgba(197,160,89,0.45)", background: "rgba(13,23,34,0.45)" }}
+          onClick={() => engineRef.current?.attackNearest()}
+        >
+          <Swords className="w-3.5 h-3.5" />
+          Atk
+        </button>
+        <button
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] tracking-widest uppercase text-amber-300 hover:-translate-y-0.5 transition-transform"
+          style={{ border: "1px solid rgba(251,191,36,0.4)", background: "rgba(13,23,34,0.45)" }}
+          onClick={() => engineRef.current?.useSpecial()}
+        >
+          <Zap className="w-3.5 h-3.5" />
+          R
+        </button>
+        <button
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] tracking-widest uppercase text-[#9ab0c6] hover:text-[#eaf4ff] hover:-translate-y-0.5 transition-transform"
+          style={{ border: "1px solid rgba(140,191,221,0.25)", background: "rgba(13,23,34,0.45)" }}
+          onClick={() => setPanelOpen(true)}
+        >
+          <LayoutGrid className="w-3.5 h-3.5" />
+          C
+        </button>
+        <button
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] tracking-widest uppercase text-[#9ab0c6] hover:text-[#eaf4ff] hover:-translate-y-0.5 transition-transform"
+          style={{ border: "1px solid rgba(140,191,221,0.25)", background: "rgba(13,23,34,0.45)" }}
+          onClick={() => setLocation("/equipment")}
+        >
+          <Shield className="w-3.5 h-3.5" />
+          Armory
+        </button>
+        <button
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] tracking-widest uppercase text-[#72bbff] hover:-translate-y-0.5 transition-transform"
+          style={{ border: "1px solid rgba(59,130,246,0.4)", background: "rgba(13,23,34,0.45)" }}
+          onClick={() => setLocation("/boss")}
+        >
+          <Zap className="w-3.5 h-3.5" />
+          Boss
+        </button>
+      </div>
 
       {/* MainPanel overlay (hotkey C) */}
       <MainPanel
@@ -711,11 +679,10 @@ function Game() {
                 <Crosshair className="w-3 h-3 text-primary" />
                 <p className="text-[10px] font-serif text-primary uppercase tracking-widest">Controls</p>
               </div>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">WASD — Move · LMB move/target · RMB hold attack</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F Attack · Space Jump · Q Block · Shift Dodge</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">E Interact · R Special · 1-5 Skills (AoE: key then LMB place)</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Chop trees / quarry stone with F · Cove east · Colossus west</p>
-              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Left Click Ground — Move To</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">WASD move · LMB click/hold drag-move · LMB target · RMB hold attack</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">Wheel zoom · MMB reset zoom · Shift+wheel fast · Ctrl sprint</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">F Attack · Space Jump · Q Block · Shift Dodge · E Interact · R Special</p>
+              <p className="text-[10px] font-mono text-muted-foreground tracking-widest uppercase">1–5 Skills · AoE: key then LMB place · Esc cancel</p>
             </div>
           </motion.div>
         )}

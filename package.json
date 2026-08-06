@@ -2,6 +2,7 @@
   "name": "workspace",
   "version": "0.2.0",
   "license": "MIT",
+  "packageManager": "pnpm@9.15.9",
   "scripts": {
     "preinstall": "node -e \"const fs=require('fs');for(const f of['package-lock.json','yarn.lock']){try{fs.unlinkSync(f)}catch{}}if(!(process.env.npm_config_user_agent||'').startsWith('pnpm')){console.error('Use pnpm instead');process.exit(1)}\"",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
@@ -14,7 +15,11 @@
   },
   "private": true,
   "devDependencies": {
+    "@gltf-transform/core": "4.1.1",
+    "@gltf-transform/extensions": "4.1.1",
+    "@gltf-transform/functions": "4.1.1",
     "@rollup/rollup-win32-x64-msvc": "^4.62.2",
+    "meshoptimizer": "^1.2.0",
     "playwright": "^1.61.1",
     "prettier": "^3.8.3",
     "typescript": "~5.9.3"

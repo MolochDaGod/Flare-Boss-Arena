@@ -87,7 +87,9 @@ export function archetypeFor(type: string): Archetype {
     case "minotaur":
     case "egyptian":
     case "titan":
-    case "elemental": return "humanoid";
+    case "elemental":
+    case "voxel":     return "humanoid"; // pixel / voxel humanoids
+    case "humanoid":  return "humanoid";
     default:          return "humanoid";
   }
 }
@@ -117,6 +119,7 @@ function colorsFor(type: string, name: string, tier: number): { primary: number;
     case "orc":       return { primary: 0x4a6638, secondary: 0x222e18, accent: 0x88aa55 };
     case "troll":     return { primary: 0x556a48, secondary: 0x2a3520, accent: 0x88a070 };
     case "undead":    return { primary: 0xa8a89a, secondary: 0x5a5a50, accent: 0x6644aa };
+    case "voxel":     return { primary: 0xc45a3a, secondary: 0x5a2818, accent: 0xffc070 };
     case "minotaur":  return { primary: 0x6a4a2a, secondary: 0x331a08, accent: 0xaa7733 };
     case "egyptian":  return { primary: 0xc9a06e, secondary: 0x7a5a32, accent: 0xffd366 };
     case "titan":     return { primary: 0x4a5566, secondary: 0x222a35, accent: 0x88aabb };

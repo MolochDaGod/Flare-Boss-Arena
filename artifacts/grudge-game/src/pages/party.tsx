@@ -1,33 +1,31 @@
 /**
- * Party — deploy owned Grudge6 units + recruited fighter heroes only.
- * Purchase / hire from Barracks-backed roster shop.
+ * Party — recruit earned Grudge6 allies, rank them, bind spellbook ally skills.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/PageChrome";
+import { MAX_PARTY_ALLIES } from "@/data/grudge6Roster";
+import { defaultColorSetForHero, colorSetLabel } from "@/data/toonRtsColorSets";
 import {
-  GRUDGE6_HEROES,
-  getPartyAllyIds,
-  togglePartyAlly,
-  MAX_PARTY_ALLIES,
-  type Grudge6HeroDef,
-} from "@/data/grudge6Roster";
-import {
-  getOwnedGrudge6Ids,
-  purchaseGrudge6,
-  hireCostForGrudge6,
-  getOwnedHeroes,
-  isHeroOwned,
-  purchaseHero,
-  recruitHeroCost,
-  hireableGrudge6,
-  recruitableHeroes,
-} from "@/data/rosterOwnership";
-import { getBuildingTier } from "@/data/rtsCrafting";
+  equipAllySkill,
+  equipSkillCost,
+  listAvailableAllySkills,
+  listPartyRoster,
+  partyProgressSummary,
+  recruitAlly,
+  sanitizePartySelection,
+  togglePartyAllyGated,
+  unequipAllySkill,
+  upgradeAllyRank,
+  MAX_ALLY_RANK,
+  MAX_ALLY_SKILL_SLOTS,
+  type AllySkillDef,
+} from "@/data/partyProgress";
 import { getWallet } from "@/data/wallet";
-import { Tent, Users, ShoppingBag } from "lucide-react";
+import { spellbookSlotUrl } from "@/data/spellbookAssets";
+import { BookOpen, Coins, Tent, Users, ChevronUp, Lock, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 const ROLE_COLOR: Record<string, string> = {
@@ -42,230 +40,330 @@ const ROLE_COLOR: Record<string, string> = {
 
 export default function Party() {
   const [tick, setTick] = useState(0);
+  const [focusId, setFocusId] = useState<string | null>(null);
   void tick;
-  const refresh = () => setTick((t) => t + 1);
 
-  const selected = new Set(getPartyAllyIds());
-  const ownedG6 = new Set(getOwnedGrudge6Ids());
-  const ownedHeroes = getOwnedHeroes();
-  const barracks = getBuildingTier("barracks");
+  // Ensure party slots only hold unlocked allies
+  sanitizePartySelection();
+
+  const roster = useMemo(() => listPartyRoster(), [tick]);
+  const summary = useMemo(() => partyProgressSummary(), [tick]);
   const gold = getWallet().gold;
-  const hireable = hireableGrudge6();
-  const recruitable = recruitableHeroes().slice(0, 24);
+  const focus = focusId ? roster.find((h) => h.id === focusId) : roster.find((h) => h.inParty) ?? roster.find((h) => h.unlocked);
+
+  const refresh = () => setTick((t) => t + 1);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       <PageHeader
-        kicker="Owned roster only"
-        title="Party & Barracks"
-        subtitle={`Deploy up to ${MAX_PARTY_ALLIES} owned Grudge6 allies · hire units · recruit heroes`}
+        kicker="Earned progression"
+        title="Party"
+        subtitle={`Recruit allies with gold · rank kits · bind spellbook ally skills · max ${MAX_PARTY_ALLIES} in field`}
         action={
-          <Button asChild variant="outline" className="font-serif tracking-widest border-primary/40">
-            <Link href="/game" className="flex items-center gap-2">
-              <Tent className="h-4 w-4" /> Enter Dungeon
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" className="font-serif tracking-widest border-primary/40">
+              <Link href="/skills" className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4" /> Ally Tomes
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="font-serif tracking-widest border-primary/40">
+              <Link href="/game" className="flex items-center gap-2">
+                <Tent className="h-4 w-4" /> Enter Dungeon
+              </Link>
+            </Button>
+          </div>
         }
       />
 
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border/50 bg-card/50 px-4 py-3">
         <Users className="h-5 w-5 text-primary" />
         <p className="text-sm font-serif text-muted-foreground">
-          Deployed{" "}
+          Field{" "}
           <span className="text-primary font-mono">
-            {selected.size}/{MAX_PARTY_ALLIES}
+            {roster.filter((h) => h.inParty).length}/{MAX_PARTY_ALLIES}
           </span>
           {" · "}
-          Owned Grudge6 <span className="text-primary font-mono">{ownedG6.size}</span>
+          Recruited{" "}
+          <span className="font-mono text-foreground">
+            {summary.unlocked}/{summary.total}
+          </span>
           {" · "}
-          Heroes <span className="text-primary font-mono">{ownedHeroes.length}</span>
+          <span className="inline-flex items-center gap-1 font-mono text-[#c5a059]">
+            <Coins className="h-3.5 w-3.5" />
+            {gold} gold
+          </span>
           {" · "}
-          Barracks T{barracks} · {gold}g
+          Ranks {summary.activeRanks} · Skills bound {summary.skillsBound}
+        </p>
+        <p className="w-full text-[11px] font-mono text-muted-foreground">
+          Gold from dungeons &amp; bosses. Two starter allies free · rest recruit · spell primers unlock ally skills only.
         </p>
       </div>
 
-      {/* Active deploy slots */}
-      <section className="space-y-3">
-        <h2 className="font-serif text-sm uppercase tracking-widest text-primary">Deploy (owned only)</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {GRUDGE6_HEROES.filter((h) => ownedG6.has(h.id)).map((h) => (
-            <HeroCard
-              key={h.id}
-              hero={h}
-              active={selected.has(h.id)}
-              owned
-              onToggle={() => {
-                const r = togglePartyAlly(h.id);
+      {focus && (
+        <AllySkillDock
+          hero={focus}
+          onRefresh={refresh}
+        />
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {roster.map((h) => (
+          <HeroCard
+            key={h.id}
+            hero={h}
+            selectedFocus={focus?.id === h.id}
+            onFocus={() => setFocusId(h.id)}
+            onRefresh={refresh}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AllySkillDock({
+  hero,
+  onRefresh,
+}: {
+  hero: ReturnType<typeof listPartyRoster>[number];
+  onRefresh: () => void;
+}) {
+  const skills = listAvailableAllySkills(hero.id);
+  const schoolAccent =
+    ROLE_COLOR[hero.role] ?? "#c5a059";
+
+  return (
+    <Card className="border-border/50 bg-card/70 overflow-hidden">
+      <div className="h-1" style={{ background: schoolAccent }} />
+      <CardHeader className="pb-2">
+        <CardTitle className="font-serif text-base uppercase tracking-widest flex flex-wrap items-center justify-between gap-2">
+          <span className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />
+            Ally skills — {hero.displayName}
+          </span>
+          <span className="text-[10px] font-mono text-muted-foreground normal-case tracking-normal">
+            Prefer {hero.preferredSchool} · {hero.skills.length}/{MAX_ALLY_SKILL_SLOTS} slots · bind {equipSkillCost()}g
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!hero.unlocked && (
+          <p className="text-xs text-muted-foreground font-serif">
+            Recruit this ally before binding spellbook skills.
+          </p>
+        )}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {skills.map((sk) => (
+            <SkillChip
+              key={sk.id}
+              skill={sk}
+              disabled={!hero.unlocked}
+              onEquip={() => {
+                const r = equipAllySkill(hero.id, sk.id);
                 toast[r.ok ? "success" : "error"](r.message);
-                refresh();
+                onRefresh();
+              }}
+              onUnequip={() => {
+                unequipAllySkill(hero.id, sk.id);
+                toast.success(`Unequipped ${sk.name}`);
+                onRefresh();
               }}
             />
           ))}
-          {ownedG6.size === 0 && (
-            <p className="text-sm text-muted-foreground col-span-full">
-              No owned units — hire from the Barracks shop below (starter pack grants 2 free).
-            </p>
-          )}
         </div>
-      </section>
+        <p className="text-[10px] font-mono text-muted-foreground">
+          Study tomes on{" "}
+          <Link href="/skills" className="text-primary underline-offset-2 hover:underline">
+            Skills → Ally Tomes
+          </Link>
+          {" "}({160} gold each). Off-role schools still work at reduced potency.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
 
-      {ownedHeroes.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="font-serif text-sm uppercase tracking-widest text-primary">Recruited heroes</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {ownedHeroes.map((f) => (
-              <Card key={f.id} className="border-border/50 bg-card/60">
-                <CardHeader className="pb-2">
-                  <CardTitle className="font-serif text-base uppercase tracking-widest">
-                    {f.name}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-xs text-muted-foreground font-serif">{f.title} · {f.role}</p>
-                  <p className="text-[10px] font-mono text-muted-foreground mt-1">Owned · warband recruit</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </section>
+function SkillChip({
+  skill,
+  disabled,
+  onEquip,
+  onUnequip,
+}: {
+  skill: AllySkillDef & {
+    studied: boolean;
+    equipped: boolean;
+    iconUrl: string | null;
+    schoolLabel: string;
+    accent: string;
+    affinity: boolean;
+  };
+  disabled: boolean;
+  onEquip: () => void;
+  onUnequip: () => void;
+}) {
+  return (
+    <div
+      className="flex gap-2 items-center rounded border p-2"
+      style={{
+        borderColor: skill.equipped ? `${skill.accent}99` : `${skill.accent}33`,
+        background: skill.equipped ? `${skill.accent}14` : "transparent",
+        opacity: skill.studied ? 1 : 0.55,
+      }}
+    >
+      <div
+        className="w-10 h-10 shrink-0 rounded flex items-center justify-center overflow-hidden"
+        style={{
+          backgroundImage: `url(${spellbookSlotUrl("slot_default")})`,
+          backgroundSize: "100% 100%",
+          imageRendering: "pixelated",
+        }}
+      >
+        {skill.iconUrl ? (
+          <img src={skill.iconUrl} alt="" className="w-7 h-7" style={{ imageRendering: "pixelated" }} draggable={false} />
+        ) : (
+          <BookOpen className="w-4 h-4" style={{ color: skill.accent }} />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-serif truncate" style={{ color: skill.accent }}>
+          {skill.name}
+          {!skill.affinity && <span className="text-muted-foreground"> · off-role</span>}
+        </p>
+        <p className="text-[9px] font-mono text-muted-foreground truncate">{skill.schoolLabel}</p>
+      </div>
+      {!skill.studied ? (
+        <span className="text-[9px] font-mono text-muted-foreground flex items-center gap-1">
+          <Lock className="h-3 w-3" /> Study
+        </span>
+      ) : skill.equipped ? (
+        <Button size="sm" variant="ghost" className="h-7 text-[10px] font-mono" onClick={onUnequip} disabled={disabled}>
+          Unequip
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-[10px] font-mono"
+          disabled={disabled}
+          onClick={onEquip}
+        >
+          Bind
+        </Button>
       )}
-
-      {/* Hire Grudge6 */}
-      <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <ShoppingBag className="h-4 w-4 text-primary" />
-          <h2 className="font-serif text-sm uppercase tracking-widest text-primary">
-            Hire Grudge6 (Barracks T{Math.max(1, barracks)})
-          </h2>
-        </div>
-        {barracks < 1 && (
-          <p className="text-xs text-amber-200/80 font-serif">
-            Upgrade Barracks to tier 1 in Main Panel → Crafting to unlock hiring.
-          </p>
-        )}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {hireable.slice(0, 18).map((h) => {
-            const cost = hireCostForGrudge6(h.id);
-            return (
-              <Card key={h.id} className="border-border/40 bg-card/50">
-                <CardHeader className="pb-2">
-                  <CardTitle className="font-serif text-sm uppercase tracking-widest flex justify-between gap-2">
-                    <span>{h.displayName}</span>
-                    <span className="text-[10px] font-mono text-muted-foreground">{h.faction}</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <p className="text-[11px] font-mono uppercase text-muted-foreground">
-                    {h.role} · {h.race}
-                  </p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full font-serif text-xs tracking-widest"
-                    disabled={barracks < 1}
-                    onClick={() => {
-                      const r = purchaseGrudge6(h.id);
-                      toast[r.ok ? "success" : "error"](r.message);
-                      refresh();
-                    }}
-                  >
-                    Hire · {cost}g
-                  </Button>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* Recruit fighter heroes */}
-      <section className="space-y-3">
-        <h2 className="font-serif text-sm uppercase tracking-widest text-primary">
-          Recruit heroes (Barracks T2+)
-        </h2>
-        {barracks < 2 && (
-          <p className="text-xs text-muted-foreground font-serif">
-            Barracks tier 2 unlocks recruiting fighter champions into your warband.
-          </p>
-        )}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {recruitable.map((f) => {
-            const cost = recruitHeroCost(f.id);
-            const owned = isHeroOwned(f.id);
-            return (
-              <Card key={f.id} className="border-border/40 bg-card/50">
-                <CardHeader className="pb-2">
-                  <CardTitle className="font-serif text-sm uppercase tracking-widest">
-                    {f.name}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <p className="text-xs text-muted-foreground font-serif">{f.role}</p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full font-serif text-xs tracking-widest"
-                    disabled={barracks < 2 || owned}
-                    onClick={() => {
-                      const r = purchaseHero(f.id);
-                      toast[r.ok ? "success" : "error"](r.message);
-                      refresh();
-                    }}
-                  >
-                    {owned ? "Recruited" : `Recruit · ${cost}g`}
-                  </Button>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      </section>
     </div>
   );
 }
 
 function HeroCard({
   hero,
-  active,
-  owned,
-  onToggle,
+  selectedFocus,
+  onFocus,
+  onRefresh,
 }: {
-  hero: Grudge6HeroDef;
-  active: boolean;
-  owned: boolean;
-  onToggle: () => void;
+  hero: ReturnType<typeof listPartyRoster>[number];
+  selectedFocus: boolean;
+  onFocus: () => void;
+  onRefresh: () => void;
 }) {
+  const r = hero.resolved;
   return (
     <Card
-      className={`border-border/50 bg-card/60 overflow-hidden ${active ? "ring-1 ring-primary/60" : ""}`}
+      className={`border-border/50 bg-card/60 overflow-hidden cursor-pointer transition-shadow ${
+        hero.inParty ? "ring-1 ring-primary/60" : ""
+      } ${selectedFocus ? "ring-1 ring-[#c5a059]/70" : ""} ${!hero.unlocked ? "opacity-90" : ""}`}
+      onClick={onFocus}
     >
       <div className="h-1" style={{ background: ROLE_COLOR[hero.role] ?? "#c5a059" }} />
       <CardHeader className="pb-2">
         <CardTitle className="font-serif text-base uppercase tracking-widest flex items-center justify-between gap-2">
-          <span>{hero.displayName}</span>
-          <span className="text-[10px] font-mono text-muted-foreground">{hero.faction}</span>
+          <span className="flex items-center gap-1.5 min-w-0">
+            {!hero.unlocked && <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+            <span className="truncate">{hero.displayName}</span>
+          </span>
+          <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+            {hero.faction}
+            {hero.unlocked ? ` · R${hero.rank}` : ""}
+          </span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="space-y-2" onClick={(e) => e.stopPropagation()}>
         <p className="text-[11px] font-mono uppercase text-muted-foreground">
-          {hero.role} · brain:{hero.brain} · {hero.race}
+          {hero.role} · {hero.brain} · {hero.preferredSchool} · dye{" "}
+          {colorSetLabel(
+            defaultColorSetForHero({ race: hero.race, role: hero.role, faction: hero.faction }),
+          )}
         </p>
         <p className="text-xs text-muted-foreground font-serif">
-          Dmg {hero.kit.damage} · Range {hero.kit.attackRange}
-          {hero.kit.healAmount > 0 ? ` · Heal ${hero.kit.healAmount}` : ""}
+          Dmg {r.damage} · Range {r.attackRange.toFixed(1)}
+          {r.healAmount > 0 ? ` · Heal ${r.healAmount}` : ""}
+          {" · "}Mult {r.skillMult.toFixed(2)}
         </p>
+        {hero.skills.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {hero.skills.map((sk) => (
+              <span
+                key={sk.id}
+                className="text-[9px] font-mono px-1.5 py-0.5 rounded border"
+                style={{ borderColor: `${ROLE_COLOR[hero.role]}55`, color: ROLE_COLOR[hero.role] }}
+              >
+                {sk.name}
+              </span>
+            ))}
+          </div>
+        )}
         {hero.weaponMesh && (
           <p className="text-[10px] font-mono text-muted-foreground truncate">⚔ {hero.weaponMesh}</p>
         )}
-        <Button
-          size="sm"
-          variant={active ? "default" : "outline"}
-          className="w-full font-serif text-xs tracking-widest"
-          onClick={onToggle}
-          disabled={!owned}
-        >
-          {active ? "In party" : "Deploy"}
-        </Button>
+
+        <div className="flex flex-col gap-1.5 pt-1">
+          {!hero.unlocked ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full font-serif text-xs tracking-widest"
+              onClick={() => {
+                const res = recruitAlly(hero.id);
+                toast[res.ok ? "success" : "error"](res.message);
+                onRefresh();
+              }}
+            >
+              <Coins className="h-3.5 w-3.5 mr-1" />
+              Recruit · {hero.recruitGold}g
+            </Button>
+          ) : (
+            <>
+              <Button
+                size="sm"
+                variant={hero.inParty ? "default" : "outline"}
+                className="w-full font-serif text-xs tracking-widest"
+                onClick={() => {
+                  const res = togglePartyAllyGated(hero.id);
+                  toast[res.ok ? "success" : "error"](res.message);
+                  onRefresh();
+                }}
+              >
+                {hero.inParty ? "In party" : "Add to party"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="w-full font-mono text-[10px] tracking-wide"
+                disabled={hero.rank >= MAX_ALLY_RANK}
+                onClick={() => {
+                  const res = upgradeAllyRank(hero.id);
+                  toast[res.ok ? "success" : "error"](res.message);
+                  onRefresh();
+                }}
+              >
+                <ChevronUp className="h-3 w-3 mr-1" />
+                {hero.rank >= MAX_ALLY_RANK
+                  ? `Max rank ${MAX_ALLY_RANK}`
+                  : `Upgrade rank · ${hero.nextRankGold}g`}
+              </Button>
+            </>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

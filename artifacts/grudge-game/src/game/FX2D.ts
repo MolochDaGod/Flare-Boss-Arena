@@ -58,22 +58,27 @@ export class FX2D {
   private projectiles: Projectile[] = [];
   private mouseX = 0;
   private mouseY = 0;
-  private showCrosshair = true;
+  /**
+   * Combat mode uses React DRC centre reticle (CombatCrosshair).
+   * FX2D only draws free-aim mouse reticle when explicitly enabled (non-combat tools).
+   */
+  private showCrosshair = false;
   private container: HTMLElement;
   private _moveHandler: (e: MouseEvent) => void;
   private _enterHandler: () => void;
   private _leaveHandler: () => void;
   private mouseInside = true;
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, opts: { freeAimCrosshair?: boolean } = {}) {
     this.container = container;
+    this.showCrosshair = !!opts.freeAimCrosshair;
     this.canvas = document.createElement("canvas");
     this.canvas.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;";
     container.appendChild(this.canvas);
     this.ctx = this.canvas.getContext("2d")!;
     this.resize();
 
-    // Hide the native cursor on the 3D canvas so our drawn crosshair replaces it
+    // Combat: hide OS cursor so DRC centre reticle is the only aim cue
     const threeDom = container.querySelector("canvas:not([style*='pointer-events:none'])") as HTMLCanvasElement | null;
     if (threeDom) threeDom.style.cursor = "none";
     container.style.cursor = "none";
@@ -89,6 +94,11 @@ export class FX2D {
     container.addEventListener("mouseenter", this._enterHandler);
     container.addEventListener("mouseleave", this._leaveHandler);
     window.addEventListener("resize", this._resizeBound);
+  }
+
+  /** Enable/disable free-aim mouse crosshair (default off — DRC centre reticle owns combat). */
+  setFreeAimCrosshair(on: boolean) {
+    this.showCrosshair = on;
   }
 
   private _resizeBound = () => this.resize();

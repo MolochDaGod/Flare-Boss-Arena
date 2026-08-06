@@ -3,16 +3,17 @@
  * rotation, boss-kill progress, and level persistence rules.
  *
  * Rules (production):
- * - All fighters locked by default.
+ * - Most fighters locked by default.
+ * - Racalvin + crew (Scourge, John Wayne) always free-to-play (not owned).
  * - Unlock cost: spend 1 Flare Grudge Token (bought for 1000 GBUX, or earned).
  * - 5 boss kills → 1 Flare Grudge Token.
  * - New accounts start with 2 tokens.
  * - Each ISO week, 3 random fighters are free to play (test rotation only).
  * - Level progress is persisted only when the fighter is owned via token spend
- *   (weekly free does NOT save long-term levels).
+ *   (weekly free / starter free does NOT save long-term levels).
  */
 
-import { FIGHTERS } from "./fighters";
+import { FIGHTERS, RACALVIN_ID, SCOURGE_ID, JOHN_WAYNE_ID } from "./fighters";
 
 export const FLARE_TOKEN_ID = "flare_grudge_token" as const;
 export const GBUX_PER_TOKEN = 1000;
@@ -20,6 +21,16 @@ export const BOSSES_PER_TOKEN = 5;
 export const STARTER_TOKENS = 2;
 export const WEEKLY_FREE_COUNT = 3;
 export const UNLOCK_TOKEN_COST = 1;
+
+/**
+ * Always free-to-play (not permanent owned) — Racalvin pirate crew + captain.
+ * Levels still require token unlock. Tokens can still buy permanent ownership.
+ */
+export const STARTER_FREE_IDS: readonly string[] = [
+  RACALVIN_ID,
+  SCOURGE_ID,
+  JOHN_WAYNE_ID,
+];
 
 const STATE_KEY = "flare:economy:v1";
 const WELCOME_KEY = "flare:welcome:production:seen";
@@ -179,12 +190,17 @@ export function isWeeklyFree(fighterId: string): boolean {
   return s.weeklyFree.includes(fighterId);
 }
 
+/** True if always free-to-play starter crew (Racalvin / Scourge / John Wayne). */
+export function isStarterFree(fighterId: string): boolean {
+  return STARTER_FREE_IDS.includes(fighterId);
+}
+
 /**
- * Playable = owned OR weekly free.
+ * Playable = owned OR weekly free OR starter free crew.
  * Selecting is allowed only when playable.
  */
 export function isPlayable(fighterId: string): boolean {
-  return isOwned(fighterId) || isWeeklyFree(fighterId);
+  return isOwned(fighterId) || isWeeklyFree(fighterId) || isStarterFree(fighterId);
 }
 
 export function isLocked(fighterId: string): boolean {

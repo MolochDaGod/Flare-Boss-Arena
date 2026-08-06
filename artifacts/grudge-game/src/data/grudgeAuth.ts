@@ -69,7 +69,8 @@ export function buildLoginUrl(returnPath = "/"): string {
   return `${GRUDGE_ID_ORIGIN}/login?${params.toString()}`;
 }
 
-export function startLogin(returnPath = "/") {
+/** Production capital island is the default post-login destination. */
+export function startLogin(returnPath = "/camp") {
   if (typeof window === "undefined") return;
   window.location.href = buildLoginUrl(returnPath);
 }

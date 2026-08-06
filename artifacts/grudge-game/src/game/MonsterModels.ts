@@ -95,6 +95,21 @@ export const MONSTER_DEFS: MonsterDef[] = [
     hp: 210, damage: 18, file: "skeleton_warrior_ummo.glb", archetype: "humanoid",
     height: 1.9, clip: null,
   },
+  // ── Voxel / pixel enemies ─────────────────────────────────────────────────
+  // pixel_morocc.glb — voxel humanoid with authored clips:
+  // wait (idle), walk, attack, hit, die, use_skill, skill_ready, use_magic, playshow
+  {
+    id: "mon_pixel_morocc",
+    name: "Pixel Morocc",
+    type: "voxel",
+    tier: 2,
+    hp: 240,
+    damage: 18,
+    file: "pixel_morocc.glb",
+    archetype: "humanoid",
+    height: 1.85,
+    clip: "wait", // preferred idle; GlbClipBank also maps walk/attack/hit/die
+  },
 ];
 
 const MONSTER_BY_ID = new Map(MONSTER_DEFS.map((d) => [d.id, d]));

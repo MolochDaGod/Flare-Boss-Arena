@@ -1,17 +1,88 @@
 /**
- * Shared Three.js setup helpers for Flare.
- * - One GLTFLoader recipe (incl. archived KHR SpecGloss materials)
- * - Safe WebGLRenderer teardown (forceContextLoss)
+ * Shared Three.js setup for Flare Boss Arena / camp / boss / dungeon.
+ *
+ * Production glTF recipe (aligned with gameopen + threejs-loaders skill):
+ *  - Shared LoadingManager (one progress/error surface)
+ *  - DRACO geometry decoder
+ *  - Meshopt buffer decoder
+ *  - KTX2 / Basis (after bindKtx2(renderer))
+ *  - KHR_materials_pbrSpecularGlossiness → MeshStandard approx (KayKit packs)
+ *
+ * Plain uncompressed GLBs still load; decoders only activate when declared.
  */
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 
 const SPEC_GLOSS = "KHR_materials_pbrSpecularGlossiness";
+
+/** Google-hosted Draco WASM (1.5.x fleet default). */
+const DRACO_DECODER_PATH =
+  "https://www.gstatic.com/draco/versioned/decoders/1.5.7/";
+/** Basis transcoder pinned near three@0.185. */
+const KTX2_TRANSCODER_PATH =
+  "https://cdn.jsdelivr.net/npm/three@0.185.0/examples/jsm/libs/basis/";
+
+// Enable browser Cache for TextureLoader / FileLoader under the hood.
+if (typeof THREE.Cache !== "undefined") {
+  THREE.Cache.enabled = true;
+}
+
+/** Shared progress/error surface for every optimized load. */
+export const gltfManager = new THREE.LoadingManager();
+
+let sharedDraco: DRACOLoader | null = null;
+function getDraco(): DRACOLoader {
+  if (!sharedDraco) {
+    sharedDraco = new DRACOLoader(gltfManager);
+    sharedDraco.setDecoderPath(DRACO_DECODER_PATH);
+    sharedDraco.preload();
+  }
+  return sharedDraco;
+}
+
+let sharedKtx2: KTX2Loader | null = null;
+let ktx2Bound = false;
+
+/**
+ * Bind KTX2 / Basis Universal using a live WebGLRenderer (GPU detect).
+ * Call once after creating the renderer in Camp / Arena / GameEngine.
+ * Safe to call multiple times.
+ */
+export function bindKtx2(renderer: THREE.WebGLRenderer): void {
+  if (!renderer) return;
+  if (ktx2Bound && sharedKtx2) {
+    try {
+      sharedKtx2.detectSupport(renderer);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  try {
+    sharedKtx2 = new KTX2Loader(gltfManager)
+      .setTranscoderPath(KTX2_TRANSCODER_PATH)
+      .detectSupport(renderer);
+    ktx2Bound = true;
+    if (sharedLoader) {
+      sharedLoader.setKTX2Loader(sharedKtx2);
+    }
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.warn("[threeSetup] KTX2 bind failed (non-fatal):", err);
+    }
+  }
+}
+
+export function isKtx2Bound(): boolean {
+  return ktx2Bound;
+}
 
 /**
  * Archived glTF extension removed from three.js core loaders.
  * Approximate as MeshStandardMaterial (diffuse → color/map, gloss → roughness).
- * @see https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Archived/KHR_materials_pbrSpecularGlossiness
  */
 function createSpecGlossPlugin(parser: {
   assignTexture: (
@@ -50,18 +121,15 @@ function createSpecGlossPlugin(parser: {
       const gloss =
         typeof ext.glossinessFactor === "number" ? ext.glossinessFactor : 1;
       materialParams.roughness = THREE.MathUtils.clamp(1 - gloss, 0.04, 1);
-      // Specular-glossiness has no direct metalness; keep non-metal default.
       materialParams.metalness = 0.0;
 
       const specular = ext.specularFactor as number[] | undefined;
       if (Array.isArray(specular)) {
-        // Mild metalness lift from bright specular (heuristic only).
         const specLum = (specular[0] + specular[1] + specular[2]) / 3;
         materialParams.metalness = THREE.MathUtils.clamp(specLum * 0.35, 0, 0.6);
       }
 
       if (ext.specularGlossinessTexture) {
-        // Use SG map as roughnessMap (alpha is gloss in the extension).
         pending.push(
           parser.assignTexture(
             materialParams,
@@ -76,11 +144,61 @@ function createSpecGlossPlugin(parser: {
   };
 }
 
-/** Canonical GLTFLoader for the app — always register SpecGloss for KayKit / older packs. */
-export function createGltfLoader(): GLTFLoader {
-  const loader = new GLTFLoader();
+export interface GltfLoaderOptions {
+  /** Override shared LoadingManager (tests / isolated progress UI). */
+  manager?: THREE.LoadingManager;
+  /** Supply a live renderer to enable KTX2. */
+  renderer?: THREE.WebGLRenderer;
+  /** Force a fresh loader instance (default: false → shared singleton). */
+  fresh?: boolean;
+}
+
+/**
+ * Wire Draco + Meshopt + SpecGloss (+ KTX2 when bound/renderer provided).
+ */
+export function makeGltfLoader(opts: GltfLoaderOptions = {}): GLTFLoader {
+  const manager = opts.manager ?? gltfManager;
+  const loader = new GLTFLoader(manager);
+  loader.setDRACOLoader(getDraco());
+  try {
+    loader.setMeshoptDecoder(MeshoptDecoder);
+  } catch {
+    /* meshopt optional if bundler strips wasm */
+  }
   loader.register((parser) => createSpecGlossPlugin(parser));
+  if (opts.renderer) {
+    bindKtx2(opts.renderer);
+  }
+  if (sharedKtx2) {
+    loader.setKTX2Loader(sharedKtx2);
+  }
   return loader;
+}
+
+let sharedLoader: GLTFLoader | null = null;
+
+/**
+ * Process-wide decoder-optimized loader (preferred for camp / boss / skills).
+ * Prefer this over `new GLTFLoader()` or repeated createGltfLoader() calls.
+ */
+export function sharedGltfLoader(): GLTFLoader {
+  if (!sharedLoader) sharedLoader = makeGltfLoader();
+  return sharedLoader;
+}
+
+/**
+ * Canonical GLTFLoader for the app.
+ * Defaults to the shared singleton so camp/skills/arena share one decode pipeline.
+ * Pass `{ fresh: true }` only when a private LoadingManager is required.
+ */
+export function createGltfLoader(opts: GltfLoaderOptions = {}): GLTFLoader {
+  if (opts.fresh || opts.manager) {
+    return makeGltfLoader(opts);
+  }
+  if (opts.renderer) {
+    bindKtx2(opts.renderer);
+  }
+  return sharedGltfLoader();
 }
 
 export type FlareTimer = THREE.Timer;
@@ -103,7 +221,6 @@ export function createFrameTimer(): {
       disconnect: () => timer.disconnect(),
     };
   }
-  // Legacy path (should not hit on three@0.185)
   const clock = new THREE.Clock();
   return {
     update: () => {},
@@ -124,7 +241,6 @@ export const FLARE_SHADOW_TYPE = THREE.PCFShadowMap;
 export function disposeRenderer(renderer: THREE.WebGLRenderer | null | undefined) {
   if (!renderer) return;
   try {
-    renderer.domElement?.removeEventListener?.("webglcontextlost", () => {});
     renderer.forceContextLoss();
   } catch {
     /* ignore */
@@ -138,4 +254,22 @@ export function disposeRenderer(renderer: THREE.WebGLRenderer | null | undefined
   if (canvas?.parentNode) {
     canvas.parentNode.removeChild(canvas);
   }
+}
+
+/** Dispose shared decoder workers (call only on full app teardown). */
+export function disposeGltfDecoders() {
+  try {
+    sharedDraco?.dispose();
+  } catch {
+    /* ignore */
+  }
+  sharedDraco = null;
+  try {
+    sharedKtx2?.dispose();
+  } catch {
+    /* ignore */
+  }
+  sharedKtx2 = null;
+  ktx2Bound = false;
+  sharedLoader = null;
 }

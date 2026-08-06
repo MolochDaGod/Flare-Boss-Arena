@@ -1,7 +1,9 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import type { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { heroVfxTtl } from "./combat/combatVfx";
 import type { CombatVfxKind } from "../data/vfxHotkeys";
+import { loadGLTFCached } from "./assets";
+import { createGltfLoader } from "./threeSetup";
 
 /**
  * SkillVfx — spawns short-lived GLB VFX at world positions.
@@ -79,14 +81,14 @@ export class SkillVfx {
   private pending: PendingSpawn[] = [];
   private disposed = false;
 
-  constructor(scene: THREE.Scene, loader: GLTFLoader) {
+  constructor(scene: THREE.Scene, loader?: GLTFLoader) {
     this.scene = scene;
+    const active = loader ?? createGltfLoader();
     (Object.keys(URLS) as VfxKind[]).forEach((kind) => {
-      loader.load(
-        URLS[kind],
+      // Shared promise cache — camp/boss/dungeon skills reuse one network parse.
+      loadGLTFCached(active, URLS[kind]).then(
         (gltf) => {
           if (this.disposed) {
-            disposeVfxRoot(gltf.scene);
             return;
           }
           gltf.scene.traverse((c) => {
@@ -97,7 +99,6 @@ export class SkillVfx {
           this.clips[kind] = gltf.animations;
           this.flushPending(kind);
         },
-        undefined,
         () => {
           // missing VFX must never break gameplay — soft fail
         },

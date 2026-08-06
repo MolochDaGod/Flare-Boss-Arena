@@ -243,6 +243,42 @@ export const CAMP_PROP_LAYOUTS: CampPropLayout[] = [
   { propId: "prop_grass_trenches", x: -68, z: -28, rotY: 2.1 },
   { propId: "prop_grass_trenches", x: 28, z: 68, rotY: 1.4 },
   { propId: "prop_grass_trenches", x: -30, z: 62, rotY: 0.8 },
+
+  // ── GST Fantasy Props — forge / market / stash / training décor ──
+  // Smithy lane (near anvil station ~-40,-14)
+  { propId: "fp_anvil_log", x: -36, z: -18, rotY: 0.4 },
+  { propId: "fp_workbench", x: -44, z: -8, rotY: 1.2 },
+  { propId: "fp_weapon_stand", x: -32, z: -10, rotY: -0.5 },
+  { propId: "fp_whetstone", x: -38, z: -22, rotY: 0.2 },
+  { propId: "fp_axe", x: -34, z: -6, rotY: 0.8 },
+  // Market row (stash / armory ~44,10)
+  { propId: "fp_stall", x: 38, z: 16, rotY: -0.9 },
+  { propId: "fp_stall_cart", x: 48, z: 4, rotY: 0.6 },
+  { propId: "fp_barrel_apples", x: 42, z: 8, rotY: 0.3 },
+  { propId: "fp_crate_wood", x: 50, z: 12, rotY: 0.1 },
+  { propId: "fp_farm_crate", x: 36, z: 6, rotY: -0.4 },
+  // Vault / chest near stash
+  { propId: "fp_chest", x: 40, z: 12, rotY: Math.PI * 0.9 },
+  { propId: "fp_coins", x: 42, z: 14, rotY: 0 },
+  { propId: "fp_pouch", x: 38, z: 10, rotY: 0.5 },
+  // Guild / skills reading nook (~30,-36)
+  { propId: "fp_bookcase", x: 26, z: -32, rotY: 0.4 },
+  { propId: "fp_books", x: 28, z: -34, rotY: 0 },
+  { propId: "fp_table", x: 22, z: -38, rotY: 0.2 },
+  { propId: "fp_bench", x: 20, z: -40, rotY: 0.2 },
+  { propId: "fp_candles", x: 24, z: -36, rotY: 0 },
+  // Training yard centre
+  { propId: "fp_dummy", x: 4, z: 8, rotY: -0.6 },
+  { propId: "fp_dummy", x: -6, z: 10, rotY: 0.8 },
+  { propId: "fp_banner_1", x: 10, z: -2, rotY: 0.3 },
+  { propId: "fp_banner_2", x: -10, z: -4, rotY: -0.4 },
+  { propId: "fp_torch", x: 12, z: 14, rotY: 0 },
+  { propId: "fp_torch", x: -14, z: 12, rotY: Math.PI * 0.5 },
+  // Tavern green clutter
+  { propId: "fp_barrel", x: -20, z: -36, rotY: 0.5 },
+  { propId: "fp_cauldron", x: -28, z: -38, rotY: 0.2 },
+  { propId: "fp_stool", x: -22, z: -42, rotY: 0 },
+  { propId: "fp_bucket", x: -26, z: -34, rotY: 0.3 },
 ];
 
 export interface CampFighterNpcLayout {
@@ -258,6 +294,8 @@ export interface CampFighterNpcLayout {
 /** Real roster champions wandering the harbor (skins + Racalvin). */
 export const CAMP_FIGHTER_NPCS: CampFighterNpcLayout[] = [
   { fighterId: "racalvin", skinId: "racalvin", name: "Racalvin", x: 14, z: 2, wanderRadius: 6, faceY: -0.4 },
+  { fighterId: "scourge_faithbearer", skinId: "scourge_faithbearer", name: "Scourge Faithbearer", x: 18, z: 6, wanderRadius: 4, faceY: -0.6 },
+  { fighterId: "capt_john_wayne", skinId: "capt_john_wayne", name: "Captain John Wayne", x: 10, z: 8, wanderRadius: 5, faceY: -0.2 },
   { fighterId: "shanks", skinId: "shanks", name: "Shanks", x: -20, z: -34, wanderRadius: 5 },
   { fighterId: "shanks_yonko", skinId: "shanks_yonko", name: "Shanks", x: -74, z: -18, wanderRadius: 4, faceY: 0.5 },
   { fighterId: "law", skinId: "law", name: "Law", x: 26, z: -30, wanderRadius: 4.5 },
@@ -313,6 +351,8 @@ export const CAMP_YARD_KAYKIT_NPCS: { x: number; z: number; model: string }[] = 
 /** A few champion skins strolling the expanded yard (subset — keeps load light). */
 export const CAMP_YARD_FIGHTER_NPCS: CampFighterNpcLayout[] = [
   { fighterId: "racalvin", skinId: "racalvin", name: "Racalvin", x: 14, z: 2, wanderRadius: 6, faceY: -0.4 },
+  { fighterId: "scourge_faithbearer", skinId: "scourge_faithbearer", name: "Scourge Faithbearer", x: 18, z: 6, wanderRadius: 4, faceY: -0.6 },
+  { fighterId: "capt_john_wayne", skinId: "capt_john_wayne", name: "Captain John Wayne", x: 10, z: 8, wanderRadius: 5, faceY: -0.2 },
   { fighterId: "shanks", skinId: "shanks", name: "Shanks", x: -20, z: -34, wanderRadius: 5 },
   { fighterId: "law", skinId: "law", name: "Law", x: 26, z: -30, wanderRadius: 4.5 },
   { fighterId: "koby", skinId: "koby", name: "Koby", x: 18, z: 20, wanderRadius: 6 },
