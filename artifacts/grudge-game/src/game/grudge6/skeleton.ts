@@ -50,21 +50,22 @@ export function unifySkeletons(root: THREE.Object3D): THREE.Skeleton | null {
 }
 
 /**
- * Force uniform local scale on every Mesh node.
- * WK kit heads ship non-uniform [2.41, 2.54, 2.54] which reads as stretch
- * once the kit is parent-scaled to 1.8 m.
+ * Force uniform local scale on **rigid** (non-skinned) meshes only.
+ * Skinned body/head scales are part of the GLTF bind — changing them without
+ * recomputing IBM twists the spine/neck/head. Leave SkinnedMesh alone.
  */
 export function forceUniformMeshScales(root: THREE.Object3D): number {
   let fixed = 0;
   root.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
+    // Never touch skinned wardrobe — bind matrix owns their rest pose
+    if ((m as THREE.SkinnedMesh).isSkinnedMesh) return;
     const sx = Math.abs(m.scale.x);
     const sy = Math.abs(m.scale.y);
     const sz = Math.abs(m.scale.z);
     if (sx < 1e-8 && sy < 1e-8 && sz < 1e-8) return;
     if (Math.abs(sx - sy) > 0.015 || Math.abs(sx - sz) > 0.015 || Math.abs(sy - sz) > 0.015) {
-      // Prefer max axis so we don't shrink heads too hard vs body (still uniform)
       const u = Math.max(sx, sy, sz);
       m.scale.set(u, u, u);
       fixed++;

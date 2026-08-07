@@ -469,17 +469,16 @@ export async function createGrudge6Character(
     }
   });
 
-  // 1) Uniform mesh scales BEFORE skeleton bind (heads ship 2.41×2.54×2.54).
-  //    Changing scale after bind = broken skinning (head-at-feet / stretch).
-  const fixedScales = forceUniformMeshScales(model);
-  if (fixedScales > 0) {
-    debug.errors.push(`normalized ${fixedScales} non-uniform mesh scale(s)`);
-  }
-
-  // 2) Unify multi-skin kit onto one Bip001 chain (after scales are final)
+  // 1) Unify multi-skin kit onto one Bip001 chain (CRITICAL)
   const unified = unifySkeletons(model);
   if (!unified) {
     debug.errors.push("unifySkeletons failed — multi-skin kit may not animate");
+  }
+
+  // 2) Rigid props only — never re-scale SkinnedMesh (breaks Max biped rest)
+  const fixedScales = forceUniformMeshScales(model);
+  if (fixedScales > 0) {
+    debug.errors.push(`normalized ${fixedScales} non-uniform rigid mesh scale(s)`);
   }
 
   // 3) Mesh allow-list: ALWAYS Warlords T0 portrait for player classId;

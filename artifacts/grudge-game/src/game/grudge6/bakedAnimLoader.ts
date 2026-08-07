@@ -69,34 +69,126 @@ function buildSceneBoneLookup(scene: THREE.Object3D): Map<string, string> {
 
 function toRotationOnlyClip(clip: THREE.AnimationClip): THREE.AnimationClip {
   const tracks = clip.tracks.filter((t) => t.name.endsWith(".quaternion"));
-  return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+  return new THREE.AnimationClip(clip.name, clip.duration, tracks, clip.blendMode);
+}
+
+/**
+ * Map bone name → live Bone (kit bind pose).
+ * Toon RTS Max biped rest ≠ Mixamo-origin bake rest. Absolute clip quats
+ * replace spine/neck/head with the wrong rest → “bent the opposite way”.
+ */
+function collectBindBones(scene: THREE.Object3D): Map<string, THREE.Bone> {
+  const map = new Map<string, THREE.Bone>();
+  scene.traverse((o) => {
+    const b = o as THREE.Bone;
+    if (b.isBone && b.name) map.set(b.name, b);
+  });
+  return map;
+}
+
+/**
+ * Retarget rotation tracks onto the kit’s bind pose:
+ *   q_out(t) = q_bind * inverse(q_clip(0)) * q_clip(t)
+ * t=0 stays bind (no snap); motion is the bake’s relative deltas.
+ * Required for Bip001-named packs when source rest ≠ Toon ★ rest.
+ */
+export function retargetRotationClipToKitBind(
+  clip: THREE.AnimationClip,
+  scene: THREE.Object3D,
+): THREE.AnimationClip {
+  const bones = collectBindBones(scene);
+  if (bones.size === 0) return clip;
+
+  const src0 = new THREE.Quaternion();
+  const src0Inv = new THREE.Quaternion();
+  const qClip = new THREE.Quaternion();
+  const qRel = new THREE.Quaternion();
+  const qOut = new THREE.Quaternion();
+  const bindQ = new THREE.Quaternion();
+
+  const nextTracks: THREE.KeyframeTrack[] = [];
+  for (const track of clip.tracks) {
+    if (!track.name.endsWith(".quaternion")) {
+      nextTracks.push(track);
+      continue;
+    }
+    const boneName = track.name.slice(0, -".quaternion".length);
+    const bone = bones.get(boneName);
+    const values = track.values as Float32Array;
+    if (!bone || values.length < 4) {
+      nextTracks.push(track);
+      continue;
+    }
+
+    bindQ.copy(bone.quaternion).normalize();
+    src0.set(values[0]!, values[1]!, values[2]!, values[3]!).normalize();
+    // Skip near-identity relative (already matches) — still rewrite for safety
+    src0Inv.copy(src0).invert();
+
+    const out = new Float32Array(values.length);
+    for (let i = 0; i < values.length; i += 4) {
+      qClip.set(values[i]!, values[i + 1]!, values[i + 2]!, values[i + 3]!).normalize();
+      // relative motion in source space, then apply on kit bind
+      qRel.copy(src0Inv).multiply(qClip);
+      qOut.copy(bindQ).multiply(qRel).normalize();
+      out[i] = qOut.x;
+      out[i + 1] = qOut.y;
+      out[i + 2] = qOut.z;
+      out[i + 3] = qOut.w;
+    }
+    nextTracks.push(
+      new THREE.QuaternionKeyframeTrack(
+        track.name,
+        Array.from(track.times as ArrayLike<number>),
+        Array.from(out),
+      ),
+    );
+  }
+  return new THREE.AnimationClip(clip.name, clip.duration, nextTracks, clip.blendMode);
 }
 
 function normalizeBakedClip(clip: THREE.AnimationClip, scene: THREE.Object3D | null): THREE.AnimationClip {
   const lookup = scene ? buildSceneBoneLookup(scene) : null;
+  // Clone tracks so we never mutate cached source arrays in place across scenes
+  const renamed: THREE.KeyframeTrack[] = [];
   for (const track of clip.tracks) {
     const dot = track.name.indexOf(".");
-    if (dot === -1) continue;
-    let bone = track.name.slice(0, dot);
+    if (dot === -1) {
+      renamed.push(track);
+      continue;
+    }
+    const bone = track.name.slice(0, dot);
     const prop = track.name.slice(dot);
+    let resolved = bone;
     if (lookup) {
-      if (lookup.has(bone)) {
-        track.name = lookup.get(bone)! + prop;
-      } else if (bone.startsWith("Bip001_")) {
+      if (lookup.has(bone)) resolved = lookup.get(bone)!;
+      else if (bone.startsWith("Bip001_")) {
         const spaced = bone.replace(/^Bip001_/, "Bip001 ").replace(/_/g, " ");
-        if (lookup.has(spaced)) track.name = lookup.get(spaced)! + prop;
+        if (lookup.has(spaced)) resolved = lookup.get(spaced)!;
       }
+      if (!lookup.has(resolved) && !lookup.has(bone)) continue; // drop unbound
+    }
+    if (resolved !== bone) {
+      const Ctor = track.constructor as new (
+        name: string,
+        times: ArrayLike<number>,
+        values: ArrayLike<number>,
+      ) => THREE.KeyframeTrack;
+      renamed.push(
+        new Ctor(
+          `${resolved}${prop}`,
+          (track.times as Float32Array).slice(),
+          (track.values as Float32Array).slice(),
+        ),
+      );
+    } else {
+      renamed.push(track);
     }
   }
-  if (lookup) {
-    clip.tracks = clip.tracks.filter((t) => {
-      const dot = t.name.indexOf(".");
-      if (dot === -1) return true;
-      const bone = t.name.slice(0, dot);
-      return lookup.has(bone);
-    });
-  }
-  return toRotationOnlyClip(clip);
+  let out = new THREE.AnimationClip(clip.name, clip.duration, renamed, clip.blendMode);
+  out = toRotationOnlyClip(out);
+  if (scene) out = retargetRotationClipToKitBind(out, scene);
+  return out;
 }
 
 export function validateClipBinding(
