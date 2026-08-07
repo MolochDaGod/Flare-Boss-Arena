@@ -1,11 +1,11 @@
 /**
- * Grudge6 / Toon RTS prefab loader — STONE SSOT pipeline:
- * production GLB → SkeletonUtils clone → **unifySkeletons** → force uniform mesh
- * scales → race atlas (flipY=false) → mesh_ids allow-list → Box3 feet ground →
- * art-forward +π/2 → baked Bip001 clips.
+ * Toon RTS race GLB — plain Three.js load path (no invented pipeline):
  *
- * Without unifySkeletons the kit has ~14 disconnected skins and looks stretched /
- * half T-pose. See grudge-character-correctness + Open grudge/skeleton.ts.
+ *   GLTFLoader → SkeletonUtils.clone → unifySkeletons (multi-skin kit only)
+ *   → mesh visible allow-list → Box3 fit 1.8 m + feet → AnimationMixer
+ *
+ * Production GLB already has embeds, Bip001, hand containers. Do not force
+ * atlas scrub, art-forward yaw, mesh-scale “fixes”, or foreign absolute clips.
  */
 
 import * as THREE from "three";
@@ -31,12 +31,13 @@ import {
 import { getWarlordsLoadout } from "../../data/warlordsEquipment";
 import type { AnnihilateClass } from "../../data/annihilateHeroes";
 import { PlayerAnimator, buildAuthoredClips } from "../PlayerAnimator";
-import { loadBakedPackForAlly } from "./bakedAnimLoader";
-import { Grudge6AllyAnimator } from "./Grudge6AllyAnimator";
-import { forceUniformMeshScales, unifySkeletons } from "./skeleton";
+import { unifySkeletons } from "./skeleton";
 import { applyToonRtsMaterials } from "./toonRtsMaterials";
+// Note: foreign baked packs (wrong rest pose) are not applied here — kit uses
+// AnimationMixer + bind-local procedural clips. Combat packs can wire later
+// with proper retarget, not absolute Mixamo quats on Max biped.
 
-/** Toon RTS FBX art faces +X; controller walks +Z — apply once on group. */
+/** Optional yaw if a consumer needs +Z walk after load. Not applied by default on play GLB. */
 export const GRUDGE6_ART_FORWARD_YAW = Math.PI / 2;
 
 /** Shared animator API for party allies (baked gait or authored fallback). */
@@ -129,47 +130,20 @@ function bodyBox(root: THREE.Object3D): THREE.Box3 {
   return box;
 }
 
-/**
- * Uniform SI height fit from skinned body min.y (feet) — never non-uniform
- * axes (stretch) and never pelvis-as-feet.
- */
+/** Box3 fit to target height (SI human ~1.8 m) + feet on y=0. Standard Three.js. */
 function fitFeetOrigin(model: THREE.Object3D, targetHeight: number) {
   model.updateWorldMatrix(true, true);
-  // Force parent scale uniform before measuring
-  {
-    const sx = Math.abs(model.scale.x) || 1;
-    const sy = Math.abs(model.scale.y) || 1;
-    const sz = Math.abs(model.scale.z) || 1;
-    const base = (sx + sy + sz) / 3;
-    model.scale.setScalar(base);
-  }
   let box = bodyBox(model);
   const size = box.getSize(new THREE.Vector3());
-  if (size.y > 0.001) {
-    // Decade unit snap first (classic 100×) then residual fit — unclamped decade
-    const decade = Math.pow(10, Math.round(Math.log10(targetHeight / size.y)));
-    let s = decade;
-    model.scale.multiplyScalar(s);
+  if (size.y > 1e-4) {
+    model.scale.multiplyScalar(targetHeight / size.y);
     model.updateWorldMatrix(true, true);
     box = bodyBox(model);
-    const size2 = box.getSize(new THREE.Vector3());
-    if (size2.y > 0.001) {
-      const residual = targetHeight / size2.y;
-      // Aesthetic residual only — clamp so we never explode partial allow-lists
-      const clamped = THREE.MathUtils.clamp(residual, 0.35, 3.5);
-      model.scale.multiplyScalar(clamped);
-    }
   }
-  model.updateWorldMatrix(true, true);
-  box = bodyBox(model);
   const center = box.getCenter(new THREE.Vector3());
   model.position.x -= center.x;
   model.position.z -= center.z;
   model.position.y -= box.min.y;
-  model.updateWorldMatrix(true, true);
-  // Second pass: feet exact after scale/center
-  box = bodyBox(model);
-  model.position.y += 0 - box.min.y;
 }
 
 function listAllMeshNames(root: THREE.Object3D): string[] {
@@ -378,50 +352,35 @@ async function loadRaceAtlas(
   });
 }
 
+/**
+ * Mixer on the kit root — Three.js standard.
+ * Toon ★ race GLB has no embedded clips; use light Bip001 procedural idle/walk
+ * on the live bind pose (no foreign absolute bake quats).
+ */
 async function buildAnimator(
   model: THREE.Object3D,
   def: Grudge6HeroDef,
   debug: Grudge6PrefabDebug,
 ): Promise<AllyAnimatorLike | null> {
-  const pack = animPackForRole(def.role);
-  debug.animPack = pack;
-
-  try {
-    const baked = await loadBakedPackForAlly(pack, model);
-    const { idle, walk, run, sprint, attack, walkBack, runBack, strafeLeft, strafeRight } = baked.clips;
-    if (idle && walk && run && sprint && attack) {
-      debug.animSource = "baked";
-      debug.idleBindRatio = baked.idleBindRatio;
-      debug.clipNames = baked.pool.map((c) => c.name);
-      return new Grudge6AllyAnimator(
-        model,
-        { idle, walk, run, sprint, attack, walkBack, runBack, strafeLeft, strafeRight },
-        baked.pool,
-      );
-    }
-    debug.errors.push("Baked pack incomplete — missing idle/walk/run/sprint/attack");
-  } catch (err) {
-    debug.errors.push(`Baked anim load failed: ${(err as Error).message}`);
-  }
-
+  debug.animPack = animPackForRole(def.role);
   try {
     const clips = buildAuthoredClips(model);
     if (clips.idle || clips.walk) {
       debug.animSource = "authored";
       debug.clipNames = Object.keys(clips);
+      // PlayerAnimator = AnimationMixer(model) + clipAction — standard Three.js
       return new PlayerAnimator(model, clips);
     }
   } catch (err) {
-    debug.errors.push(`Authored fallback failed: ${(err as Error).message}`);
+    debug.errors.push(`Animator failed: ${(err as Error).message}`);
   }
-
   debug.animSource = "none";
   return null;
 }
 
 /**
- * Spawn a Grudge6 hero instance with proper mesh, texture, and animation prefab.
- * Applies Toon RTS color sets + author material recipe (metal 0 / gloss 0).
+ * Spawn Toon RTS hero — simple Three.js:
+ * load → clone → unify multi-skin → equip meshes → Box3 feet → mixer.
  */
 export async function createGrudge6Character(
   def: Grudge6HeroDef,
@@ -453,6 +412,7 @@ export async function createGrudge6Character(
     errors: [],
   };
 
+  // 1) Load + SkeletonUtils.clone (never scene.clone on SkinnedMesh)
   const raceScene = await loadRaceScene(def.race, loader);
   const model = cloneGLTFScene(raceScene);
   const loadedUrl = String(raceScene.userData.loadedUrl || raceGlbUrl(def.race));
@@ -469,20 +429,12 @@ export async function createGrudge6Character(
     }
   });
 
-  // 1) Unify multi-skin kit onto one Bip001 chain (CRITICAL)
-  const unified = unifySkeletons(model);
-  if (!unified) {
-    debug.errors.push("unifySkeletons failed — multi-skin kit may not animate");
+  // 2) Multi-skin modular kit → one bone chain (required for Toon wardrobe GLBs)
+  if (!unifySkeletons(model)) {
+    debug.errors.push("unifySkeletons failed");
   }
 
-  // 2) Rigid props only — never re-scale SkinnedMesh (breaks Max biped rest)
-  const fixedScales = forceUniformMeshScales(model);
-  if (fixedScales > 0) {
-    debug.errors.push(`normalized ${fixedScales} non-uniform rigid mesh scale(s)`);
-  }
-
-  // 3) Mesh allow-list: ALWAYS Warlords T0 portrait for player classId;
-  //    roster meshSample only when no class (party NPCs).
+  // 3) Class wardrobe = visibility only (mesh_ids), not body GLB swap
   const classId =
     (def as Grudge6HeroDef & { classId?: string }).classId ??
     (() => {
@@ -493,70 +445,38 @@ export async function createGrudge6Character(
   if (classId) {
     allow = meshAllowForPlayer(model, def.race, classId, def.displayName || def.id);
   }
-  if (allow.length < 3 && def.meshSample.length >= 3) {
-    allow = [...def.meshSample];
-  }
-  if (allow.length < 3) {
-    allow = fallbackAllowFromRace(model, def);
-  }
-  // Guarantee body + class weapon (Toon RTS exclusive wardrobe)
-  if (allow.length) {
-    const allNames = listAllMeshNames(model);
-    const hasBody = allow.some((n) => /body/i.test(n));
-    if (!hasBody) {
-      const b = allNames.find((n) => /(^|_)body(_|$)/i.test(n));
-      if (b) allow.push(b);
-    }
-    const hasWeapon = allow.some((n) =>
-      /sword|bow|staff|axe|hammer|spear|dagger|mace|shield|pick/i.test(n),
-    );
-    if (!hasWeapon && def.role !== "unarmed") {
-      const fb = fallbackAllowFromRace(model, def);
-      for (const n of fb) {
-        if (
-          /sword|bow|staff|axe|hammer|spear|dagger|mace|shield|pick/i.test(n) &&
-          !allow.includes(n)
-        ) {
-          allow.push(n);
-        }
-      }
-    }
-  }
-  applyMeshAllowList(model, allow);
+  if (allow.length < 3 && def.meshSample.length >= 3) allow = [...def.meshSample];
+  if (allow.length < 3) allow = fallbackAllowFromRace(model, def);
+  if (allow.length) applyMeshAllowList(model, allow);
 
-  // 4) Toon RTS color set atlas + author material (metal 0 · gloss 0 · white plate)
-  //    Keep embeds when already present; only force rebuild if atlas load succeeds.
-  const atlasPack = await loadRaceAtlas(def.race, colorSet);
-  if (atlasPack) {
-    debug.atlasUrl = atlasPack.url;
-    debug.texturedSlots = applyToonRtsMaterials(model, {
-      atlas: atlasPack.tex,
-      tintHex: atlasPack.tint,
-      // Toon ★ play GLBs often ship correct maps — soft rebind, not hard scrub
-      forceStandard: colorSet !== "standard",
-    });
+  // 4) Team color dye only — standard Toon ★ keeps embedded maps
+  if (colorSet !== "standard") {
+    const atlasPack = await loadRaceAtlas(def.race, colorSet);
+    if (atlasPack) {
+      debug.atlasUrl = atlasPack.url;
+      debug.texturedSlots = applyToonRtsMaterials(model, {
+        atlas: atlasPack.tex,
+        tintHex: atlasPack.tint,
+        forceStandard: true,
+      });
+    }
   } else {
-    debug.errors.push(`Atlas failed: ${debug.atlasUrl}`);
+    debug.atlasUrl = "(embedded)";
+    debug.texturedSlots = -1; // embeds left alone
   }
 
-  // 5) Uniform height fit + feet ground (skinned body only)
+  // 5) SI height + feet on ground (Box3 on visible skinned body)
   fitFeetOrigin(model, height);
   group.add(model);
-  // Art-forward once on GROUP (Toon RTS art +X → controller walks +Z) — never double-yaw model+group
-  group.rotation.y = GRUDGE6_ART_FORWARD_YAW;
-  group.userData.artForwardSet = true;
-  group.userData.artForwardYaw = GRUDGE6_ART_FORWARD_YAW;
-  model.userData.artForwardSet = true;
+  // No automatic art-forward yaw on production play GLB — asset is already oriented.
+  // Controllers may set group.rotation.y if their walk axis requires it.
 
   debug.boneCount = countBones(model);
   debug.visibleMeshes = listVisibleMeshes(model);
-  if (debug.boneCount < 10) {
-    debug.errors.push(`Low bone count (${debug.boneCount}) — expect Bip001 skeleton`);
-  }
 
+  // 6) AnimationMixer on model root (Three.js standard)
   resetSkeletonBindPose(model);
   const animator = await buildAnimator(model, def, debug);
-  // Re-ground feet after first idle sample (position tracks stripped in baked path)
   if (animator) {
     try {
       animator.update(1 / 30);
