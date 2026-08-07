@@ -33,9 +33,12 @@ import type { AnnihilateClass } from "../../data/annihilateHeroes";
 import { PlayerAnimator, buildAuthoredClips } from "../PlayerAnimator";
 import { unifySkeletons } from "./skeleton";
 import { applyToonRtsMaterials } from "./toonRtsMaterials";
-// Note: foreign baked packs (wrong rest pose) are not applied here — kit uses
-// AnimationMixer + bind-local procedural clips. Combat packs can wire later
-// with proper retarget, not absolute Mixamo quats on Max biped.
+import {
+  attachCharacterFrame,
+  type CharacterFrame,
+  PLAYER_HEIGHT_M,
+} from "./characterFrame";
+// Kit anim: AnimationMixer + bind-local procedural clips (no foreign absolute bake).
 
 /** Optional yaw if a consumer needs +Z walk after load. Not applied by default on play GLB. */
 export const GRUDGE6_ART_FORWARD_YAW = Math.PI / 2;
@@ -73,7 +76,12 @@ export interface Grudge6PrefabDebug {
 export interface Grudge6Instance {
   id: string;
   def: Grudge6HeroDef;
+  /** World root — feet on ground; owns collider + uuid (characterFrame). */
   group: THREE.Group;
+  /** Kit under group */
+  model?: THREE.Object3D;
+  /** Root / capsule / feet / uuid SSOT */
+  frame: CharacterFrame | null;
   animator: AllyAnimatorLike | null;
   debug: Grudge6PrefabDebug;
   dispose: () => void;
@@ -508,24 +516,30 @@ export async function createGrudge6Character(
     debug.texturedSlots = -1; // embeds left alone
   }
 
-  // 5) SI height + feet on ground (Box3 on visible skinned body)
-  fitFeetOrigin(model, height);
+  // 5) Frame: root (feet world) · model fit · root-between-feet · capsule · uuid
+  //    SSOT: characterFrame.ts ← Open characterDeploy + grudge-physics capsule
   group.add(model);
-  // No automatic art-forward yaw on production play GLB — asset is already oriented.
-  // Controllers may set group.rotation.y if their walk axis requires it.
-
+  const frame = attachCharacterFrame(group, model, {
+    targetHeightM: height || PLAYER_HEIGHT_M,
+    groundY: 0,
+  });
   debug.boneCount = countBones(model);
   debug.visibleMeshes = listVisibleMeshes(model);
+  group.userData.frameSummary = {
+    uuid: frame.uuid,
+    heightM: frame.heightM,
+    capsule: { r: frame.capsule.radius, halfH: frame.capsule.halfHeight },
+    feet: !!(frame.feet.left && frame.feet.right),
+    pelvis: !!frame.pelvis,
+  };
 
-  // 6) AnimationMixer on model root (Three.js standard)
+  // 6) AnimationMixer on kit (Three.js standard)
   resetSkeletonBindPose(model);
   const animator = await buildAnimator(model, def, debug);
   if (animator) {
     try {
       animator.update(1 / 30);
-      model.updateWorldMatrix(true, true);
-      const box = bodyBox(model);
-      model.position.y += 0 - box.min.y;
+      frame.alignRootToFeet(0);
     } catch {
       /* non-fatal */
     }
@@ -534,6 +548,7 @@ export async function createGrudge6Character(
 
   const dispose = () => {
     animator?.dispose();
+    frame.disposeDebug();
     group.traverse((c) => {
       const m = c as THREE.Mesh;
       if (!m.isMesh) return;
@@ -543,7 +558,16 @@ export async function createGrudge6Character(
     });
   };
 
-  return { id: def.id, def, group, animator, debug, dispose };
+  return {
+    id: def.id,
+    def,
+    group,
+    model,
+    frame,
+    animator,
+    debug,
+    dispose,
+  };
 }
 
 /** Shared loader for party batching. */

@@ -1375,14 +1375,12 @@ export class GameEngine {
   }
 
   /**
-   * Toon RTS / grudge6 race kit — production CDN GLB + Bip001 baked packs.
-   * Uses Grudge6Factory (SkeletonUtils, mesh allow-list, atlas flipY=false, art-forward).
-   * Never KayKit/Mixamo as the player path.
+   * Toon RTS / grudge6 race kit — GLB load + characterFrame
+   * (root feet, capsule, uuid, plant). Never KayKit/Mixamo player path.
    */
   private loadRaceModel() {
     const race = (this.initStats.charRace?.toLowerCase() || "human") as RaceId;
     const classId = (this.initStats.charClass || "warrior").toLowerCase();
-    // Per-race SI height (human 1.8 · orc/barb ~2.0 · dwarf ~1.5) — never flat 1.8
     void this.grudge6Factory
       .createPlayer({
         race,
@@ -1392,6 +1390,15 @@ export class GameEngine {
       })
       .then((inst) => {
         const bridge = createG6PlayerBridge(inst.animator);
+        // Frame already on inst.group: root=feet, capsule, uuid
+        if (inst.frame) {
+          inst.group.userData.characterFrame = inst.frame;
+          // Align world spawn: keep XZ from playerPos, plant Y via frame
+          inst.frame.alignRootToFeet(this.playerPos.y);
+          inst.group.position.x = this.playerPos.x;
+          inst.group.position.z = this.playerPos.z;
+          inst.frame.refreshCapsule();
+        }
         this.finalizePlayer(inst.group, bridge as unknown as PlayerAnimator);
       })
       .catch((err) => {
