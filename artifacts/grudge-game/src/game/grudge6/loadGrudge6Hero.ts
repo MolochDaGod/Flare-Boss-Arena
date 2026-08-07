@@ -34,10 +34,10 @@ const CLASS_TO_ROLE: Record<AnnihilateClass, AllyRole> = {
 };
 
 const CLASS_TO_PACK: Record<AnnihilateClass, BakedAnimPack> = {
-  warrior: "greatsword_samurai",
+  warrior: "sword_shield",
   mage: "magic",
-  ranger: "rifle",
-  worge: "unarmed",
+  ranger: "longbow",
+  worge: "sword_shield",
 };
 
 const raceSceneCache = new Map<RaceId, Promise<THREE.Group>>();
@@ -159,18 +159,8 @@ export async function loadGrudge6PlayableHero(
   model.traverse((c) => {
     if ((c as THREE.Mesh).isMesh && c.name) names.push(c.name);
   });
-  const visible = resolveVisibleMeshes(
-    names,
-    raceId,
-    {
-      mainCategory: gear.portrait.mainCategory,
-      hasOffhand: gear.portrait.hasOffhand,
-      offCategory: gear.portrait.offCategory,
-      offhandIsShield: gear.portrait.offhandIsShield,
-      hasShoulder: gear.portrait.hasShoulder,
-    },
-    heroId,
-  );
+  // Full Warlords T0 portrait (body letters + weapon) — same SSOT as createPlayer
+  const visible = resolveVisibleMeshes(names, raceId, gear.portrait, heroId);
   model.traverse((c) => {
     const m = c as THREE.Mesh;
     if (!m.isMesh) return;

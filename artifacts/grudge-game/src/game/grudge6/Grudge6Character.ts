@@ -78,23 +78,33 @@ export interface Grudge6Instance {
   dispose: () => void;
 }
 
-/** Hide everything, then show only meshes whose names match the allow list (case-insensitive). */
+/**
+ * Exclusive wardrobe: hide every mesh, then show only allow-list names.
+ * Exact name match only (case-insensitive) — endsWith over-matching caused
+ * extra body/weapon islands and “scrambled armoury” looks on /select.
+ */
 export function applyMeshAllowList(root: THREE.Object3D, allow: string[]) {
-  const want = new Set(allow.map((n) => n.toLowerCase()));
+  const want = new Set(
+    allow.map((n) => n.trim().toLowerCase()).filter(Boolean),
+  );
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
+    if (/container|auxscene|forgescene/i.test(mesh.name)) {
+      mesh.visible = false;
+      return;
+    }
     const n = mesh.name.toLowerCase();
     let vis = want.has(n);
-    if (!vis) {
+    if (!vis && want.size > 0) {
+      // Prefix-tolerant: kit "WK_Units_Body_A" vs allow "Units_Body_A"
       for (const a of want) {
-        if (n === a || n.endsWith(a) || a.endsWith(n)) {
+        if (n === a || (a.length >= 6 && (n.endsWith("_" + a) || n.endsWith(a)))) {
           vis = true;
           break;
         }
       }
     }
-    if (/container|auxscene|forgescene/i.test(mesh.name)) vis = false;
     mesh.visible = vis;
     mesh.castShadow = vis;
     mesh.receiveShadow = vis;
@@ -459,76 +469,72 @@ export async function createGrudge6Character(
     }
   });
 
-  // 1) Unify ~14 disconnected skins onto one Bip001 chain (CRITICAL — stretch/T-pose)
-  const unified = unifySkeletons(model);
-  if (!unified) {
-    debug.errors.push("unifySkeletons failed — multi-skin kit may not animate");
-  }
-
-  // 2) Kill non-uniform mesh scales (heads ship 2.41×2.54×2.54 → stretch)
+  // 1) Uniform mesh scales BEFORE skeleton bind (heads ship 2.41×2.54×2.54).
+  //    Changing scale after bind = broken skinning (head-at-feet / stretch).
   const fixedScales = forceUniformMeshScales(model);
   if (fixedScales > 0) {
     debug.errors.push(`normalized ${fixedScales} non-uniform mesh scale(s)`);
   }
 
-  // 3) Mesh allow-list: roster sample → Warlords class loadout → race fallback
-  let allow =
-    def.meshSample.length >= 3 ? [...def.meshSample] : [];
-  if (allow.length < 3) {
-    const classId =
-      (def as Grudge6HeroDef & { classId?: string }).classId ??
-      def.id.replace(/^player_[^_]+_/, "") ??
-      "warrior";
-    allow = meshAllowForPlayer(model, def.race, classId, def.displayName);
+  // 2) Unify multi-skin kit onto one Bip001 chain (after scales are final)
+  const unified = unifySkeletons(model);
+  if (!unified) {
+    debug.errors.push("unifySkeletons failed — multi-skin kit may not animate");
+  }
+
+  // 3) Mesh allow-list: ALWAYS Warlords T0 portrait for player classId;
+  //    roster meshSample only when no class (party NPCs).
+  const classId =
+    (def as Grudge6HeroDef & { classId?: string }).classId ??
+    (() => {
+      const m = /^player_[^_]+_(.+)$/.exec(def.id);
+      return m?.[1] ?? "";
+    })();
+  let allow: string[] = [];
+  if (classId) {
+    allow = meshAllowForPlayer(model, def.race, classId, def.displayName || def.id);
+  }
+  if (allow.length < 3 && def.meshSample.length >= 3) {
+    allow = [...def.meshSample];
   }
   if (allow.length < 3) {
     allow = fallbackAllowFromRace(model, def);
   }
-  // Always force at least one body + one weapon when role expects it (Toon RTS SSOT)
+  // Guarantee body + class weapon (Toon RTS exclusive wardrobe)
   if (allow.length) {
     const allNames = listAllMeshNames(model);
     const hasBody = allow.some((n) => /body/i.test(n));
     if (!hasBody) {
-      const b = allNames.find((n) => /body/i.test(n));
+      const b = allNames.find((n) => /(^|_)body(_|$)/i.test(n));
       if (b) allow.push(b);
     }
     const hasWeapon = allow.some((n) =>
-      /sword|bow|staff|axe|hammer|spear|dagger|mace|shield/i.test(n),
+      /sword|bow|staff|axe|hammer|spear|dagger|mace|shield|pick/i.test(n),
     );
     if (!hasWeapon && def.role !== "unarmed") {
       const fb = fallbackAllowFromRace(model, def);
       for (const n of fb) {
-        if (/sword|bow|staff|axe|hammer|spear|dagger|mace|shield/i.test(n) && !allow.includes(n)) {
+        if (
+          /sword|bow|staff|axe|hammer|spear|dagger|mace|shield|pick/i.test(n) &&
+          !allow.includes(n)
+        ) {
           allow.push(n);
         }
       }
     }
   }
   applyMeshAllowList(model, allow);
-  // Re-show any allow-list mesh that ended hidden (equip exclusivity bugs)
-  model.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (!m.isMesh || !o.name) return;
-    const want = allow.some(
-      (a) =>
-        o.name.toLowerCase() === a.toLowerCase() ||
-        o.name.toLowerCase().endsWith(a.toLowerCase()) ||
-        a.toLowerCase().endsWith(o.name.toLowerCase()),
-    );
-    if (want) {
-      m.visible = true;
-      m.frustumCulled = false;
-    }
-  });
 
   // 4) Toon RTS color set atlas + author material (metal 0 · gloss 0 · white plate)
+  //    Keep embeds when already present; only force rebuild if atlas load succeeds.
   const atlasPack = await loadRaceAtlas(def.race, colorSet);
   if (atlasPack) {
     debug.atlasUrl = atlasPack.url;
     debug.texturedSlots = applyToonRtsMaterials(model, {
       atlas: atlasPack.tex,
       tintHex: atlasPack.tint,
-      forceStandard: true,
+      // Toon ★ play GLBs often ship correct maps — soft rebind, not hard scrub
+      forceStandard: colorSet !== "standard",
     });
   } else {
     debug.errors.push(`Atlas failed: ${debug.atlasUrl}`);

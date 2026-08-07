@@ -58,9 +58,14 @@ export function applyToonRtsMaterials(root: THREE.Object3D, opts: ApplyToonRtsOp
       if (!mat) continue;
       let m: THREE.MeshStandardMaterial;
 
-      if (forceStandard || !(mat as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+      const old = mat as THREE.MeshStandardMaterial;
+      const hasEmbedMap = !!(old.map && old.map.image);
+      if (
+        forceStandard ||
+        !(old as THREE.MeshStandardMaterial).isMeshStandardMaterial ||
+        !hasEmbedMap
+      ) {
         // Rebuild to Standard so metal/rough match author polyart
-        const old = mat as THREE.MeshStandardMaterial;
         m = new THREE.MeshStandardMaterial({
           map: atlas,
           color: tint.clone(),
@@ -73,14 +78,11 @@ export function applyToonRtsMaterials(root: THREE.Object3D, opts: ApplyToonRtsOp
           alphaTest: old.alphaTest ?? 0,
           name: old.name || "toon_rts_unit",
         });
-        // Drop old material to avoid leaking when we cloned the scene mats already
-        if (old !== mat) {
-          /* clone path owns materials */
-        }
       } else {
-        m = mat as THREE.MeshStandardMaterial;
-        m.map = atlas;
-        m.color.copy(tint);
+        // Keep embedded Toon ★ map; only author metal/rough/tint
+        m = old;
+        if (tintHex !== 0xffffff) m.color.copy(tint);
+        else if (m.color) m.color.set(0xffffff);
         m.metalness = TOON_RTS_MATERIAL.metalness;
         m.roughness = TOON_RTS_MATERIAL.roughness;
         if ("envMapIntensity" in m) m.envMapIntensity = TOON_RTS_MATERIAL.envMapIntensity;

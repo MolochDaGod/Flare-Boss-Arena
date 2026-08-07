@@ -262,15 +262,33 @@ export function resolveVisibleMeshes(
 
   if (equip.hasShoulder) add(pick(b.shoulder, seed, 4));
 
+  /** First mesh hit across weapon roles; falls through categories when race kit lacks that weapon. */
+  const pickWeapon = (category: string | undefined, seedOff: number): string | undefined => {
+    if (!category) return undefined;
+    const roles = categoryToRoles(category);
+    // Universal fallbacks so every Warlords class always holds *something*
+    const fallback: Role[] = [
+      "weapon_sword",
+      "weapon_axe",
+      "weapon_hammer",
+      "weapon_mace",
+      "weapon_staff",
+      "weapon_spear",
+      "weapon_bow",
+      "weapon_dagger",
+      "weapon_pick",
+    ];
+    const order = [...roles, ...fallback.filter((r) => !roles.includes(r))];
+    for (const r of order) {
+      const hit = pick(b[r], seed, seedOff);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+
   // Weapon: try every role for the equipped category, in priority order.
   if (equip.mainCategory) {
-    const roles = categoryToRoles(equip.mainCategory);
-    let chosen: string | undefined;
-    for (const r of roles) {
-      chosen = pick(b[r], seed, 5);
-      if (chosen) break;
-    }
-    add(chosen);
+    add(pickWeapon(equip.mainCategory, 5));
   }
 
   // Offhand: shield OR dual-wield second weapon (sword + dagger practice).
@@ -279,20 +297,12 @@ export function resolveVisibleMeshes(
     if (wantShield || equip.offhandIsShield === true) {
       add(pick(b.shield, seed, 6));
     } else if (equip.offCategory) {
-      const roles = categoryToRoles(equip.offCategory);
-      let off: string | undefined;
-      for (const r of roles) {
-        off = pick(b[r], seed, 7);
-        if (off) break;
-      }
+      let off = pickWeapon(equip.offCategory, 7);
       // Prefer a different mesh than mainhand if both are swords/daggers.
       if (off && equip.mainCategory) {
-        const mainRoles = categoryToRoles(equip.mainCategory);
-        for (const r of mainRoles) {
-          const main = pick(b[r], seed, 5);
-          if (main && off === main && b[r].length > 1) {
-            off = pick(b[r], seed, 8) ?? off;
-          }
+        const main = pickWeapon(equip.mainCategory, 5);
+        if (main && off === main) {
+          off = pickWeapon(equip.offCategory, 8) ?? off;
         }
       }
       add(off);

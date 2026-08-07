@@ -28,20 +28,21 @@ export class BakedAnimLoadError extends Error {
   }
 }
 
-function getAnimationRoot(scene: THREE.Object3D): THREE.Object3D {
-  let skinned: THREE.SkinnedMesh | null = null;
+/**
+ * Mixer / bind root must own the Bip001 bone tree.
+ * Never return a lone SkinnedMesh — body parts are siblings of Bip001 under
+ * RootNode, so PropertyBinding would find 0 bones and baked idle fails →
+ * authored fallback (looks “way off” for worge + many classes).
+ */
+export function getAnimationRoot(scene: THREE.Object3D): THREE.Object3D {
+  let bipRoot: THREE.Object3D | undefined;
   scene.traverse((o) => {
-    if (skinned) return;
-    const m = o as THREE.SkinnedMesh;
-    if (m.isSkinnedMesh) skinned = m;
+    if (bipRoot) return;
+    if (o.name === "Bip001" || /^Bip001$/i.test(o.name)) {
+      bipRoot = o.parent ?? o;
+    }
   });
-  if (skinned) return skinned;
-  let bip: THREE.Object3D | null = null;
-  scene.traverse((o) => {
-    if (bip) return;
-    if (/^Bip001/i.test(o.name)) bip = o;
-  });
-  return bip ?? scene;
+  return bipRoot ?? scene;
 }
 
 function indexBoneName(lookup: Map<string, string>, name: string) {
@@ -55,8 +56,8 @@ function indexBoneName(lookup: Map<string, string>, name: string) {
 
 function buildSceneBoneLookup(scene: THREE.Object3D): Map<string, string> {
   const lookup = new Map<string, string>();
-  const root = getAnimationRoot(scene);
-  root.traverse((node) => {
+  // Index every bone under the full kit (not a single mesh island)
+  scene.traverse((node) => {
     if ((node as THREE.Bone).isBone) indexBoneName(lookup, node.name);
     const sm = node as THREE.SkinnedMesh;
     if (sm.isSkinnedMesh && sm.skeleton?.bones) {

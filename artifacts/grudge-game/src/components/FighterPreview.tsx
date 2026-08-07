@@ -204,11 +204,15 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
     if (!model) return;
     if (fighterId === RACALVIN_ID) {
       applyRacalvinAssetTuning(model, tuning);
+    } else if (isAnnihilateHeroId(fighterId) || isAnnihilateHeroId(skinId)) {
+      // Warlords Toon RTS ★ — exclusive equip is applied in Grudge6Factory;
+      // do NOT run KayKit deferred-weapon hide (would blank swords/axes at idle).
+      return;
     } else {
       const active = sceneRef.current.activeAction?.getClip().name;
       setupFighterMeshVisibility(model, fighterId, tuning.hiddenMeshes, active);
     }
-  }, [tuning, fighterId]);
+  }, [tuning, fighterId, skinId]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -507,8 +511,13 @@ export const FighterPreview = forwardRef<FighterPreviewHandle, FighterPreviewPro
               onMeshesReady?.(
                 collectMeshNames(inst.group).concat([
                   `[toon] ${String(inst.debug?.glbUrl || playUrl).split("/").pop()}`,
+                  `[vis] ${(inst.debug?.visibleMeshes ?? []).slice(0, 8).join(",")}`,
+                  `[anim] ${inst.debug?.animSource ?? "?"} bones=${inst.debug?.boneCount ?? 0}`,
                 ]),
               );
+              if (import.meta.env.DEV || inst.debug?.errors?.length) {
+                console.info("[FighterPreview] g6", g6, inst.debug);
+              }
               onHandBoneReady?.(null);
               const anim = inst.animator;
               if (anim) {
