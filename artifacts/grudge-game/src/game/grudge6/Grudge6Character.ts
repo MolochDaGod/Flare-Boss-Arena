@@ -113,39 +113,6 @@ export function applyMeshAllowList(root: THREE.Object3D, allow: string[]) {
   });
 }
 
-/** Skinned body only — ignore hidden equip for height/feet (grudge6-full-stack). */
-function bodyBox(root: THREE.Object3D): THREE.Box3 {
-  const box = new THREE.Box3();
-  let any = false;
-  root.updateMatrixWorld(true);
-  root.traverse((o) => {
-    const m = o as THREE.SkinnedMesh;
-    if (!m.isSkinnedMesh || !m.visible) return;
-    if (!any) {
-      box.setFromObject(m, true);
-      any = true;
-    } else box.expandByObject(m);
-  });
-  if (!any) box.setFromObject(root, true);
-  return box;
-}
-
-/** Box3 fit to target height (SI human ~1.8 m) + feet on y=0. Standard Three.js. */
-function fitFeetOrigin(model: THREE.Object3D, targetHeight: number) {
-  model.updateWorldMatrix(true, true);
-  let box = bodyBox(model);
-  const size = box.getSize(new THREE.Vector3());
-  if (size.y > 1e-4) {
-    model.scale.multiplyScalar(targetHeight / size.y);
-    model.updateWorldMatrix(true, true);
-    box = bodyBox(model);
-  }
-  const center = box.getCenter(new THREE.Vector3());
-  model.position.x -= center.x;
-  model.position.z -= center.z;
-  model.position.y -= box.min.y;
-}
-
 function listAllMeshNames(root: THREE.Object3D): string[] {
   const names: string[] = [];
   root.traverse((o) => {
@@ -172,11 +139,87 @@ function meshAllowForPlayer(
   return [];
 }
 
-/** Reset skinned meshes to bind pose before applying baked clips (prevents T-pose pop). */
+/**
+ * SI fit via bone structural box (ObjectStore loadRaceKit parity).
+ * PURGED setFromObject(SkinnedMesh) — unskinned modular geo under-measures.
+ */
+function measureBoneBox(model: THREE.Object3D): THREE.Box3 | null {
+  model.updateWorldMatrix(true, true);
+  model.traverse((o) => {
+    const sm = o as THREE.SkinnedMesh;
+    if (sm.isSkinnedMesh && sm.skeleton) sm.skeleton.update();
+  });
+  const names = [
+    "Bip001 Head",
+    "Bip001 Pelvis",
+    "Bip001 L Foot",
+    "Bip001 R Foot",
+    "Bip001 L Hand",
+    "Bip001 R Hand",
+  ];
+  const box = new THREE.Box3();
+  const p = new THREE.Vector3();
+  let n = 0;
+  for (const name of names) {
+    const bone = model.getObjectByName(name);
+    if (!bone) continue;
+    bone.getWorldPosition(p);
+    if (n === 0) {
+      box.min.copy(p);
+      box.max.copy(p);
+    } else box.expandByPoint(p);
+    n++;
+  }
+  if (n < 2) return null;
+  const h = Math.max(box.max.y - box.min.y, 1e-4);
+  const pad = h * 0.1;
+  box.min.y -= pad * 0.55;
+  box.max.y += pad * 0.45;
+  return box;
+}
+
+function fitFeetOrigin(model: THREE.Object3D, targetHeight: number) {
+  model.position.set(0, 0, 0);
+  model.rotation.set(0, 0, 0);
+  model.scale.setScalar(1);
+  model.updateWorldMatrix(true, true);
+  let box = measureBoneBox(model) || new THREE.Box3().setFromObject(model);
+  let h = Math.max(box.max.y - box.min.y, 1e-4);
+  if (h > 40) {
+    model.scale.setScalar(0.01);
+    model.updateWorldMatrix(true, true);
+    box = measureBoneBox(model) || new THREE.Box3().setFromObject(model);
+    h = Math.max(box.max.y - box.min.y, 1e-4);
+  }
+  if (h > 0.001) model.scale.multiplyScalar(targetHeight / h);
+  model.updateWorldMatrix(true, true);
+  box = measureBoneBox(model) || new THREE.Box3().setFromObject(model);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  model.position.x -= center.x;
+  model.position.z -= center.z;
+  model.position.y -= box.min.y;
+}
+
+/**
+ * Bind pose — widest skeleton once only.
+ * PURGED pose() on every mesh (1-joint head skins → head-at-feet).
+ */
 export function resetSkeletonBindPose(scene: THREE.Object3D) {
+  let widest: THREE.Skeleton | null = null;
   scene.traverse((node) => {
     const sm = node as THREE.SkinnedMesh;
-    if (sm.isSkinnedMesh && sm.skeleton) sm.skeleton.pose();
+    if (sm.isSkinnedMesh && sm.skeleton) {
+      if (!widest || sm.skeleton.bones.length > widest.bones.length) widest = sm.skeleton;
+    }
+  });
+  if (widest) {
+    widest.pose();
+    widest.update();
+  }
+  scene.traverse((node) => {
+    const sm = node as THREE.SkinnedMesh;
+    if (sm.isSkinnedMesh && sm.skeleton) sm.skeleton.update();
   });
   scene.updateMatrixWorld(true);
 }
